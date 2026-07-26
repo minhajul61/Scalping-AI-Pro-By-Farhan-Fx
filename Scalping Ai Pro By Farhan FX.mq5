@@ -1056,7 +1056,7 @@ void UpdateDashboard()
 
    int x = InpDashboardX, lx = InpDashboardX + 2, y = InpDashboardY, lh = 15, lblW = 12;
 
-   DbLabel("Title", x, y, "GOLD DUAL BASKET DCA", clrWhite, 9);
+   DbLabel("Title", x, y, "SCALPING AI PRO BY FARHAN FX", clrWhite, 9);
    y += lh + 6;
 
    bool loginOk = (InpExpectedLogin == 0 || AccountInfoInteger(ACCOUNT_LOGIN) == InpExpectedLogin);

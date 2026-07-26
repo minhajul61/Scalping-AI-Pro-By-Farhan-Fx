@@ -120,16 +120,21 @@ disabled — see `learnings.md` for the full history if revisiting this idea.
 
 **Current shipped defaults**: `InpInitialLot=0.02`, `InpLotMultiplier=1.5`,
 `InpDcaDistancePrice=3.0` (fixed), `InpMaxLegsPerBasket=5`,
-`InpBasketProfitTargetUSD=2.0`, `InpBasketMaxLossUSD=150.0`,
-`InpUseDailyLimit=false`, `InpUseIntradayBrake=true`
-(`InpIntradayBrakeLossPercent=3.0`). This is the best result found across
-every tested combination — real-tick verified, hard-SL kept ON (removing it
-increases drawdown a lot for little-to-no PF gain — see table), pyramid
-removed permanently, daily circuit breaker traded for the softer intraday
-brake per explicit request. Still net-negative (PF 0.95, not >1.0) and
-still one week of data — this is repeatedly-verified progress, not a proven
-edge. **Do not keep tuning against this same 1-week window**; the honest
-next step is validating against a different time period.
+`InpBasketProfitTargetUSD=2.0`, `InpBasketMaxLossUSD=0.0` (basket hard-SL
+**OFF**, per explicit request 2026-07-27), `InpUseDailyLimit=false`,
+`InpUseIntradayBrake=true` (`InpIntradayBrakeLossPercent=3.0`). The
+backtested-best config in the table above shipped with the basket hard-SL
+ON (`150.0`) — removing it was a deliberate later request, not something
+re-validated by backtest. With it off, a basket's only remaining loss
+bound is the wide catastrophic backstop SL on each leg
+(`InpUseCatastrophicSL`, `InpCatastrophicSLMultiple`) — everyday losses are
+no longer capped by the tighter basket-level stop. Pyramid removed
+permanently, daily circuit breaker traded for the softer intraday brake
+per earlier explicit request. Still net-negative on the tested week (PF
+0.95, not >1.0) even before this change — this is repeatedly-verified
+progress, not a proven edge. **Do not keep tuning against this same
+1-week window**; the honest next step is validating against a different
+time period.
 
 **On `InpUseDailyLimit=false`**: repeatedly stress-tested at the user's
 explicit request. With the older, smaller-account configs it wiped the

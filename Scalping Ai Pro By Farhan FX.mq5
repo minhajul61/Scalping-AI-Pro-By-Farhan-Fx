@@ -36,123 +36,69 @@ enum ENUM_BASKET_SIDE
   };
 
 input group "=== Trade Settings ==="
-input ulong    InpMagicNumber        = 20270115;  // Magic number (unique per EA/account)
-input long     InpExpectedLogin      = 416045126; // Expected account login (0 = skip check)
-input int      InpMaxSpreadPoints    = 300;       // Skip new entries if spread exceeds this (XAUUSD real spread on this
-                                                   // Exness demo runs ~150-200 points at point=0.001 - the original 50
-                                                   // default blocked every single entry, including the bootstrap leg,
-                                                   // for the entire backtest. Confirmed via a real-tick visual test
-                                                   // that showed 0 trades over a full week before this fix.
+input ulong    InpMagicNumber        = 20270115;  // ID number for this EA's trades (leave as is)
+input long     InpExpectedLogin      = 416045126; // Your account number (0 = don't check)
+input int      InpMaxSpreadPoints    = 300;       // Skip new trades if spread is too wide
 
 input group "=== Basket Core ==="
-// Re-derived for a $5000 account via a systematic search (see git history /
-// learnings.md for the full table): initial=0.02, 1.5x, $3 distance, 5 legs
-// gives a full-load (all 5 legs in, no bounce) worst-case floating loss of
-// only -$96 (1.92% of $5000) and needs just a ~$3.77 bounce from that point
-// to reach the $2 target - a genuinely "easy" exit relative to the $12 of
-// adverse movement it took to load all 5 legs. Earlier defaults (0.05 lot,
-// -$195 worst case) needed a much bigger account to be a sane risk fraction.
-input double   InpInitialLot            = 0.02;   // Starting lot size per basket
-input double   InpBasketProfitTargetUSD = 2.0;    // Close whole basket once floating profit reaches this ($)
-input int      InpMaxLegsPerBasket      = 5;      // Hard cap on DCA legs per basket
+input double   InpInitialLot            = 0.02;   // First trade size (lot)
+input double   InpBasketProfitTargetUSD = 2.0;    // Close basket once it earns this much profit ($)
+input int      InpMaxLegsPerBasket      = 5;      // Max number of DCA add-ons allowed per basket
 
 input group "=== DCA / Martingale ==="
-// A fixed $ distance doesn't adapt to how much gold is actually moving day
-// to day - too tight in a calm market (DCAs constantly on noise), too wide
-// in a volatile one (waits too long, basket already deep before the first
-// add). Scaling the distance off the current M1 ATR was tried as the
-// "smart" default but backtested WORSE than a fixed $3 (PF 0.92->0.75, see
-// learnings.md) - left in the code (InpUseAtrDcaDistance) but off by
-// default until a better-tuned ATR multiplier is found.
-input bool     InpUseAtrDcaDistance   = false;    // DCA distance = current ATR * InpDcaDistanceAtrMult (instead of a fixed $)
-input double   InpDcaDistanceAtrMult  = 1.5;      // Multiplier applied to the current M1 ATR for DCA distance
-input double   InpDcaDistancePrice  = 3.0;        // Fixed $ distance (used when InpUseAtrDcaDistance = false, the current default)
-input double   InpLotMultiplier     = 1.5;        // Martingale multiplier per DCA leg
+input bool     InpUseAtrDcaDistance   = false;    // Auto-adjust DCA gap by volatility (off = use fixed $ gap below)
+input double   InpDcaDistanceAtrMult  = 1.5;      // Only used if the above is ON: how wide the auto gap is
+input double   InpDcaDistancePrice  = 3.0;        // Price move ($) before adding the next DCA trade
+input double   InpLotMultiplier     = 1.5;        // How much bigger each new DCA trade is (1.5 = 50% bigger)
 
 
-input group "=== DCA Filters (volatility-spike \"news proxy\" + trend) ==="
-input bool             InpUseAtrSpikeFilter = true;      // Skip DCA adds during a volatility spike (news proxy)
-input int              InpAtrPeriod         = 14;        // ATR period (M1)
-input int              InpAtrBaselineBars   = 20;         // Bars averaged to build the ATR baseline
-input double           InpMaxAtrRatio       = 1.5;        // Current ATR must be <= baseline * this to allow a DCA add
-input bool             InpUseTrendFilter    = true;       // Skip new baskets AND DCA adds fighting a strong higher-timeframe trend
-input ENUM_TIMEFRAMES  InpTrendTF           = PERIOD_H1;  // Timeframe for the trend filter
-input int              InpTrendMAPeriod     = 50;         // MA period for the trend filter
-input int              InpTrendAtrPeriod    = 14;         // ATR period (on InpTrendTF) used to judge trend strength
-// A raw close-vs-MA comparison flips sign on ordinary noise around the MA,
-// which would block far too many legitimate entries. Requiring the close to
-// sit at least this many ATRs away from the MA before counting it as a real
-// trend only blocks genuinely strong, sustained moves - the exact scenario
-// that ran BUY baskets to their hard-SL repeatedly in earlier testing.
-input double           InpTrendStrengthATRMult = 0.5;     // Close must be this many ATRs past the MA to count as trending
+input group "=== DCA Filters (skip adding on bad conditions) ==="
+input bool             InpUseAtrSpikeFilter = true;      // Don't add DCA trades during a sudden volatility spike
+input int              InpAtrPeriod         = 14;        // Volatility measuring period (candles)
+input int              InpAtrBaselineBars   = 20;         // Candles used to calculate "normal" volatility
+input double           InpMaxAtrRatio       = 1.5;        // How many times above normal counts as a "spike"
+input bool             InpUseTrendFilter    = true;       // Don't add DCA trades against a strong trend
+input ENUM_TIMEFRAMES  InpTrendTF           = PERIOD_H1;  // Timeframe used to judge the trend
+input int              InpTrendMAPeriod     = 50;         // Moving average length used for the trend check
+input int              InpTrendAtrPeriod    = 14;         // Volatility period used to judge trend strength
+input double           InpTrendStrengthATRMult = 0.5;     // How strong the trend must be before it blocks a trade
 
 input group "=== Basket Safety ==="
-// Re-derived alongside the $5000/0.02-lot config above: full 5-leg worst
-// case is about -$96, so 150 gives a real margin beyond that (lets leg 5
-// actually get used) while still being only 3% of a $5000 account.
-input double   InpBasketMaxLossUSD        = 150.0; // Force-close a basket if its floating loss reaches this ($)
-input int      InpBasketSLCooldownMinutes = 30;    // Minutes to wait before reopening a basket after a hard-SL close
-input bool     InpUseCatastrophicSL       = true;  // Attach a wide backstop SL to every leg (dead-man's switch)
-input double   InpCatastrophicSLMultiple  = 2.0;   // Backstop SL = DcaDistance * (MaxLegs + this), beyond entry
+input double   InpBasketMaxLossUSD        = 0.0;   // Force-close a basket at this loss ($) - 0 = OFF (turned off per request)
+input int      InpBasketSLCooldownMinutes = 30;    // Wait this many minutes before reopening after a stop-loss
+input bool     InpUseCatastrophicSL       = true;  // Emergency backup stop-loss on every trade (safety net if EA/VPS goes offline)
+input double   InpCatastrophicSLMultiple  = 2.0;   // How far away the emergency stop-loss sits
 
-input group "=== Daily Circuit Breaker ==="
-// Off by default per explicit user request. IMPORTANT: this was
-// stress-tested repeatedly with it off, and every time before the $5000/
-// deep-AI-brain config it wiped the account completely (100%+ drawdown) -
-// see learnings.md. Even with the current config it is a real, meaningful
-// safety layer, not a redundant one. Leaving it off is a deliberate,
-// explicitly-requested risk - the intraday soft-brake below (part of the
-// AI brain) is the substitute self-adjusting mechanism, not a replacement
-// guarantee.
-input bool     InpUseDailyLimit         = false;  // Stop new entries past the daily loss limit
-// Raised from 2.0 to 5.0 alongside the $5000/-$150-max-basket-loss config
-// above: at 2%, the daily limit (~$100 on $5000) would trip BEFORE a single
-// basket even reached its own $150 hard-SL, making the basket-level stop
-// pointless. 5% (~$250) gives room for one full basket-SL event before the
-// daily breaker engages, which is the intended layering (basket stop first,
-// daily stop as the second-line brake on repeated bad baskets).
-input double   InpDailyMaxLossPercent   = 5.0;    // Max daily loss (% of day-start balance)
-input bool     InpDailyLimitForceCloses = true;   // Also force-close both baskets (not just halt new entries) on breach
+input group "=== Daily Stop (currently OFF per request) ==="
+input bool     InpUseDailyLimit         = false;  // Stop trading for the day after a big loss - OFF (turned off per request)
+input double   InpDailyMaxLossPercent   = 5.0;    // Daily loss limit (% of balance) - only matters if the line above is ON
+input bool     InpDailyLimitForceCloses = true;   // Also close open trades when the daily limit hits (if ON above)
 
-input group "=== Self-Tuning AI Brain (rule-based, not ML) ==="
-// Intraday soft-brake: since InpUseDailyLimit is off by default, this is the
-// AI brain's own substitute - not a hard stop, no force-close. If today's
-// floating equity crosses a soft loss threshold, it temporarily caps the
-// lot multiplier down and widens the DCA distance for the REST of that
-// calendar day (reverts automatically at the next day rollover), making new
-// DCA legs smaller and further apart while today is going badly - without
-// ever closing a basket or refusing a new one outright.
-input bool     InpUseIntradayBrake            = true;  // Soft de-risk (not a hard stop) once today's loss crosses the threshold
-input double   InpIntradayBrakeLossPercent    = 3.0;    // Today's floating loss (% of day-start balance) that engages the brake
-input double   InpIntradayBrakeMultiplierCap  = 1.15;   // Lot multiplier is capped to this (or lower) once the brake is on
-input double   InpIntradayBrakeDistanceMult   = 1.5;    // DCA distance is multiplied by this once the brake is on
+input group "=== Auto-Adjust Settings (AI Brain) ==="
+input bool     InpUseIntradayBrake            = true;  // Auto slow-down (not a full stop) after a bad day so far
+input double   InpIntradayBrakeLossPercent    = 3.0;    // Today's loss (%) that triggers the slow-down
+input double   InpIntradayBrakeMultiplierCap  = 1.15;   // Smaller DCA growth allowed once slowed down
+input double   InpIntradayBrakeDistanceMult   = 1.5;    // DCA gap gets this much wider once slowed down
 
-input bool     InpEnableSelfTuning = true;   // Daily parameter self-tuning from yesterday's trade history
-input double   InpDcaDistanceMin   = 2.0;   // Bounds for the fixed $ distance (used only when InpUseAtrDcaDistance = false)
-input double   InpDcaDistanceMax   = 6.0;
-input double   InpDcaAtrMultMin    = 1.0;   // Bounds for the ATR multiplier (used when InpUseAtrDcaDistance = true)
-input double   InpDcaAtrMultMax    = 3.0;
-input double   InpLotMultiplierMin = 1.2;
-input double   InpLotMultiplierMax = 1.8;
-input double   InpProfitTargetMin  = 0.5;
-input double   InpProfitTargetMax  = 3.0;
-// Deeper "AI brain" capability: tracks real, persistent (not just yesterday's)
-// win/loss counts at each leg depth a basket has ever reached, and lets the
-// max-legs cap itself adapt from that history - not just DCA distance/
-// multiplier/target. If a given leg depth empirically recovers less than
-// InpLegStatWinRateFloor of the time (once enough samples exist), the max
-// legs cap steps down toward InpMaxLegsFloor; a leg depth working well can
-// let it step back up, capped at the original InpMaxLegsPerBasket ceiling.
-input int      InpMaxLegsFloor        = 2;    // Never auto-reduce max legs below this
-input int      InpLegStatMinSample    = 8;     // Min cycles reaching a leg depth before trusting its win rate
-input double   InpLegStatWinRateFloor = 0.30;  // Below this win rate at the current max-leg depth, reduce the cap
-input double   InpLegStatWinRateCeil  = 0.70;  // Above this, allow the cap to step back up (never past InpMaxLegsPerBasket)
-input bool     InpResetTunedParams = false; // Wipe tuned values back to Inp* defaults on next init
+input bool     InpEnableSelfTuning = true;   // Let the EA auto-adjust its own settings daily from results
+input double   InpDcaDistanceMin   = 2.0;   // Auto-tuning: smallest DCA gap ($) it may use
+input double   InpDcaDistanceMax   = 6.0;   // Auto-tuning: largest DCA gap ($) it may use
+input double   InpDcaAtrMultMin    = 1.0;   // Auto-tuning: smallest auto-gap multiplier it may use
+input double   InpDcaAtrMultMax    = 3.0;   // Auto-tuning: largest auto-gap multiplier it may use
+input double   InpLotMultiplierMin = 1.2;   // Auto-tuning: smallest DCA size growth it may use
+input double   InpLotMultiplierMax = 1.8;   // Auto-tuning: largest DCA size growth it may use
+input double   InpProfitTargetMin  = 0.5;   // Auto-tuning: smallest profit target ($) it may use
+input double   InpProfitTargetMax  = 3.0;   // Auto-tuning: largest profit target ($) it may use
+input int      InpMaxLegsFloor        = 2;    // Auto-tuning will never drop max DCA trades below this
+input int      InpLegStatMinSample    = 8;     // Min past baskets needed before auto-tuning trusts the win rate
+input double   InpLegStatWinRateFloor = 0.30;  // Win rate below this lowers the max DCA trades allowed
+input double   InpLegStatWinRateCeil  = 0.70;  // Win rate above this raises the max DCA trades allowed back up
+input bool     InpResetTunedParams = false; // Reset all auto-tuned values back to the defaults above
 
 input group "=== Dashboard ==="
-input bool     InpShowDashboard = true;
-input int      InpDashboardX    = 10;
-input int      InpDashboardY    = 20;
+input bool     InpShowDashboard = true;   // Show the on-chart info panel
+input int      InpDashboardX    = 10;     // Panel position - distance from left edge
+input int      InpDashboardY    = 20;     // Panel position - distance from top edge
 
 CTrade trade;
 

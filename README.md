@@ -9,10 +9,10 @@ and everything in it is the native MQL5 grid/DCA EA documented below; it
 has no code relationship to that other project.
 
 Every position this EA opens is tagged with magic number `InpMagicNumber`
-(default `20270115`) and a trade comment like `GDSE-buy-leg1` /
-`GDSE-sell-leg3` (visible in MT5's Trade/History "Comment" column) —
-`GDSE` is just the internal short prefix, distinct per leg number and
-direction so it's easy to tell legs apart at a glance.
+(default `20270115`) and a trade comment like `FarhanFx-buy-leg1` /
+`FarhanFx-sell-leg3` (visible in MT5's Trade/History "Comment" column),
+distinct per leg number and direction so it's easy to tell legs apart at
+a glance.
 
 Native MQL5 Expert Advisor for XAUUSD (M1). Runs a BUY basket and a SELL
 basket simultaneously (requires a **hedging-mode** MT5 account). Each basket

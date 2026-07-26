@@ -67,26 +67,53 @@ target-hit "sure wins" into extended, trend-riding exposure lost more often
 than it gained on the tested week. Left in the code, off by default
 (`InpUsePyramid = false`), in case a different market period favors it.
 
-## Backtest Results (1-week real-tick Strategy Tester runs, 2026.07.18-25, $2000 deposit)
+## Backtest Results (1-week real-tick Strategy Tester runs, 2026.07.18-25)
 
-| Config | Profit Factor | Win rate | Net P/L | Max DD |
-|---|---|---|---|---|
-| Original spec defaults (0.01 lot, 4 legs, no trend filter) | 0.77 | 66.67% | -$12.39 (on $100) | 19.16% |
-| + trend filter (ATR-scaled, applied to bootstrap too) | 0.71 | 78.33% | -$108.84 | 10.53% |
-| + pyramiding | 0.62-0.64 | 64.83% | -$165.69/-$166.43 | 14.03-14.20% |
-| **+ lower max-loss ($220->$100) + higher target ($1->$2), no pyramid** | **0.92** | **79.34%** | **-$80.76** | **11.05%** |
-| Pushed the same two levers further ($2.50/$80) | 0.62 | 68.24% | -$165.69 | 14.03% |
+| Config | Deposit | Profit Factor | Win rate | Net P/L | Max DD |
+|---|---|---|---|---|---|
+| Original spec defaults (0.01 lot, 4 legs, no trend filter) | $100 | 0.77 | 66.67% | -$12.39 | 19.16% |
+| + trend filter (ATR-scaled, applied to bootstrap too) | $2000 | 0.71 | 78.33% | -$108.84 | 10.53% |
+| + pyramiding | $2000 | 0.62-0.64 | 64.83% | -$165.69/-$166.43 | 14.03-14.20% |
+| + lower max-loss ($220->$100) + higher target ($1->$2), no pyramid | $2000 | 0.92 | 79.34% | -$80.76 | 11.05% |
+| Pushed the same two levers further ($2.50/$80) - worse, stopped tuning here | $2000 | 0.62 | 68.24% | -$165.69 | 14.03% |
+| ATR-based dynamic DCA distance (`InpUseAtrDcaDistance=true`) | $2000 | 0.75 | 73.31% | -$234.58 | 14.24% |
+| Daily loss limit **OFF** (stress test) x3, various configs above | $2000 | 0.81-0.82 | 65-74% | **-$2000+ (wiped)** | **100%+** |
+| **$5000 config below + deep AI brain, daily loss limit OFF (stress test)** | $5000 | **0.94** | 69.54% | **-$365.85** | **12.35%** |
 
-**Current shipped defaults reflect the best row above**: `InpInitialLot=0.05`,
-`InpLotMultiplier=1.3`, `InpMaxLegsPerBasket=5`, `InpBasketProfitTargetUSD=2.0`,
-`InpBasketMaxLossUSD=100.0`, `InpUsePyramid=false`. Still net-negative (PF
-0.92, not >1.0) — close to breakeven but not there. Pushing the same two
-levers one step further made results sharply *worse*, not better (a
-non-monotonic result that's a clear overfitting warning sign on a single
-week of data) — see `learnings.md` for the full reasoning. **Do not tune
-these further against the same 1-week window**; the honest next step is
-validating against a different time period, not squeezing more out of this
-one.
+**Current shipped defaults**: `InpInitialLot=0.02`, `InpLotMultiplier=1.5`,
+`InpDcaDistancePrice=3.0` (fixed, `InpUseAtrDcaDistance=false` — ATR mode
+backtested worse), `InpMaxLegsPerBasket=5`, `InpBasketProfitTargetUSD=2.0`,
+`InpBasketMaxLossUSD=150.0`, `InpDailyMaxLossPercent=5.0`,
+`InpUsePyramid=false`. Derived from a systematic search (not guessed) for a
+config where the full 5-leg worst-case floating loss is a small, comfortable
+fraction of a bigger ($5000) account (-$96, 1.92%) with an easy bounce back
+to target from there (~$3.77) — see `learnings.md` for the full search
+table. Still net-negative even in the best row (PF 0.94, not >1.0) — this is
+progress, not a proven edge. **Do not keep tuning against this same 1-week
+window**; the honest next step is validating against a different time
+period.
+
+**On `InpUseDailyLimit=false`**: repeatedly stress-tested at the user's
+explicit request. With the older, smaller-account configs it wiped the
+account completely every time (100%+ drawdown, negative equity) — 3 runs in
+a row, regardless of ATR-distance/pyramid on or off. With the new $5000
+config and the deepened self-tuner (below), the account survived a fourth
+attempt (12.35% drawdown) — real evidence the sizing/self-tuning is
+healthier now, but **this does not mean the daily circuit breaker is safe
+to leave off**; it means the basket-level and self-tuning layers are doing
+more of the job than before. Ship with `InpUseDailyLimit=true`.
+
+## Deep AI brain: persistent per-leg-depth history
+
+Beyond the daily nudges to distance/multiplier/target, the self-tuner now
+tracks **persistent** (not reset daily) win/loss counts at every leg depth a
+basket has ever reached (`GetLegStat`/`IncrementLegStat`, keyed per-depth in
+`GlobalVariable`s). Once a leg depth has enough samples
+(`InpLegStatMinSample`), a win rate below `InpLegStatWinRateFloor` steps the
+active max-legs cap (`g_tunedMaxLegs`) down (floor `InpMaxLegsFloor`); a win
+rate above `InpLegStatWinRateCeil` lets it step back up, never past the
+`InpMaxLegsPerBasket` ceiling. This is real accumulated evidence about
+whether going deeper actually pays off, not just a fixed human-chosen number.
 
 Also found and worth remembering: MT5's Strategy Tester caches an EA's
 last-used inputs in `MQL5/Profiles/Tester/<EA>.set`, silently overriding

@@ -69,9 +69,16 @@ input bool             InpUseAtrSpikeFilter = true;      // Skip DCA adds during
 input int              InpAtrPeriod         = 14;        // ATR period (M1)
 input int              InpAtrBaselineBars   = 20;         // Bars averaged to build the ATR baseline
 input double           InpMaxAtrRatio       = 1.5;        // Current ATR must be <= baseline * this to allow a DCA add
-input bool             InpUseTrendFilter    = true;       // Skip DCA adds fighting a strong higher-timeframe trend
+input bool             InpUseTrendFilter    = true;       // Skip new baskets AND DCA adds fighting a strong higher-timeframe trend
 input ENUM_TIMEFRAMES  InpTrendTF           = PERIOD_H1;  // Timeframe for the trend filter
 input int              InpTrendMAPeriod     = 50;         // MA period for the trend filter
+input int              InpTrendAtrPeriod    = 14;         // ATR period (on InpTrendTF) used to judge trend strength
+// A raw close-vs-MA comparison flips sign on ordinary noise around the MA,
+// which would block far too many legitimate entries. Requiring the close to
+// sit at least this many ATRs away from the MA before counting it as a real
+// trend only blocks genuinely strong, sustained moves - the exact scenario
+// that ran BUY baskets to their hard-SL repeatedly in earlier testing.
+input double           InpTrendStrengthATRMult = 0.5;     // Close must be this many ATRs past the MA to count as trending
 
 input group "=== Basket Safety ==="
 // Sized to comfortably exceed the leg-5 worst-case (straight-line adverse,
@@ -120,8 +127,9 @@ struct SBasket
 
 SBasket g_buyBasket, g_sellBasket;
 
-int g_atrHandle     = INVALID_HANDLE;
-int g_trendMAHandle = INVALID_HANDLE;
+int g_atrHandle      = INVALID_HANDLE;
+int g_trendMAHandle  = INVALID_HANDLE;
+int g_trendAtrHandle = INVALID_HANDLE;
 
 int    g_dayStartDateCode = -1;
 double g_dayStartBalance  = 0.0;
@@ -171,6 +179,13 @@ int OnInit()
          Print("GoldDualBasketDCA: trend MA handle creation failed.");
          return(INIT_FAILED);
         }
+
+      g_trendAtrHandle = iATR(_Symbol, InpTrendTF, InpTrendAtrPeriod);
+      if(g_trendAtrHandle == INVALID_HANDLE)
+        {
+         Print("GoldDualBasketDCA: trend ATR handle creation failed.");
+         return(INIT_FAILED);
+        }
      }
 
    LoadTunedParams();
@@ -192,6 +207,8 @@ void OnDeinit(const int reason)
       IndicatorRelease(g_atrHandle);
    if(g_trendMAHandle != INVALID_HANDLE)
       IndicatorRelease(g_trendMAHandle);
+   if(g_trendAtrHandle != INVALID_HANDLE)
+      IndicatorRelease(g_trendAtrHandle);
    EventKillTimer();
    ObjectsDeleteAll(0, DB_PREFIX);
    ChartRedraw();
@@ -396,6 +413,12 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
 
    if(b.legCount == 0)
      {
+      // Don't even start a basket fighting a strong higher-timeframe trend -
+      // this is what let earlier testing repeatedly run BUY baskets to their
+      // hard-SL: DCA was trend-filtered, but the doomed bootstrap entry that
+      // started each of those baskets was not.
+      if(InpUseTrendFilter && IsAgainstTrend(side))
+         return;
       OpenLeg(side, 0, 0);
       return;
      }
@@ -498,21 +521,30 @@ bool IsAtrSpiking()
    return(current > baseline * InpMaxAtrRatio);
   }
 
-// Trend on InpTrendTF via a simple MA: last closed candle above the MA = uptrend
-// (1), below = downtrend (-1), unavailable/filter off = 0.
+// Trend on InpTrendTF via MA + ATR-scaled strength gate: last closed candle
+// must sit at least InpTrendStrengthATRMult ATRs away from the MA to count
+// as trending (1=up, -1=down); anything closer is treated as noise/no-trend
+// (0). A raw close-vs-MA check flips sign on ordinary chop, which would
+// block far more entries than intended - the ATR margin only catches
+// genuinely sustained, strong moves, which is what actually ran baskets to
+// their hard-SL in earlier testing.
 int GetTrend()
   {
-   if(!InpUseTrendFilter || g_trendMAHandle == INVALID_HANDLE)
+   if(!InpUseTrendFilter || g_trendMAHandle == INVALID_HANDLE || g_trendAtrHandle == INVALID_HANDLE)
       return 0;
 
-   double maBuf[1];
+   double maBuf[1], atrBuf[1];
    if(CopyBuffer(g_trendMAHandle, 0, 1, 1, maBuf) <= 0)
+      return 0;
+   if(CopyBuffer(g_trendAtrHandle, 0, 1, 1, atrBuf) <= 0 || atrBuf[0] <= 0)
       return 0;
 
    double closePrice = iClose(_Symbol, InpTrendTF, 1);
-   if(closePrice > maBuf[0])
+   double margin = atrBuf[0] * InpTrendStrengthATRMult;
+
+   if(closePrice > maBuf[0] + margin)
       return 1;
-   if(closePrice < maBuf[0])
+   if(closePrice < maBuf[0] - margin)
       return -1;
    return 0;
   }

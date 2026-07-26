@@ -1,4 +1,11 @@
-# Gold Dual Basket DCA EA
+# XAUUSD Dual Basket DCA EA
+
+File: `XAUUSD Dual Basket DCA EA.mq5` / `.ex5`. Every position this EA opens
+is tagged with magic number `InpMagicNumber` (default `20270115`) and a
+trade comment like `GDSE-buy-leg1` / `GDSE-sell-leg3` (visible in MT5's
+Trade/History "Comment" column) — `GDSE` is just the internal short prefix,
+distinct per leg number and direction so it's easy to tell legs apart at a
+glance.
 
 Native MQL5 Expert Advisor for XAUUSD (M1). Runs a BUY basket and a SELL
 basket simultaneously (requires a **hedging-mode** MT5 account). Each basket
@@ -147,8 +154,8 @@ new compiled defaults on the next run unless explicitly passed via a
 
 ## Setup
 
-1. Open `GoldDualBasketDCA.mq5` in MetaEditor, compile (0 errors/warnings as
-   of the last build).
+1. Open `XAUUSD Dual Basket DCA EA.mq5` in MetaEditor, compile (0 errors/
+   warnings as of the last build).
 2. Attach to an XAUUSD M1 chart on a **hedging-mode** account. Confirm
    `InpExpectedLogin` matches the account you intend to run on (or set to 0
    to skip the check).

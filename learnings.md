@@ -98,3 +98,23 @@ human-reviewed summaries and anything the automated log wouldn't capture.)
   can deliver with finite capital — this was stated plainly rather than
   faked. The honest next step, unchanged from before: validate this config
   against a different time period.
+
+- **2026-07-27 (basket hard-SL turned off, real-tick 1-week retest):** Per
+  explicit request, `InpBasketMaxLossUSD` set to `0.0` (off) — a basket's
+  only remaining loss bound is now the wide catastrophic backstop SL per
+  leg, not the tighter basket-level stop. Re-ran the same real-tick
+  Strategy Tester setup ($5000, one week 2026-07-19 to 2026-07-26, 100%
+  real ticks, 1280025 ticks / 6889 bars / 1905 trades):
+
+  Result: **PF 1.02 (first config to cross 1.0), net +$147.10**, win rate
+  71.13% — but equity drawdown jumped to **31.17% (-$2046.98)** and balance
+  drawdown to 26.55%, versus 11.68% with the basket hard-SL on. Largest
+  single losing trade widened to -$299.62 (was -$58.65), and there was an
+  8-trade losing streak totaling -$1440.11 (28.8% of the $5000 account) in
+  one stretch. This matches the exact tradeoff flagged before turning it
+  off: crossing breakeven on this one week came from letting individual
+  baskets ride out bigger adverse moves instead of cutting them at $150 —
+  more of the "hope for a bounce" risk paying off this specific week, at
+  the cost of a much rougher equity curve. Still one week of data, still
+  not proof of a durable edge — same "validate on another period before
+  trusting it" caveat as every prior result in this file.

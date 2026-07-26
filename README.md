@@ -116,7 +116,8 @@ disabled — see `learnings.md` for the full history if revisiting this idea.
 | $5000 resize + deep AI brain, daily limit OFF | $5000 | 0.94 | 69.54% | -$365.85 | 12.35% |
 | Daily limit OFF + hard-SL OFF + pyramid ON | $5000 | 0.69 | ~66% | -$1086.74 | 25.68% |
 | Daily limit OFF + hard-SL OFF + pyramid OFF | $5000 | 0.93 | ~69% | -$334.82 | 21.78% |
-| **Pyramid removed + daily limit OFF + intraday soft-brake (current)** | $5000 | **0.95** | **71.68%** | **-$253.02** | **11.68%** |
+| Pyramid removed + daily limit OFF + intraday soft-brake | $5000 | 0.95 | 71.68% | -$253.02 | 11.68% |
+| **+ basket hard-SL OFF too (current, 2026-07-19 to 07-26, real ticks)** | $5000 | **1.02** | **71.13%** | **+$147.10** | **31.17% (equity)** |
 
 **Current shipped defaults**: `InpInitialLot=0.02`, `InpLotMultiplier=1.5`,
 `InpDcaDistancePrice=3.0` (fixed), `InpMaxLegsPerBasket=5`,

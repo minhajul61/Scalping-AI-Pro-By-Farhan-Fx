@@ -55,6 +55,45 @@ across restarts via `GlobalVariableSet`/`Get` (`InpResetTunedParams` wipes
 back to input defaults). Each day's decision is logged to
 `MQL5/Files/GoldDualBasketDCA_tuning_log.txt` on the terminal running it.
 
+## Pyramiding (present in code, off by default)
+
+`InpUsePyramid` adds to a winning basket instead of closing it, at the exact
+moment its target is hit, if the higher-timeframe trend still strongly
+confirms that direction (decided in `ManageBasketExits`, not a separate
+distance trigger — an earlier version's own `$` distance trigger never fired
+because the base target closes the basket at a far smaller move first).
+Backtested worse than not pyramiding (see Backtest Results) — converting
+target-hit "sure wins" into extended, trend-riding exposure lost more often
+than it gained on the tested week. Left in the code, off by default
+(`InpUsePyramid = false`), in case a different market period favors it.
+
+## Backtest Results (1-week real-tick Strategy Tester runs, 2026.07.18-25, $2000 deposit)
+
+| Config | Profit Factor | Win rate | Net P/L | Max DD |
+|---|---|---|---|---|
+| Original spec defaults (0.01 lot, 4 legs, no trend filter) | 0.77 | 66.67% | -$12.39 (on $100) | 19.16% |
+| + trend filter (ATR-scaled, applied to bootstrap too) | 0.71 | 78.33% | -$108.84 | 10.53% |
+| + pyramiding | 0.62-0.64 | 64.83% | -$165.69/-$166.43 | 14.03-14.20% |
+| **+ lower max-loss ($220->$100) + higher target ($1->$2), no pyramid** | **0.92** | **79.34%** | **-$80.76** | **11.05%** |
+| Pushed the same two levers further ($2.50/$80) | 0.62 | 68.24% | -$165.69 | 14.03% |
+
+**Current shipped defaults reflect the best row above**: `InpInitialLot=0.05`,
+`InpLotMultiplier=1.3`, `InpMaxLegsPerBasket=5`, `InpBasketProfitTargetUSD=2.0`,
+`InpBasketMaxLossUSD=100.0`, `InpUsePyramid=false`. Still net-negative (PF
+0.92, not >1.0) — close to breakeven but not there. Pushing the same two
+levers one step further made results sharply *worse*, not better (a
+non-monotonic result that's a clear overfitting warning sign on a single
+week of data) — see `learnings.md` for the full reasoning. **Do not tune
+these further against the same 1-week window**; the honest next step is
+validating against a different time period, not squeezing more out of this
+one.
+
+Also found and worth remembering: MT5's Strategy Tester caches an EA's
+last-used inputs in `MQL5/Profiles/Tester/<EA>.set`, silently overriding
+new compiled defaults on the next run unless explicitly passed via a
+`[TesterInputs]` section in the launch `.ini` — cost two wasted test runs
+(identical output to a prior run) before being caught.
+
 ## Setup
 
 1. Open `GoldDualBasketDCA.mq5` in MetaEditor, compile (0 errors/warnings as
@@ -68,14 +107,13 @@ back to input defaults). Each day's decision is logged to
 
 ## Next steps / not yet done
 
-- Only manually reasoned through the logic and confirmed a clean compile —
-  has not yet been run on a live/demo chart. Watch the first few cycles
+- Backtested extensively (1 week, real ticks, Strategy Tester) but **not yet
+  run on a live/demo chart in real time** — watch the first few cycles
   closely (bootstrap entry, a forced DCA, a profit-target close+reopen)
   before leaving it unattended.
-- Strategy Tester validation (this design should backtest cleanly, unlike
-  EAs using the real economic calendar, since the DCA filters are ATR/MA
-  based) — not yet run.
-- `InpBasketMaxLossUSD` (15.0) and `InpDailyMaxLossPercent` (2.0) defaults
-  are reasonable starting guesses for a small demo account, not tuned to any
-  specific account size — revisit before scaling up lot sizes or moving to
-  a live account.
+- Still net-negative on the tested week (PF 0.92) — validate against a
+  different time period before trusting the current defaults, and don't
+  keep tuning against this same week (see Backtest Results above).
+- `InpDailyMaxLossPercent` (2.0%) hasn't itself been re-tuned for the bigger
+  $2000+ account size this now assumes — revisit alongside any further
+  account-size change.

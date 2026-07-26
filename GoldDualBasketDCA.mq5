@@ -38,16 +38,31 @@ enum ENUM_BASKET_SIDE
 input group "=== Trade Settings ==="
 input ulong    InpMagicNumber        = 20270115;  // Magic number (unique per EA/account)
 input long     InpExpectedLogin      = 416045126; // Expected account login (0 = skip check)
-input int      InpMaxSpreadPoints    = 50;        // Skip new entries if spread exceeds this
+input int      InpMaxSpreadPoints    = 300;       // Skip new entries if spread exceeds this (XAUUSD real spread on this
+                                                   // Exness demo runs ~150-200 points at point=0.001 - the original 50
+                                                   // default blocked every single entry, including the bootstrap leg,
+                                                   // for the entire backtest. Confirmed via a real-tick visual test
+                                                   // that showed 0 trades over a full week before this fix.
 
 input group "=== Basket Core ==="
-input double   InpInitialLot            = 0.01;   // Starting lot size per basket
+// InpInitialLot raised from 0.01: at the broker's 0.01 volume step, a 1.5x/1.3x
+// multiplier applied to a 0.01 base lot rounds to the same +0.01-per-leg
+// sequence regardless of the multiplier value (confirmed by direct calculation
+// - legs 1-5 were IDENTICAL for 1.2x/1.3x/1.5x). The multiplier only starts to
+// actually differentiate lot sizes once the base lot is large enough that a
+// fractional multiple exceeds one volume step - hence 0.05 here. This also
+// means running this EA meaningfully now needs a bigger account: the 5-leg
+// worst-case (straight-line adverse, no bounce) floating loss at these
+// settings is about -$195 (see InpBasketMaxLossUSD below), which needs a
+// multi-thousand-dollar account to represent a sane risk fraction, not the
+// $100 demo this was first tested on.
+input double   InpInitialLot            = 0.05;   // Starting lot size per basket
 input double   InpBasketProfitTargetUSD = 1.0;    // Close whole basket once floating profit reaches this ($)
-input int      InpMaxLegsPerBasket      = 4;      // Hard cap on DCA legs per basket
+input int      InpMaxLegsPerBasket      = 5;      // Hard cap on DCA legs per basket
 
 input group "=== DCA / Martingale ==="
 input double   InpDcaDistancePrice  = 3.0;        // Adverse move ($ price) past last leg before adding a DCA leg
-input double   InpLotMultiplier     = 1.5;        // Martingale multiplier per DCA leg
+input double   InpLotMultiplier     = 1.3;        // Martingale multiplier per DCA leg
 
 input group "=== DCA Filters (volatility-spike \"news proxy\" + trend) ==="
 input bool             InpUseAtrSpikeFilter = true;      // Skip DCA adds during a volatility spike (news proxy)
@@ -59,7 +74,12 @@ input ENUM_TIMEFRAMES  InpTrendTF           = PERIOD_H1;  // Timeframe for the t
 input int              InpTrendMAPeriod     = 50;         // MA period for the trend filter
 
 input group "=== Basket Safety ==="
-input double   InpBasketMaxLossUSD        = 15.0; // Force-close a basket if its floating loss reaches this ($)
+// Sized to comfortably exceed the leg-5 worst-case (straight-line adverse,
+// no bounce) floating loss of about -$195 at InpInitialLot=0.05/1.3x/5legs/
+// $3 distance - see InpInitialLot comment above. Without this margin, the
+// hard stop would fire before the last leg(s) ever got real room to work,
+// same problem the original $15 default had at the smaller lot scale.
+input double   InpBasketMaxLossUSD        = 220.0; // Force-close a basket if its floating loss reaches this ($)
 input int      InpBasketSLCooldownMinutes = 30;    // Minutes to wait before reopening a basket after a hard-SL close
 input bool     InpUseCatastrophicSL       = true;  // Attach a wide backstop SL to every leg (dead-man's switch)
 input double   InpCatastrophicSLMultiple  = 2.0;   // Backstop SL = DcaDistance * (MaxLegs + this), beyond entry

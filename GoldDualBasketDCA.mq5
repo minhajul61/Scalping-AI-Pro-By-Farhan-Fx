@@ -45,24 +45,29 @@ input int      InpMaxSpreadPoints    = 300;       // Skip new entries if spread 
                                                    // that showed 0 trades over a full week before this fix.
 
 input group "=== Basket Core ==="
-// InpInitialLot raised from 0.01: at the broker's 0.01 volume step, a 1.5x/1.3x
-// multiplier applied to a 0.01 base lot rounds to the same +0.01-per-leg
-// sequence regardless of the multiplier value (confirmed by direct calculation
-// - legs 1-5 were IDENTICAL for 1.2x/1.3x/1.5x). The multiplier only starts to
-// actually differentiate lot sizes once the base lot is large enough that a
-// fractional multiple exceeds one volume step - hence 0.05 here. This also
-// means running this EA meaningfully now needs a bigger account: the 5-leg
-// worst-case (straight-line adverse, no bounce) floating loss at these
-// settings is about -$195 (see InpBasketMaxLossUSD below), which needs a
-// multi-thousand-dollar account to represent a sane risk fraction, not the
-// $100 demo this was first tested on.
-input double   InpInitialLot            = 0.05;   // Starting lot size per basket
+// Re-derived for a $5000 account via a systematic search (see git history /
+// learnings.md for the full table): initial=0.02, 1.5x, $3 distance, 5 legs
+// gives a full-load (all 5 legs in, no bounce) worst-case floating loss of
+// only -$96 (1.92% of $5000) and needs just a ~$3.77 bounce from that point
+// to reach the $2 target - a genuinely "easy" exit relative to the $12 of
+// adverse movement it took to load all 5 legs. Earlier defaults (0.05 lot,
+// -$195 worst case) needed a much bigger account to be a sane risk fraction.
+input double   InpInitialLot            = 0.02;   // Starting lot size per basket
 input double   InpBasketProfitTargetUSD = 2.0;    // Close whole basket once floating profit reaches this ($)
 input int      InpMaxLegsPerBasket      = 5;      // Hard cap on DCA legs per basket
 
 input group "=== DCA / Martingale ==="
-input double   InpDcaDistancePrice  = 3.0;        // Adverse move ($ price) past last leg before adding a DCA leg
-input double   InpLotMultiplier     = 1.3;        // Martingale multiplier per DCA leg
+// A fixed $ distance doesn't adapt to how much gold is actually moving day
+// to day - too tight in a calm market (DCAs constantly on noise), too wide
+// in a volatile one (waits too long, basket already deep before the first
+// add). Scaling the distance off the current M1 ATR was tried as the
+// "smart" default but backtested WORSE than a fixed $3 (PF 0.92->0.75, see
+// learnings.md) - left in the code (InpUseAtrDcaDistance) but off by
+// default until a better-tuned ATR multiplier is found.
+input bool     InpUseAtrDcaDistance   = false;    // DCA distance = current ATR * InpDcaDistanceAtrMult (instead of a fixed $)
+input double   InpDcaDistanceAtrMult  = 1.5;      // Multiplier applied to the current M1 ATR for DCA distance
+input double   InpDcaDistancePrice  = 3.0;        // Fixed $ distance (used when InpUseAtrDcaDistance = false, the current default)
+input double   InpLotMultiplier     = 1.5;        // Martingale multiplier per DCA leg
 
 input group "=== Pyramiding (add to winners on a confirmed trend) ==="
 // DCA can bound losses but can never guarantee zero of them - no finite-
@@ -100,31 +105,46 @@ input int              InpTrendAtrPeriod    = 14;         // ATR period (on InpT
 input double           InpTrendStrengthATRMult = 0.5;     // Close must be this many ATRs past the MA to count as trending
 
 input group "=== Basket Safety ==="
-// Lowered from 220 (which comfortably covered the leg-5 worst-case of about
-// -$195) down to 100, deliberately trading DCA "room to work" for smaller
-// realized losses when it doesn't - the same trade-off as before, just
-// leaning the other way this time: baskets will now often hard-stop around
-// leg 3-4 rather than reaching leg 5, same structural effect the original
-// $15/0.01-lot default had (see leg-by-leg math in git history) - but at
-// least this time it's a deliberate choice being tested, not an oversight.
-input double   InpBasketMaxLossUSD        = 100.0; // Force-close a basket if its floating loss reaches this ($)
+// Re-derived alongside the $5000/0.02-lot config above: full 5-leg worst
+// case is about -$96, so 150 gives a real margin beyond that (lets leg 5
+// actually get used) while still being only 3% of a $5000 account.
+input double   InpBasketMaxLossUSD        = 150.0; // Force-close a basket if its floating loss reaches this ($)
 input int      InpBasketSLCooldownMinutes = 30;    // Minutes to wait before reopening a basket after a hard-SL close
 input bool     InpUseCatastrophicSL       = true;  // Attach a wide backstop SL to every leg (dead-man's switch)
 input double   InpCatastrophicSLMultiple  = 2.0;   // Backstop SL = DcaDistance * (MaxLegs + this), beyond entry
 
 input group "=== Daily Circuit Breaker ==="
 input bool     InpUseDailyLimit         = true;   // Stop new entries past the daily loss limit
-input double   InpDailyMaxLossPercent   = 2.0;    // Max daily loss (% of day-start balance)
+// Raised from 2.0 to 5.0 alongside the $5000/-$150-max-basket-loss config
+// above: at 2%, the daily limit (~$100 on $5000) would trip BEFORE a single
+// basket even reached its own $150 hard-SL, making the basket-level stop
+// pointless. 5% (~$250) gives room for one full basket-SL event before the
+// daily breaker engages, which is the intended layering (basket stop first,
+// daily stop as the second-line brake on repeated bad baskets).
+input double   InpDailyMaxLossPercent   = 5.0;    // Max daily loss (% of day-start balance)
 input bool     InpDailyLimitForceCloses = true;   // Also force-close both baskets (not just halt new entries) on breach
 
 input group "=== Self-Tuning AI Brain (rule-based, not ML) ==="
 input bool     InpEnableSelfTuning = true;   // Daily parameter self-tuning from yesterday's trade history
-input double   InpDcaDistanceMin   = 2.0;
+input double   InpDcaDistanceMin   = 2.0;   // Bounds for the fixed $ distance (used only when InpUseAtrDcaDistance = false)
 input double   InpDcaDistanceMax   = 6.0;
+input double   InpDcaAtrMultMin    = 1.0;   // Bounds for the ATR multiplier (used when InpUseAtrDcaDistance = true)
+input double   InpDcaAtrMultMax    = 3.0;
 input double   InpLotMultiplierMin = 1.2;
 input double   InpLotMultiplierMax = 1.8;
 input double   InpProfitTargetMin  = 0.5;
 input double   InpProfitTargetMax  = 3.0;
+// Deeper "AI brain" capability: tracks real, persistent (not just yesterday's)
+// win/loss counts at each leg depth a basket has ever reached, and lets the
+// max-legs cap itself adapt from that history - not just DCA distance/
+// multiplier/target. If a given leg depth empirically recovers less than
+// InpLegStatWinRateFloor of the time (once enough samples exist), the max
+// legs cap steps down toward InpMaxLegsFloor; a leg depth working well can
+// let it step back up, capped at the original InpMaxLegsPerBasket ceiling.
+input int      InpMaxLegsFloor        = 2;    // Never auto-reduce max legs below this
+input int      InpLegStatMinSample    = 8;     // Min cycles reaching a leg depth before trusting its win rate
+input double   InpLegStatWinRateFloor = 0.30;  // Below this win rate at the current max-leg depth, reduce the cap
+input double   InpLegStatWinRateCeil  = 0.70;  // Above this, allow the cap to step back up (never past InpMaxLegsPerBasket)
 input bool     InpResetTunedParams = false; // Wipe tuned values back to Inp* defaults on next init
 
 input group "=== Dashboard ==="
@@ -158,9 +178,11 @@ double g_dayStartBalance  = 0.0;
 
 datetime g_cooldownUntil[2] = {0, 0}; // indexed by ENUM_BASKET_SIDE
 
-double g_tunedDcaDistance;
+double g_tunedDcaDistance;   // fixed-$ mode (InpUseAtrDcaDistance = false)
+double g_tunedDcaAtrMult;    // ATR mode (InpUseAtrDcaDistance = true) - the "smart" default
 double g_tunedLotMultiplier;
 double g_tunedProfitTarget;
+int    g_tunedMaxLegs;      // max legs cap, adapted from real per-leg-depth win/loss history
 int    g_lastTuneDateCode = -1;
 
 #define GV_PREFIX  "GDSE_"
@@ -471,19 +493,20 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
 
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   double dcaDistance = GetCurrentDcaDistance();
 
    bool adverse;
    if(side == SIDE_BUY)
-      adverse = (bid <= b.lastLegEntry - g_tunedDcaDistance);
+      adverse = (bid <= b.lastLegEntry - dcaDistance);
    else
-      adverse = (ask >= b.lastLegEntry + g_tunedDcaDistance);
+      adverse = (ask >= b.lastLegEntry + dcaDistance);
 
    // Pyramid legs don't count against the DCA cap - they're a separate risk
    // decision (adding to a winner, handled in ManageBasketExits at the
    // moment target is hit) with their own InpMaxPyramidLegs cap.
    int dcaLegCount = b.legCount - b.pyramidLegCount;
 
-   if(adverse && dcaLegCount < InpMaxLegsPerBasket)
+   if(adverse && dcaLegCount < g_tunedMaxLegs)
      {
       if(InpUseAtrSpikeFilter && IsAtrSpiking())
          return; // "news proxy" - don't average into a volatility spike
@@ -521,7 +544,7 @@ void OpenLeg(ENUM_BASKET_SIDE side, int legIndexForSizing, double previousLegLot
 
    int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
    double backstopDist = InpUseCatastrophicSL
-                          ? g_tunedDcaDistance * (InpMaxLegsPerBasket + InpCatastrophicSLMultiple)
+                          ? GetCurrentDcaDistance() * (InpMaxLegsPerBasket + InpCatastrophicSLMultiple)
                           : 0;
 
    double price, sl;
@@ -546,6 +569,25 @@ void OpenLeg(ENUM_BASKET_SIDE side, int legIndexForSizing, double previousLegLot
       PrintFormat("GoldDualBasketDCA: %s %s leg open failed (lot=%.2f): retcode=%d %s",
                   (side == SIDE_BUY ? "BUY" : "SELL"), (isPyramid ? "pyramid" : "DCA/bootstrap"),
                   lots, trade.ResultRetcode(), trade.ResultRetcodeDescription());
+  }
+
+//+------------------------------------------------------------------+
+//| DCA distance - "smart"/adaptive when InpUseAtrDcaDistance is on:   |
+//| scales with current M1 ATR instead of a fixed $ amount, so it     |
+//| widens automatically in a genuinely more volatile market and      |
+//| tightens in a quiet one, rather than needing a human to guess a   |
+//| single $ figure that fits every condition.                        |
+//+------------------------------------------------------------------+
+double GetCurrentDcaDistance()
+  {
+   if(!InpUseAtrDcaDistance)
+      return g_tunedDcaDistance;
+
+   double atrBuf[1];
+   if(CopyBuffer(g_atrHandle, 0, 1, 1, atrBuf) <= 0 || atrBuf[0] <= 0)
+      return g_tunedDcaDistance; // fallback if ATR unavailable this tick
+
+   return atrBuf[0] * g_tunedDcaAtrMult;
   }
 
 //+------------------------------------------------------------------+
@@ -662,17 +704,28 @@ void LoadTunedParams()
    if(InpResetTunedParams)
      {
       GlobalVariableDel(GVName("DcaDistance"));
+      GlobalVariableDel(GVName("DcaAtrMult"));
       GlobalVariableDel(GVName("LotMultiplier"));
       GlobalVariableDel(GVName("ProfitTarget"));
+      GlobalVariableDel(GVName("MaxLegs"));
       GlobalVariableDel(GVName("LastTuneDate"));
+      for(int i = 1; i <= InpMaxLegsPerBasket; i++)
+        {
+         GlobalVariableDel(GVName("LegWins" + IntegerToString(i)));
+         GlobalVariableDel(GVName("LegLosses" + IntegerToString(i)));
+        }
      }
 
    g_tunedDcaDistance   = GlobalVariableCheck(GVName("DcaDistance"))
                           ? GlobalVariableGet(GVName("DcaDistance")) : InpDcaDistancePrice;
+   g_tunedDcaAtrMult    = GlobalVariableCheck(GVName("DcaAtrMult"))
+                          ? GlobalVariableGet(GVName("DcaAtrMult")) : InpDcaDistanceAtrMult;
    g_tunedLotMultiplier = GlobalVariableCheck(GVName("LotMultiplier"))
                           ? GlobalVariableGet(GVName("LotMultiplier")) : InpLotMultiplier;
    g_tunedProfitTarget  = GlobalVariableCheck(GVName("ProfitTarget"))
                           ? GlobalVariableGet(GVName("ProfitTarget")) : InpBasketProfitTargetUSD;
+   g_tunedMaxLegs       = GlobalVariableCheck(GVName("MaxLegs"))
+                          ? (int)GlobalVariableGet(GVName("MaxLegs")) : InpMaxLegsPerBasket;
    g_lastTuneDateCode   = GlobalVariableCheck(GVName("LastTuneDate"))
                           ? (int)GlobalVariableGet(GVName("LastTuneDate")) : -1;
   }
@@ -680,9 +733,26 @@ void LoadTunedParams()
 void SaveTunedParams()
   {
    GlobalVariableSet(GVName("DcaDistance"), g_tunedDcaDistance);
+   GlobalVariableSet(GVName("DcaAtrMult"), g_tunedDcaAtrMult);
    GlobalVariableSet(GVName("LotMultiplier"), g_tunedLotMultiplier);
    GlobalVariableSet(GVName("ProfitTarget"), g_tunedProfitTarget);
+   GlobalVariableSet(GVName("MaxLegs"), g_tunedMaxLegs);
    GlobalVariableSet(GVName("LastTuneDate"), g_lastTuneDateCode);
+  }
+
+// Persistent (not reset daily) per-leg-depth win/loss counters - the "deep"
+// part of the AI brain: real accumulated history of whether reaching a
+// given leg depth actually tends to recover, not just yesterday's snapshot.
+double GetLegStat(string kind, int legs)
+  {
+   string name = GVName((kind == "win" ? "LegWins" : "LegLosses") + IntegerToString(legs));
+   return GlobalVariableCheck(name) ? GlobalVariableGet(name) : 0;
+  }
+
+void IncrementLegStat(string kind, int legs)
+  {
+   string name = GVName((kind == "win" ? "LegWins" : "LegLosses") + IntegerToString(legs));
+   GlobalVariableSet(name, GetLegStat(kind, legs) + 1);
   }
 
 void WriteTuningLog(string msg)
@@ -793,15 +863,26 @@ void RunDailySelfTune(datetime fromTime, datetime toTime)
          totalTargetGapSum += (sumProfit - g_tunedProfitTarget);
         }
 
+      // Deep AI brain: record real, persistent win/loss history at this
+      // exact leg depth, regardless of whether it happens to be today's
+      // active cap - this builds up a genuine track record over many days.
+      int legsCapped = (int)MathMin(legs, InpMaxLegsPerBasket);
+      IncrementLegStat(sumProfit >= 0 ? "win" : "loss", legsCapped);
+
       idx = j + 1;
      }
 
-   double oldDist = g_tunedDcaDistance, oldMult = g_tunedLotMultiplier, oldTarget = g_tunedProfitTarget;
+   double oldDist = InpUseAtrDcaDistance ? g_tunedDcaAtrMult : g_tunedDcaDistance;
+   double oldMult = g_tunedLotMultiplier, oldTarget = g_tunedProfitTarget;
+   int    oldMaxLegs = g_tunedMaxLegs;
    bool changed = false;
 
    if(maxedTotal > 0 && maxedAndLost >= MathMax(1, maxedTotal / 2))
      {
-      g_tunedDcaDistance   = MathMin(InpDcaDistanceMax, g_tunedDcaDistance + 0.20);
+      if(InpUseAtrDcaDistance)
+         g_tunedDcaAtrMult = MathMin(InpDcaAtrMultMax, g_tunedDcaAtrMult + 0.10);
+      else
+         g_tunedDcaDistance = MathMin(InpDcaDistanceMax, g_tunedDcaDistance + 0.20);
       g_tunedLotMultiplier = MathMax(InpLotMultiplierMin, g_tunedLotMultiplier - 0.05);
       changed = true;
      }
@@ -812,11 +893,43 @@ void RunDailySelfTune(datetime fromTime, datetime toTime)
       changed = true;
      }
 
+   // Deep AI brain: adjust the max-legs cap itself from real, persistent
+   // (all-time, not just yesterday) win/loss history at the CURRENT cap's
+   // leg depth. Requires a real sample size before trusting it either way -
+   // small samples are noise, not evidence. Reducing needs a poor win rate;
+   // increasing needs a strong one; either way it never leaves
+   // [InpMaxLegsFloor, InpMaxLegsPerBasket].
+   double wins   = GetLegStat("win", g_tunedMaxLegs);
+   double losses = GetLegStat("loss", g_tunedMaxLegs);
+   double sample = wins + losses;
+   string legStatNote = "";
+   if(sample >= InpLegStatMinSample)
+     {
+      double winRate = wins / sample;
+      if(winRate < InpLegStatWinRateFloor && g_tunedMaxLegs > InpMaxLegsFloor)
+        {
+         g_tunedMaxLegs--;
+         changed = true;
+         legStatNote = StringFormat(" | leg-depth %d win rate %.0f%% (n=%.0f) below floor - max legs reduced",
+                                     oldMaxLegs, winRate * 100, sample);
+        }
+      else if(winRate > InpLegStatWinRateCeil && g_tunedMaxLegs < InpMaxLegsPerBasket)
+        {
+         g_tunedMaxLegs++;
+         changed = true;
+         legStatNote = StringFormat(" | leg-depth %d win rate %.0f%% (n=%.0f) above ceiling - max legs increased",
+                                     oldMaxLegs, winRate * 100, sample);
+        }
+     }
+
+   double newDist = InpUseAtrDcaDistance ? g_tunedDcaAtrMult : g_tunedDcaDistance;
+   string distLabel = InpUseAtrDcaDistance ? "DcaAtrMult" : "DcaDistance";
    string logMsg = StringFormat("Self-tune %s: cycles=%d maxedTotal=%d maxedAndLost=%d targetHits=%d | "
-                                 "DcaDistance %.2f->%.2f LotMultiplier %.2f->%.2f ProfitTarget %.2f->%.2f%s",
+                                 "%s %.2f->%.2f LotMultiplier %.2f->%.2f ProfitTarget %.2f->%.2f MaxLegs %d->%d%s%s",
                                  TimeToString(fromTime, TIME_DATE), cycleCount, maxedTotal, maxedAndLost, targetHitCount,
-                                 oldDist, g_tunedDcaDistance, oldMult, g_tunedLotMultiplier, oldTarget, g_tunedProfitTarget,
-                                 changed ? "" : " | no change (no clear trouble signal)");
+                                 distLabel, oldDist, newDist, oldMult, g_tunedLotMultiplier, oldTarget, g_tunedProfitTarget,
+                                 oldMaxLegs, g_tunedMaxLegs,
+                                 changed ? "" : " | no change (no clear trouble signal)", legStatNote);
 
    Print("GoldDualBasketDCA: " + logMsg);
    WriteTuningLog(logMsg);
@@ -904,7 +1017,7 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, InpDashboardX - 10);
       ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, InpDashboardY - 10);
       ObjectSetInteger(0, bg, OBJPROP_XSIZE, 280);
-      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 430);
+      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 448);
       ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'12,12,16');
       ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, bg, OBJPROP_COLOR, C'70,70,80');
@@ -914,9 +1027,9 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_ZORDER, 0);
      }
 
-   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 360, 260, 24, "X  CLOSE ALL", C'120,20,20');
-   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 388, 126, 22, "Close BUY", C'20,80,20');
-   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 388, 126, 22, "Close SELL", C'20,80,20');
+   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 378, 260, 24, "X  CLOSE ALL", C'120,20,20');
+   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 406, 126, 22, "Close BUY", C'20,80,20');
+   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 406, 126, 22, "Close SELL", C'20,80,20');
   }
 
 void UpdateDashboard()
@@ -950,7 +1063,7 @@ void UpdateDashboard()
    int    buyDcaLegs  = g_buyBasket.legCount - g_buyBasket.pyramidLegCount;
    double buyTarget   = g_tunedProfitTarget + g_buyBasket.pyramidLegCount * InpPyramidTargetBoost;
    DbLabel("BuyHdr", lx, y, StringFormat("BUY BASKET  (%d/%d dca, %d/%d pyr)",
-           buyDcaLegs, InpMaxLegsPerBasket, g_buyBasket.pyramidLegCount, InpMaxPyramidLegs), C'0,170,220', 8);
+           buyDcaLegs, g_tunedMaxLegs, g_buyBasket.pyramidLegCount, InpMaxPyramidLegs), C'0,170,220', 8);
    y += lh;
    DbLabel("BuyAvg", lx, y, PadRight("Avg Entry", lblW) + DoubleToString(g_buyBasket.weightedAvgEntry, 2), clrWhite, 8);
    y += lh;
@@ -959,7 +1072,7 @@ void UpdateDashboard()
    y += lh;
    double buyToTarget = buyTarget - g_buyBasket.floatingPL;
    double buyToDca = (g_buyBasket.legCount > 0)
-                      ? (SymbolInfoDouble(_Symbol, SYMBOL_BID) - (g_buyBasket.lastLegEntry - g_tunedDcaDistance)) : 0;
+                      ? (SymbolInfoDouble(_Symbol, SYMBOL_BID) - (g_buyBasket.lastLegEntry - GetCurrentDcaDistance())) : 0;
    DbLabel("BuyToTarget", lx, y, PadRight("To Target", lblW) + "$" + DoubleToString(buyToTarget, 2) +
            " (tgt $" + DoubleToString(buyTarget, 2) + ")", clrSilver, 8);
    y += lh;
@@ -972,7 +1085,7 @@ void UpdateDashboard()
    int    sellDcaLegs = g_sellBasket.legCount - g_sellBasket.pyramidLegCount;
    double sellTarget   = g_tunedProfitTarget + g_sellBasket.pyramidLegCount * InpPyramidTargetBoost;
    DbLabel("SellHdr", lx, y, StringFormat("SELL BASKET (%d/%d dca, %d/%d pyr)",
-           sellDcaLegs, InpMaxLegsPerBasket, g_sellBasket.pyramidLegCount, InpMaxPyramidLegs), C'0,170,220', 8);
+           sellDcaLegs, g_tunedMaxLegs, g_sellBasket.pyramidLegCount, InpMaxPyramidLegs), C'0,170,220', 8);
    y += lh;
    DbLabel("SellAvg", lx, y, PadRight("Avg Entry", lblW) + DoubleToString(g_sellBasket.weightedAvgEntry, 2), clrWhite, 8);
    y += lh;
@@ -981,7 +1094,7 @@ void UpdateDashboard()
    y += lh;
    double sellToTarget = sellTarget - g_sellBasket.floatingPL;
    double sellToDca = (g_sellBasket.legCount > 0)
-                       ? ((g_sellBasket.lastLegEntry + g_tunedDcaDistance) - SymbolInfoDouble(_Symbol, SYMBOL_ASK)) : 0;
+                       ? ((g_sellBasket.lastLegEntry + GetCurrentDcaDistance()) - SymbolInfoDouble(_Symbol, SYMBOL_ASK)) : 0;
    DbLabel("SellToTarget", lx, y, PadRight("To Target", lblW) + "$" + DoubleToString(sellToTarget, 2) +
            " (tgt $" + DoubleToString(sellTarget, 2) + ")", clrSilver, 8);
    y += lh;
@@ -1010,11 +1123,17 @@ void UpdateDashboard()
 
    DbLabel("TuneHdr", lx, y, "SELF-TUNED PARAMS", C'0,170,220', 8);
    y += lh;
-   DbLabel("TuneDist", lx, y, PadRight("DCA Dist", lblW) + "$" + DoubleToString(g_tunedDcaDistance, 2), clrWhite, 8);
+   string dcaDistText = InpUseAtrDcaDistance
+                         ? DoubleToString(g_tunedDcaAtrMult, 2) + "x ATR ($" + DoubleToString(GetCurrentDcaDistance(), 2) + ")"
+                         : "$" + DoubleToString(g_tunedDcaDistance, 2);
+   DbLabel("TuneDist", lx, y, PadRight("DCA Dist", lblW) + dcaDistText, clrWhite, 8);
    y += lh;
    DbLabel("TuneMult", lx, y, PadRight("Multiplier", lblW) + DoubleToString(g_tunedLotMultiplier, 2) + "x", clrWhite, 8);
    y += lh;
    DbLabel("TuneTarget", lx, y, PadRight("Target", lblW) + "$" + DoubleToString(g_tunedProfitTarget, 2), clrWhite, 8);
+   y += lh;
+   DbLabel("TuneMaxLegs", lx, y, PadRight("Max Legs", lblW) + IntegerToString(g_tunedMaxLegs) + " (ceil " +
+           IntegerToString(InpMaxLegsPerBasket) + ")", clrWhite, 8);
    y += lh;
    DbLabel("LastTune", lx, y, PadRight("Last Tune", lblW) + (g_lastTuneDateCode > 0 ? IntegerToString(g_lastTuneDateCode) : "never"), clrSilver, 8);
 

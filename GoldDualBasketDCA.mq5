@@ -69,24 +69,6 @@ input double   InpDcaDistanceAtrMult  = 1.5;      // Multiplier applied to the c
 input double   InpDcaDistancePrice  = 3.0;        // Fixed $ distance (used when InpUseAtrDcaDistance = false, the current default)
 input double   InpLotMultiplier     = 1.5;        // Martingale multiplier per DCA leg
 
-input group "=== Pyramiding (add to winners on a confirmed trend) ==="
-// DCA can bound losses but can never guarantee zero of them - no finite-
-// capital scheme can, if price never bounces. This is the other side of
-// the risk:reward fix: at the moment a basket HITS its profit target, if
-// the higher-timeframe trend still strongly confirms that direction, add a
-// flat-size leg and raise the target instead of closing small - decided in
-// ManageBasketExits, not on a separate favorable-distance trigger (an
-// earlier version used its own $ distance here, but the base target is hit
-// at such a small price move - ~$0.20 at 0.05 lots - that a wider distance
-// trigger never got a chance to fire before the basket already closed).
-// Disabled: backtested worse (PF 0.71->0.64, win rate 78.33%->64.83%, net
-// -$108.84->-$166.43) - converting target-hit "sure wins" into extended,
-// trend-riding exposure lost more often than it gained here. Kept in code
-// (not deleted) in case a future test period favors it, but off by default.
-input bool     InpUsePyramid           = false;  // Add to winners (at target, trend-confirmed) instead of closing
-input double   InpPyramidLot           = 0.05;   // Flat lot size per pyramid leg (not martingale - this is profit-taking, not recovery)
-input int      InpMaxPyramidLegs       = 2;      // Hard cap on pyramid legs per basket
-input double   InpPyramidTargetBoost   = 1.0;    // Raise the basket's profit target by this much ($) per pyramid leg added
 
 input group "=== DCA Filters (volatility-spike \"news proxy\" + trend) ==="
 input bool             InpUseAtrSpikeFilter = true;      // Skip DCA adds during a volatility spike (news proxy)
@@ -114,7 +96,15 @@ input bool     InpUseCatastrophicSL       = true;  // Attach a wide backstop SL 
 input double   InpCatastrophicSLMultiple  = 2.0;   // Backstop SL = DcaDistance * (MaxLegs + this), beyond entry
 
 input group "=== Daily Circuit Breaker ==="
-input bool     InpUseDailyLimit         = true;   // Stop new entries past the daily loss limit
+// Off by default per explicit user request. IMPORTANT: this was
+// stress-tested repeatedly with it off, and every time before the $5000/
+// deep-AI-brain config it wiped the account completely (100%+ drawdown) -
+// see learnings.md. Even with the current config it is a real, meaningful
+// safety layer, not a redundant one. Leaving it off is a deliberate,
+// explicitly-requested risk - the intraday soft-brake below (part of the
+// AI brain) is the substitute self-adjusting mechanism, not a replacement
+// guarantee.
+input bool     InpUseDailyLimit         = false;  // Stop new entries past the daily loss limit
 // Raised from 2.0 to 5.0 alongside the $5000/-$150-max-basket-loss config
 // above: at 2%, the daily limit (~$100 on $5000) would trip BEFORE a single
 // basket even reached its own $150 hard-SL, making the basket-level stop
@@ -125,6 +115,18 @@ input double   InpDailyMaxLossPercent   = 5.0;    // Max daily loss (% of day-st
 input bool     InpDailyLimitForceCloses = true;   // Also force-close both baskets (not just halt new entries) on breach
 
 input group "=== Self-Tuning AI Brain (rule-based, not ML) ==="
+// Intraday soft-brake: since InpUseDailyLimit is off by default, this is the
+// AI brain's own substitute - not a hard stop, no force-close. If today's
+// floating equity crosses a soft loss threshold, it temporarily caps the
+// lot multiplier down and widens the DCA distance for the REST of that
+// calendar day (reverts automatically at the next day rollover), making new
+// DCA legs smaller and further apart while today is going badly - without
+// ever closing a basket or refusing a new one outright.
+input bool     InpUseIntradayBrake            = true;  // Soft de-risk (not a hard stop) once today's loss crosses the threshold
+input double   InpIntradayBrakeLossPercent    = 3.0;    // Today's floating loss (% of day-start balance) that engages the brake
+input double   InpIntradayBrakeMultiplierCap  = 1.15;   // Lot multiplier is capped to this (or lower) once the brake is on
+input double   InpIntradayBrakeDistanceMult   = 1.5;    // DCA distance is multiplied by this once the brake is on
+
 input bool     InpEnableSelfTuning = true;   // Daily parameter self-tuning from yesterday's trade history
 input double   InpDcaDistanceMin   = 2.0;   // Bounds for the fixed $ distance (used only when InpUseAtrDcaDistance = false)
 input double   InpDcaDistanceMax   = 6.0;
@@ -156,8 +158,7 @@ CTrade trade;
 
 struct SBasket
   {
-   int      legCount;        // all legs: bootstrap + DCA + pyramid
-   int      pyramidLegCount; // subset of legCount added while riding a winning trend
+   int      legCount;        // all legs: bootstrap + DCA
    double   totalLots;
    double   floatingPL;      // sum of POSITION_PROFIT + POSITION_SWAP across the basket's legs
    double   weightedAvgEntry;
@@ -175,6 +176,7 @@ int g_trendAtrHandle = INVALID_HANDLE;
 
 int    g_dayStartDateCode = -1;
 double g_dayStartBalance  = 0.0;
+bool   g_intradayBrakeActive = false; // AI brain's soft de-risk for the rest of today, reset on day rollover
 
 datetime g_cooldownUntil[2] = {0, 0}; // indexed by ENUM_BASKET_SIDE
 
@@ -297,6 +299,7 @@ void OnTick()
   {
    RefreshBaskets();
    UpdateDayTracking();
+   CheckIntradayBrake();
    MaybeRunDailySelfTune();
 
    ManageBasketExits(SIDE_BUY);
@@ -324,7 +327,6 @@ void OnTick()
 void ResetBasket(SBasket &b)
   {
    b.legCount         = 0;
-   b.pyramidLegCount  = 0;
    b.totalLots        = 0;
    b.floatingPL       = 0;
    b.weightedAvgEntry = 0;
@@ -358,14 +360,11 @@ void ScanBasket(ENUM_BASKET_SIDE side, SBasket &b)
       double   entry   = PositionGetDouble(POSITION_PRICE_OPEN);
       double   profit  = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
       datetime t       = (datetime)PositionGetInteger(POSITION_TIME);
-      string   comment = PositionGetString(POSITION_COMMENT);
 
       b.legCount++;
       b.totalLots  += lots;
       b.floatingPL += profit;
       sumPriceLots += entry * lots;
-      if(StringFind(comment, "-pyr") >= 0)
-         b.pyramidLegCount++;
 
       if(t >= b.lastLegTime)
         {
@@ -400,29 +399,10 @@ void ManageBasketExits(ENUM_BASKET_SIDE side)
    if(b.legCount == 0)
       return;
 
-   double effectiveTarget = g_tunedProfitTarget + b.pyramidLegCount * InpPyramidTargetBoost;
-   if(b.floatingPL >= effectiveTarget)
+   if(b.floatingPL >= g_tunedProfitTarget)
      {
-      // At target: a separate favorable-distance trigger for pyramiding
-      // never fired here in practice, because the base $1 target is hit at
-      // a far smaller price move than any reasonable pyramid distance (e.g.
-      // ~$0.20 at 0.05 lots) - the basket always closed and reopened long
-      // before a wider threshold could ever be reached. So the pyramid
-      // decision is made right here, at the moment target is hit: if the
-      // trend still strongly confirms this basket's own direction and
-      // there's pyramid room left, ride it further (add a leg, raise the
-      // target) instead of closing small.
-      bool trendConfirms = InpUseTrendFilter &&
-                            ((side == SIDE_BUY && GetTrend() == 1) || (side == SIDE_SELL && GetTrend() == -1));
-
-      if(InpUsePyramid && trendConfirms && b.pyramidLegCount < InpMaxPyramidLegs)
-        {
-         OpenLeg(side, b.pyramidLegCount, b.lastLegLots, true);
-         return;
-        }
-
-      CloseBasket(side, StringFormat("BASKET TARGET HIT (floatingPL=%.2f >= target=%.2f, %d pyramid leg(s))",
-                                      b.floatingPL, effectiveTarget, b.pyramidLegCount));
+      CloseBasket(side, StringFormat("BASKET TARGET HIT (floatingPL=%.2f >= target=%.2f)",
+                                      b.floatingPL, g_tunedProfitTarget));
       return;
      }
 
@@ -487,7 +467,7 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
       // started each of those baskets was not.
       if(InpUseTrendFilter && IsAgainstTrend(side))
          return;
-      OpenLeg(side, 0, 0, false);
+      OpenLeg(side, 0, 0);
       return;
      }
 
@@ -501,26 +481,21 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
    else
       adverse = (ask >= b.lastLegEntry + dcaDistance);
 
-   // Pyramid legs don't count against the DCA cap - they're a separate risk
-   // decision (adding to a winner, handled in ManageBasketExits at the
-   // moment target is hit) with their own InpMaxPyramidLegs cap.
-   int dcaLegCount = b.legCount - b.pyramidLegCount;
-
-   if(adverse && dcaLegCount < g_tunedMaxLegs)
+   if(adverse && b.legCount < g_tunedMaxLegs)
      {
       if(InpUseAtrSpikeFilter && IsAtrSpiking())
          return; // "news proxy" - don't average into a volatility spike
       if(InpUseTrendFilter && IsAgainstTrend(side))
          return; // don't keep averaging into a strong opposing higher-timeframe trend
 
-      OpenLeg(side, dcaLegCount, b.lastLegLots, false);
+      OpenLeg(side, b.legCount, b.lastLegLots);
       return;
      }
   }
 
 double NextLotSize(int legCount, double previousLegLots)
   {
-   double raw = InpInitialLot * MathPow(g_tunedLotMultiplier, legCount);
+   double raw = InpInitialLot * MathPow(EffectiveLotMultiplier(), legCount);
 
    double minLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double maxLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
@@ -536,9 +511,9 @@ double NextLotSize(int legCount, double previousLegLots)
    return NormalizeDouble(lots, 2);
   }
 
-void OpenLeg(ENUM_BASKET_SIDE side, int legIndexForSizing, double previousLegLots, bool isPyramid)
+void OpenLeg(ENUM_BASKET_SIDE side, int legIndexForSizing, double previousLegLots)
   {
-   double lots = isPyramid ? InpPyramidLot : NextLotSize(legIndexForSizing, previousLegLots);
+   double lots = NextLotSize(legIndexForSizing, previousLegLots);
    if(lots <= 0)
       return;
 
@@ -549,8 +524,7 @@ void OpenLeg(ENUM_BASKET_SIDE side, int legIndexForSizing, double previousLegLot
 
    double price, sl;
    bool ok;
-   string comment = StringFormat("GDSE-%s-%s%d", (side == SIDE_BUY ? "buy" : "sell"),
-                                  (isPyramid ? "pyr" : "leg"), legIndexForSizing + 1);
+   string comment = StringFormat("GDSE-%s-leg%d", (side == SIDE_BUY ? "buy" : "sell"), legIndexForSizing + 1);
 
    if(side == SIDE_BUY)
      {
@@ -566,9 +540,8 @@ void OpenLeg(ENUM_BASKET_SIDE side, int legIndexForSizing, double previousLegLot
      }
 
    if(!ok)
-      PrintFormat("GoldDualBasketDCA: %s %s leg open failed (lot=%.2f): retcode=%d %s",
-                  (side == SIDE_BUY ? "BUY" : "SELL"), (isPyramid ? "pyramid" : "DCA/bootstrap"),
-                  lots, trade.ResultRetcode(), trade.ResultRetcodeDescription());
+      PrintFormat("GoldDualBasketDCA: %s leg open failed (lot=%.2f): retcode=%d %s",
+                  (side == SIDE_BUY ? "BUY" : "SELL"), lots, trade.ResultRetcode(), trade.ResultRetcodeDescription());
   }
 
 //+------------------------------------------------------------------+
@@ -580,14 +553,22 @@ void OpenLeg(ENUM_BASKET_SIDE side, int legIndexForSizing, double previousLegLot
 //+------------------------------------------------------------------+
 double GetCurrentDcaDistance()
   {
+   double dist;
    if(!InpUseAtrDcaDistance)
-      return g_tunedDcaDistance;
+      dist = g_tunedDcaDistance;
+   else
+     {
+      double atrBuf[1];
+      if(CopyBuffer(g_atrHandle, 0, 1, 1, atrBuf) <= 0 || atrBuf[0] <= 0)
+         dist = g_tunedDcaDistance; // fallback if ATR unavailable this tick
+      else
+         dist = atrBuf[0] * g_tunedDcaAtrMult;
+     }
 
-   double atrBuf[1];
-   if(CopyBuffer(g_atrHandle, 0, 1, 1, atrBuf) <= 0 || atrBuf[0] <= 0)
-      return g_tunedDcaDistance; // fallback if ATR unavailable this tick
+   if(g_intradayBrakeActive)
+      dist *= InpIntradayBrakeDistanceMult;
 
-   return atrBuf[0] * g_tunedDcaAtrMult;
+   return dist;
   }
 
 //+------------------------------------------------------------------+
@@ -667,7 +648,44 @@ void UpdateDayTracking()
      {
       g_dayStartDateCode = todayCode;
       g_dayStartBalance  = AccountInfoDouble(ACCOUNT_BALANCE);
+      if(g_intradayBrakeActive)
+        {
+         g_intradayBrakeActive = false;
+         Print("GoldDualBasketDCA: AI BRAIN intraday soft-brake reset for the new day.");
+        }
      }
+  }
+
+// Soft, non-closing de-risk: engages once per day, the moment today's
+// floating loss crosses the threshold, and stays on (no un-braking mid-day
+// even if equity recovers) until the next day's rollover resets it. This is
+// deliberately one-directional within a day - flapping on/off as equity
+// wobbles around the threshold would be noise, not a real risk decision.
+void CheckIntradayBrake()
+  {
+   if(!InpUseIntradayBrake || g_intradayBrakeActive || g_dayStartBalance <= 0)
+      return;
+
+   double equity    = AccountInfoDouble(ACCOUNT_EQUITY);
+   double changePct = (equity - g_dayStartBalance) / g_dayStartBalance * 100.0;
+
+   if(changePct <= -InpIntradayBrakeLossPercent)
+     {
+      g_intradayBrakeActive = true;
+      string msg = StringFormat("AI BRAIN intraday soft-brake engaged: today's P/L %.2f%% <= -%.2f%% - "
+                                 "lot multiplier capped to %.2f, DCA distance x%.2f for the rest of today",
+                                 changePct, InpIntradayBrakeLossPercent, InpIntradayBrakeMultiplierCap,
+                                 InpIntradayBrakeDistanceMult);
+      Print("GoldDualBasketDCA: " + msg);
+      WriteTuningLog(msg);
+     }
+  }
+
+double EffectiveLotMultiplier()
+  {
+   if(g_intradayBrakeActive)
+      return MathMin(g_tunedLotMultiplier, InpIntradayBrakeMultiplierCap);
+   return g_tunedLotMultiplier;
   }
 
 bool DailyLimitHit()
@@ -1017,7 +1035,7 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, InpDashboardX - 10);
       ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, InpDashboardY - 10);
       ObjectSetInteger(0, bg, OBJPROP_XSIZE, 280);
-      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 448);
+      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 464);
       ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'12,12,16');
       ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, bg, OBJPROP_COLOR, C'70,70,80');
@@ -1027,9 +1045,9 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_ZORDER, 0);
      }
 
-   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 378, 260, 24, "X  CLOSE ALL", C'120,20,20');
-   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 406, 126, 22, "Close BUY", C'20,80,20');
-   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 406, 126, 22, "Close SELL", C'20,80,20');
+   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 394, 260, 24, "X  CLOSE ALL", C'120,20,20');
+   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 422, 126, 22, "Close BUY", C'20,80,20');
+   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 422, 126, 22, "Close SELL", C'20,80,20');
   }
 
 void UpdateDashboard()
@@ -1060,21 +1078,18 @@ void UpdateDashboard()
    DbDivider("Div1", x, y, 260, C'55,55,65');
    y += 9;
 
-   int    buyDcaLegs  = g_buyBasket.legCount - g_buyBasket.pyramidLegCount;
-   double buyTarget   = g_tunedProfitTarget + g_buyBasket.pyramidLegCount * InpPyramidTargetBoost;
-   DbLabel("BuyHdr", lx, y, StringFormat("BUY BASKET  (%d/%d dca, %d/%d pyr)",
-           buyDcaLegs, g_tunedMaxLegs, g_buyBasket.pyramidLegCount, InpMaxPyramidLegs), C'0,170,220', 8);
+   DbLabel("BuyHdr", lx, y, StringFormat("BUY BASKET  (%d/%d legs)",
+           g_buyBasket.legCount, g_tunedMaxLegs), C'0,170,220', 8);
    y += lh;
    DbLabel("BuyAvg", lx, y, PadRight("Avg Entry", lblW) + DoubleToString(g_buyBasket.weightedAvgEntry, 2), clrWhite, 8);
    y += lh;
    DbLabel("BuyPL", lx, y, PadRight("Floating", lblW) + "$" + DoubleToString(g_buyBasket.floatingPL, 2),
            (g_buyBasket.floatingPL >= 0 ? clrLime : clrRed), 8);
    y += lh;
-   double buyToTarget = buyTarget - g_buyBasket.floatingPL;
+   double buyToTarget = g_tunedProfitTarget - g_buyBasket.floatingPL;
    double buyToDca = (g_buyBasket.legCount > 0)
                       ? (SymbolInfoDouble(_Symbol, SYMBOL_BID) - (g_buyBasket.lastLegEntry - GetCurrentDcaDistance())) : 0;
-   DbLabel("BuyToTarget", lx, y, PadRight("To Target", lblW) + "$" + DoubleToString(buyToTarget, 2) +
-           " (tgt $" + DoubleToString(buyTarget, 2) + ")", clrSilver, 8);
+   DbLabel("BuyToTarget", lx, y, PadRight("To Target", lblW) + "$" + DoubleToString(buyToTarget, 2), clrSilver, 8);
    y += lh;
    DbLabel("BuyToDca", lx, y, PadRight("To DCA", lblW) + "$" + DoubleToString(buyToDca, 2), clrSilver, 8);
    y += lh + 6;
@@ -1082,21 +1097,18 @@ void UpdateDashboard()
    DbDivider("Div2", x, y, 260, C'55,55,65');
    y += 9;
 
-   int    sellDcaLegs = g_sellBasket.legCount - g_sellBasket.pyramidLegCount;
-   double sellTarget   = g_tunedProfitTarget + g_sellBasket.pyramidLegCount * InpPyramidTargetBoost;
-   DbLabel("SellHdr", lx, y, StringFormat("SELL BASKET (%d/%d dca, %d/%d pyr)",
-           sellDcaLegs, g_tunedMaxLegs, g_sellBasket.pyramidLegCount, InpMaxPyramidLegs), C'0,170,220', 8);
+   DbLabel("SellHdr", lx, y, StringFormat("SELL BASKET (%d/%d legs)",
+           g_sellBasket.legCount, g_tunedMaxLegs), C'0,170,220', 8);
    y += lh;
    DbLabel("SellAvg", lx, y, PadRight("Avg Entry", lblW) + DoubleToString(g_sellBasket.weightedAvgEntry, 2), clrWhite, 8);
    y += lh;
    DbLabel("SellPL", lx, y, PadRight("Floating", lblW) + "$" + DoubleToString(g_sellBasket.floatingPL, 2),
            (g_sellBasket.floatingPL >= 0 ? clrLime : clrRed), 8);
    y += lh;
-   double sellToTarget = sellTarget - g_sellBasket.floatingPL;
+   double sellToTarget = g_tunedProfitTarget - g_sellBasket.floatingPL;
    double sellToDca = (g_sellBasket.legCount > 0)
                        ? ((g_sellBasket.lastLegEntry + GetCurrentDcaDistance()) - SymbolInfoDouble(_Symbol, SYMBOL_ASK)) : 0;
-   DbLabel("SellToTarget", lx, y, PadRight("To Target", lblW) + "$" + DoubleToString(sellToTarget, 2) +
-           " (tgt $" + DoubleToString(sellTarget, 2) + ")", clrSilver, 8);
+   DbLabel("SellToTarget", lx, y, PadRight("To Target", lblW) + "$" + DoubleToString(sellToTarget, 2), clrSilver, 8);
    y += lh;
    DbLabel("SellToDca", lx, y, PadRight("To DCA", lblW) + "$" + DoubleToString(sellToDca, 2), clrSilver, 8);
    y += lh + 6;
@@ -1116,6 +1128,9 @@ void UpdateDashboard()
    y += lh;
    bool hedgingOk = ((ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE) == ACCOUNT_MARGIN_MODE_RETAIL_HEDGING);
    DbLabel("Hedging", lx, y, PadRight("Hedging", lblW) + (hedgingOk ? "OK" : "FAIL"), hedgingOk ? clrLime : clrRed, 8);
+   y += lh;
+   DbLabel("Brake", lx, y, PadRight("Soft Brake", lblW) + (InpUseIntradayBrake ? (g_intradayBrakeActive ? "ON (de-risked today)" : "off (normal)") : "disabled"),
+           g_intradayBrakeActive ? clrOrange : clrSilver, 8);
    y += lh + 6;
 
    DbDivider("Div4", x, y, 260, C'55,55,65');

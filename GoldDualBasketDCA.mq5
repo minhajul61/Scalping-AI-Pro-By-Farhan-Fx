@@ -64,6 +64,19 @@ input group "=== DCA / Martingale ==="
 input double   InpDcaDistancePrice  = 3.0;        // Adverse move ($ price) past last leg before adding a DCA leg
 input double   InpLotMultiplier     = 1.3;        // Martingale multiplier per DCA leg
 
+input group "=== Pyramiding (add to winners on a confirmed trend) ==="
+// DCA can bound losses but can never guarantee zero of them - no finite-
+// capital scheme can, if price never bounces. This is the other side of
+// the risk:reward fix: when a basket is moving favorably AND the
+// higher-timeframe trend strongly confirms that direction, add a flat-size
+// leg and raise the basket's own profit target, so winning baskets can
+// capture more than the base $ target instead of always closing small.
+input bool     InpUsePyramid           = true;   // Add to winners on a strong confirmed trend
+input double   InpPyramidDistancePrice = 3.0;    // Favorable move ($ price) past last leg before adding a pyramid leg
+input double   InpPyramidLot           = 0.05;   // Flat lot size per pyramid leg (not martingale - this is profit-taking, not recovery)
+input int      InpMaxPyramidLegs       = 2;      // Hard cap on pyramid legs per basket
+input double   InpPyramidTargetBoost   = 1.0;    // Raise the basket's profit target by this much ($) per pyramid leg added
+
 input group "=== DCA Filters (volatility-spike \"news proxy\" + trend) ==="
 input bool             InpUseAtrSpikeFilter = true;      // Skip DCA adds during a volatility spike (news proxy)
 input int              InpAtrPeriod         = 14;        // ATR period (M1)
@@ -115,7 +128,8 @@ CTrade trade;
 
 struct SBasket
   {
-   int      legCount;
+   int      legCount;        // all legs: bootstrap + DCA + pyramid
+   int      pyramidLegCount; // subset of legCount added while riding a winning trend
    double   totalLots;
    double   floatingPL;      // sum of POSITION_PROFIT + POSITION_SWAP across the basket's legs
    double   weightedAvgEntry;
@@ -280,6 +294,7 @@ void OnTick()
 void ResetBasket(SBasket &b)
   {
    b.legCount         = 0;
+   b.pyramidLegCount  = 0;
    b.totalLots        = 0;
    b.floatingPL       = 0;
    b.weightedAvgEntry = 0;
@@ -309,15 +324,18 @@ void ScanBasket(ENUM_BASKET_SIDE side, SBasket &b)
       if(PositionGetInteger(POSITION_TYPE) != wantType)
          continue;
 
-      double   lots   = PositionGetDouble(POSITION_VOLUME);
-      double   entry  = PositionGetDouble(POSITION_PRICE_OPEN);
-      double   profit = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
-      datetime t      = (datetime)PositionGetInteger(POSITION_TIME);
+      double   lots    = PositionGetDouble(POSITION_VOLUME);
+      double   entry   = PositionGetDouble(POSITION_PRICE_OPEN);
+      double   profit  = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
+      datetime t       = (datetime)PositionGetInteger(POSITION_TIME);
+      string   comment = PositionGetString(POSITION_COMMENT);
 
       b.legCount++;
       b.totalLots  += lots;
       b.floatingPL += profit;
       sumPriceLots += entry * lots;
+      if(StringFind(comment, "-pyr") >= 0)
+         b.pyramidLegCount++;
 
       if(t >= b.lastLegTime)
         {
@@ -352,9 +370,11 @@ void ManageBasketExits(ENUM_BASKET_SIDE side)
    if(b.legCount == 0)
       return;
 
-   if(b.floatingPL >= g_tunedProfitTarget)
+   double effectiveTarget = g_tunedProfitTarget + b.pyramidLegCount * InpPyramidTargetBoost;
+   if(b.floatingPL >= effectiveTarget)
      {
-      CloseBasket(side, StringFormat("BASKET TARGET HIT (floatingPL=%.2f >= target=%.2f)", b.floatingPL, g_tunedProfitTarget));
+      CloseBasket(side, StringFormat("BASKET TARGET HIT (floatingPL=%.2f >= target=%.2f, %d pyramid leg(s))",
+                                      b.floatingPL, effectiveTarget, b.pyramidLegCount));
       return;
      }
 
@@ -419,32 +439,54 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
       // started each of those baskets was not.
       if(InpUseTrendFilter && IsAgainstTrend(side))
          return;
-      OpenLeg(side, 0, 0);
+      OpenLeg(side, 0, 0, false);
       return;
      }
-
-   if(b.legCount >= InpMaxLegsPerBasket)
-      return;
 
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
 
-   bool adverse;
+   bool adverse, favorable;
    if(side == SIDE_BUY)
-      adverse = (bid <= b.lastLegEntry - g_tunedDcaDistance);
+     {
+      adverse   = (bid <= b.lastLegEntry - g_tunedDcaDistance);
+      favorable = (ask >= b.lastLegEntry + InpPyramidDistancePrice);
+     }
    else
-      adverse = (ask >= b.lastLegEntry + g_tunedDcaDistance);
+     {
+      adverse   = (ask >= b.lastLegEntry + g_tunedDcaDistance);
+      favorable = (bid <= b.lastLegEntry - InpPyramidDistancePrice);
+     }
 
-   if(!adverse)
+   // Pyramid legs don't count against the DCA cap - they're a separate risk
+   // decision (adding to a winner) with their own InpMaxPyramidLegs cap.
+   int dcaLegCount = b.legCount - b.pyramidLegCount;
+
+   if(adverse && dcaLegCount < InpMaxLegsPerBasket)
+     {
+      if(InpUseAtrSpikeFilter && IsAtrSpiking())
+         return; // "news proxy" - don't average into a volatility spike
+      if(InpUseTrendFilter && IsAgainstTrend(side))
+         return; // don't keep averaging into a strong opposing higher-timeframe trend
+
+      OpenLeg(side, dcaLegCount, b.lastLegLots, false);
       return;
+     }
 
-   if(InpUseAtrSpikeFilter && IsAtrSpiking())
-      return; // "news proxy" - don't average into a volatility spike
+   if(InpUsePyramid && favorable && b.pyramidLegCount < InpMaxPyramidLegs)
+     {
+      // Require the trend to actively confirm this basket's own direction -
+      // not just "not against", but a real, ATR-scaled confirmed move in
+      // the basket's favor. Without a trend filter configured at all, don't
+      // pyramid blind (favorable price alone isn't a strong enough signal).
+      bool trendConfirms = InpUseTrendFilter &&
+                            ((side == SIDE_BUY && GetTrend() == 1) || (side == SIDE_SELL && GetTrend() == -1));
+      if(!trendConfirms)
+         return;
 
-   if(InpUseTrendFilter && IsAgainstTrend(side))
-      return; // don't keep averaging into a strong opposing higher-timeframe trend
-
-   OpenLeg(side, b.legCount, b.lastLegLots);
+      OpenLeg(side, b.pyramidLegCount, b.lastLegLots, true);
+      return;
+     }
   }
 
 double NextLotSize(int legCount, double previousLegLots)
@@ -465,9 +507,9 @@ double NextLotSize(int legCount, double previousLegLots)
    return NormalizeDouble(lots, 2);
   }
 
-void OpenLeg(ENUM_BASKET_SIDE side, int legIndexForSizing, double previousLegLots)
+void OpenLeg(ENUM_BASKET_SIDE side, int legIndexForSizing, double previousLegLots, bool isPyramid)
   {
-   double lots = NextLotSize(legIndexForSizing, previousLegLots);
+   double lots = isPyramid ? InpPyramidLot : NextLotSize(legIndexForSizing, previousLegLots);
    if(lots <= 0)
       return;
 
@@ -478,7 +520,8 @@ void OpenLeg(ENUM_BASKET_SIDE side, int legIndexForSizing, double previousLegLot
 
    double price, sl;
    bool ok;
-   string comment = StringFormat("GDSE-%s-leg%d", (side == SIDE_BUY ? "buy" : "sell"), legIndexForSizing + 1);
+   string comment = StringFormat("GDSE-%s-%s%d", (side == SIDE_BUY ? "buy" : "sell"),
+                                  (isPyramid ? "pyr" : "leg"), legIndexForSizing + 1);
 
    if(side == SIDE_BUY)
      {
@@ -494,8 +537,9 @@ void OpenLeg(ENUM_BASKET_SIDE side, int legIndexForSizing, double previousLegLot
      }
 
    if(!ok)
-      PrintFormat("GoldDualBasketDCA: %s leg open failed (lot=%.2f): retcode=%d %s",
-                  (side == SIDE_BUY ? "BUY" : "SELL"), lots, trade.ResultRetcode(), trade.ResultRetcodeDescription());
+      PrintFormat("GoldDualBasketDCA: %s %s leg open failed (lot=%.2f): retcode=%d %s",
+                  (side == SIDE_BUY ? "BUY" : "SELL"), (isPyramid ? "pyramid" : "DCA/bootstrap"),
+                  lots, trade.ResultRetcode(), trade.ResultRetcodeDescription());
   }
 
 //+------------------------------------------------------------------+
@@ -897,17 +941,21 @@ void UpdateDashboard()
    DbDivider("Div1", x, y, 260, C'55,55,65');
    y += 9;
 
-   DbLabel("BuyHdr", lx, y, StringFormat("BUY BASKET  (%d/%d legs)", g_buyBasket.legCount, InpMaxLegsPerBasket), C'0,170,220', 8);
+   int    buyDcaLegs  = g_buyBasket.legCount - g_buyBasket.pyramidLegCount;
+   double buyTarget   = g_tunedProfitTarget + g_buyBasket.pyramidLegCount * InpPyramidTargetBoost;
+   DbLabel("BuyHdr", lx, y, StringFormat("BUY BASKET  (%d/%d dca, %d/%d pyr)",
+           buyDcaLegs, InpMaxLegsPerBasket, g_buyBasket.pyramidLegCount, InpMaxPyramidLegs), C'0,170,220', 8);
    y += lh;
    DbLabel("BuyAvg", lx, y, PadRight("Avg Entry", lblW) + DoubleToString(g_buyBasket.weightedAvgEntry, 2), clrWhite, 8);
    y += lh;
    DbLabel("BuyPL", lx, y, PadRight("Floating", lblW) + "$" + DoubleToString(g_buyBasket.floatingPL, 2),
            (g_buyBasket.floatingPL >= 0 ? clrLime : clrRed), 8);
    y += lh;
-   double buyToTarget = g_tunedProfitTarget - g_buyBasket.floatingPL;
+   double buyToTarget = buyTarget - g_buyBasket.floatingPL;
    double buyToDca = (g_buyBasket.legCount > 0)
                       ? (SymbolInfoDouble(_Symbol, SYMBOL_BID) - (g_buyBasket.lastLegEntry - g_tunedDcaDistance)) : 0;
-   DbLabel("BuyToTarget", lx, y, PadRight("To Target", lblW) + "$" + DoubleToString(buyToTarget, 2), clrSilver, 8);
+   DbLabel("BuyToTarget", lx, y, PadRight("To Target", lblW) + "$" + DoubleToString(buyToTarget, 2) +
+           " (tgt $" + DoubleToString(buyTarget, 2) + ")", clrSilver, 8);
    y += lh;
    DbLabel("BuyToDca", lx, y, PadRight("To DCA", lblW) + "$" + DoubleToString(buyToDca, 2), clrSilver, 8);
    y += lh + 6;
@@ -915,17 +963,21 @@ void UpdateDashboard()
    DbDivider("Div2", x, y, 260, C'55,55,65');
    y += 9;
 
-   DbLabel("SellHdr", lx, y, StringFormat("SELL BASKET (%d/%d legs)", g_sellBasket.legCount, InpMaxLegsPerBasket), C'0,170,220', 8);
+   int    sellDcaLegs = g_sellBasket.legCount - g_sellBasket.pyramidLegCount;
+   double sellTarget   = g_tunedProfitTarget + g_sellBasket.pyramidLegCount * InpPyramidTargetBoost;
+   DbLabel("SellHdr", lx, y, StringFormat("SELL BASKET (%d/%d dca, %d/%d pyr)",
+           sellDcaLegs, InpMaxLegsPerBasket, g_sellBasket.pyramidLegCount, InpMaxPyramidLegs), C'0,170,220', 8);
    y += lh;
    DbLabel("SellAvg", lx, y, PadRight("Avg Entry", lblW) + DoubleToString(g_sellBasket.weightedAvgEntry, 2), clrWhite, 8);
    y += lh;
    DbLabel("SellPL", lx, y, PadRight("Floating", lblW) + "$" + DoubleToString(g_sellBasket.floatingPL, 2),
            (g_sellBasket.floatingPL >= 0 ? clrLime : clrRed), 8);
    y += lh;
-   double sellToTarget = g_tunedProfitTarget - g_sellBasket.floatingPL;
+   double sellToTarget = sellTarget - g_sellBasket.floatingPL;
    double sellToDca = (g_sellBasket.legCount > 0)
                        ? ((g_sellBasket.lastLegEntry + g_tunedDcaDistance) - SymbolInfoDouble(_Symbol, SYMBOL_ASK)) : 0;
-   DbLabel("SellToTarget", lx, y, PadRight("To Target", lblW) + "$" + DoubleToString(sellToTarget, 2), clrSilver, 8);
+   DbLabel("SellToTarget", lx, y, PadRight("To Target", lblW) + "$" + DoubleToString(sellToTarget, 2) +
+           " (tgt $" + DoubleToString(sellTarget, 2) + ")", clrSilver, 8);
    y += lh;
    DbLabel("SellToDca", lx, y, PadRight("To DCA", lblW) + "$" + DoubleToString(sellToDca, 2), clrSilver, 8);
    y += lh + 6;

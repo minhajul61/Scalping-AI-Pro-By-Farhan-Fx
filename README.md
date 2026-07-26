@@ -1,11 +1,18 @@
 # XAUUSD Dual Basket DCA EA
 
-File: `XAUUSD Dual Basket DCA EA.mq5` / `.ex5`. Every position this EA opens
-is tagged with magic number `InpMagicNumber` (default `20270115`) and a
-trade comment like `GDSE-buy-leg1` / `GDSE-sell-leg3` (visible in MT5's
-Trade/History "Comment" column) — `GDSE` is just the internal short prefix,
-distinct per leg number and direction so it's easy to tell legs apart at a
-glance.
+File (final, permanent name per explicit request): **`Scalping Ai Pro By
+Farhan FX.mq5`** / `.ex5`. Note this is the same name as the separate,
+unrelated Python ML project at `E:\Scalping AI Pro By Farhan Fx` — the user
+was told this explicitly and confirmed the name anyway, so it's
+intentional, not a mix-up. This repo/folder (`XAUUSD Dual Basket DCA EA`)
+and everything in it is the native MQL5 grid/DCA EA documented below; it
+has no code relationship to that other project.
+
+Every position this EA opens is tagged with magic number `InpMagicNumber`
+(default `20270115`) and a trade comment like `GDSE-buy-leg1` /
+`GDSE-sell-leg3` (visible in MT5's Trade/History "Comment" column) —
+`GDSE` is just the internal short prefix, distinct per leg number and
+direction so it's easy to tell legs apart at a glance.
 
 Native MQL5 Expert Advisor for XAUUSD (M1). Runs a BUY basket and a SELL
 basket simultaneously (requires a **hedging-mode** MT5 account). Each basket
@@ -154,7 +161,7 @@ new compiled defaults on the next run unless explicitly passed via a
 
 ## Setup
 
-1. Open `XAUUSD Dual Basket DCA EA.mq5` in MetaEditor, compile (0 errors/
+1. Open `Scalping Ai Pro By Farhan FX.mq5` in MetaEditor, compile (0 errors/
    warnings as of the last build).
 2. Attach to an XAUUSD M1 chart on a **hedging-mode** account. Confirm
    `InpExpectedLogin` matches the account you intend to run on (or set to 0

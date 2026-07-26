@@ -67,12 +67,14 @@ input double   InpLotMultiplier     = 1.3;        // Martingale multiplier per D
 input group "=== Pyramiding (add to winners on a confirmed trend) ==="
 // DCA can bound losses but can never guarantee zero of them - no finite-
 // capital scheme can, if price never bounces. This is the other side of
-// the risk:reward fix: when a basket is moving favorably AND the
-// higher-timeframe trend strongly confirms that direction, add a flat-size
-// leg and raise the basket's own profit target, so winning baskets can
-// capture more than the base $ target instead of always closing small.
-input bool     InpUsePyramid           = true;   // Add to winners on a strong confirmed trend
-input double   InpPyramidDistancePrice = 3.0;    // Favorable move ($ price) past last leg before adding a pyramid leg
+// the risk:reward fix: at the moment a basket HITS its profit target, if
+// the higher-timeframe trend still strongly confirms that direction, add a
+// flat-size leg and raise the target instead of closing small - decided in
+// ManageBasketExits, not on a separate favorable-distance trigger (an
+// earlier version used its own $ distance here, but the base target is hit
+// at such a small price move - ~$0.20 at 0.05 lots - that a wider distance
+// trigger never got a chance to fire before the basket already closed).
+input bool     InpUsePyramid           = true;   // Add to winners (at target, trend-confirmed) instead of closing
 input double   InpPyramidLot           = 0.05;   // Flat lot size per pyramid leg (not martingale - this is profit-taking, not recovery)
 input int      InpMaxPyramidLegs       = 2;      // Hard cap on pyramid legs per basket
 input double   InpPyramidTargetBoost   = 1.0;    // Raise the basket's profit target by this much ($) per pyramid leg added
@@ -373,6 +375,24 @@ void ManageBasketExits(ENUM_BASKET_SIDE side)
    double effectiveTarget = g_tunedProfitTarget + b.pyramidLegCount * InpPyramidTargetBoost;
    if(b.floatingPL >= effectiveTarget)
      {
+      // At target: a separate favorable-distance trigger for pyramiding
+      // never fired here in practice, because the base $1 target is hit at
+      // a far smaller price move than any reasonable pyramid distance (e.g.
+      // ~$0.20 at 0.05 lots) - the basket always closed and reopened long
+      // before a wider threshold could ever be reached. So the pyramid
+      // decision is made right here, at the moment target is hit: if the
+      // trend still strongly confirms this basket's own direction and
+      // there's pyramid room left, ride it further (add a leg, raise the
+      // target) instead of closing small.
+      bool trendConfirms = InpUseTrendFilter &&
+                            ((side == SIDE_BUY && GetTrend() == 1) || (side == SIDE_SELL && GetTrend() == -1));
+
+      if(InpUsePyramid && trendConfirms && b.pyramidLegCount < InpMaxPyramidLegs)
+        {
+         OpenLeg(side, b.pyramidLegCount, b.lastLegLots, true);
+         return;
+        }
+
       CloseBasket(side, StringFormat("BASKET TARGET HIT (floatingPL=%.2f >= target=%.2f, %d pyramid leg(s))",
                                       b.floatingPL, effectiveTarget, b.pyramidLegCount));
       return;
@@ -446,20 +466,15 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
 
-   bool adverse, favorable;
+   bool adverse;
    if(side == SIDE_BUY)
-     {
-      adverse   = (bid <= b.lastLegEntry - g_tunedDcaDistance);
-      favorable = (ask >= b.lastLegEntry + InpPyramidDistancePrice);
-     }
+      adverse = (bid <= b.lastLegEntry - g_tunedDcaDistance);
    else
-     {
-      adverse   = (ask >= b.lastLegEntry + g_tunedDcaDistance);
-      favorable = (bid <= b.lastLegEntry - InpPyramidDistancePrice);
-     }
+      adverse = (ask >= b.lastLegEntry + g_tunedDcaDistance);
 
    // Pyramid legs don't count against the DCA cap - they're a separate risk
-   // decision (adding to a winner) with their own InpMaxPyramidLegs cap.
+   // decision (adding to a winner, handled in ManageBasketExits at the
+   // moment target is hit) with their own InpMaxPyramidLegs cap.
    int dcaLegCount = b.legCount - b.pyramidLegCount;
 
    if(adverse && dcaLegCount < InpMaxLegsPerBasket)
@@ -470,21 +485,6 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
          return; // don't keep averaging into a strong opposing higher-timeframe trend
 
       OpenLeg(side, dcaLegCount, b.lastLegLots, false);
-      return;
-     }
-
-   if(InpUsePyramid && favorable && b.pyramidLegCount < InpMaxPyramidLegs)
-     {
-      // Require the trend to actively confirm this basket's own direction -
-      // not just "not against", but a real, ATR-scaled confirmed move in
-      // the basket's favor. Without a trend filter configured at all, don't
-      // pyramid blind (favorable price alone isn't a strong enough signal).
-      bool trendConfirms = InpUseTrendFilter &&
-                            ((side == SIDE_BUY && GetTrend() == 1) || (side == SIDE_SELL && GetTrend() == -1));
-      if(!trendConfirms)
-         return;
-
-      OpenLeg(side, b.pyramidLegCount, b.lastLegLots, true);
       return;
      }
   }

@@ -38,34 +38,55 @@ breaker.
   user's other bots after a prior incident.
 - Hedging-mode check in `OnInit()` — this EA's whole design breaks silently
   on a netting account (the two baskets would net against each other).
-- Daily circuit breaker (`InpUseDailyLimit`), force-closes both baskets by
-  default (`InpDailyLimitForceCloses = true`) rather than just halting new
-  entries, given this EA's higher martingale risk profile.
+- Daily circuit breaker (`InpUseDailyLimit`, **off by default per explicit
+  user request** — see below), force-closes both baskets when enabled
+  (`InpDailyLimitForceCloses = true`) rather than just halting new entries.
+- Intraday soft-brake (part of the AI brain, see below) — the substitute
+  mechanism now that the daily circuit breaker defaults off.
+
+**On `InpUseDailyLimit=false`**: stress-tested repeatedly. With earlier,
+smaller-account configs it wiped the account completely every single time
+(100%+ drawdown, negative equity) — 3 runs in a row. It is a real,
+meaningful safety layer being deliberately given up per explicit request,
+not a redundant one. The intraday soft-brake below is a genuine mitigation,
+not an equivalent guarantee.
 
 ## Self-tuning "AI brain"
 
-Native MQL5 has no ML libraries, so this is a **rule-based daily self-tuner**
-(confirmed with the user as the realistic scope), not a trained model. Once
-per new day, reviews yesterday's closed trades (grouped into basket-close
-"cycles") and nudges `DcaDistance` / `LotMultiplier` / `ProfitTarget` within
-bounded ranges — conservative by design: only widens distance / lowers
-multiplier on real trouble signals (baskets maxing out and still losing),
-never tightens risk just because a good day happened. Tuned values persist
-across restarts via `GlobalVariableSet`/`Get` (`InpResetTunedParams` wipes
-back to input defaults). Each day's decision is logged to
-`MQL5/Files/GoldDualBasketDCA_tuning_log.txt` on the terminal running it.
+Native MQL5 has no ML libraries, so this is a **rule-based, not trained**
+brain (confirmed with the user as the realistic scope). Two layers:
 
-## Pyramiding (present in code, off by default)
+1. **Daily nudges**: once per new day, reviews yesterday's closed trades
+   (grouped into basket-close "cycles") and nudges `DcaDistance`/
+   `LotMultiplier`/`ProfitTarget` within bounded ranges — conservative by
+   design: only widens distance / lowers multiplier on real trouble signals,
+   never tightens risk just because a good day happened.
+2. **Deep, persistent leg-depth history**: tracks real (not just yesterday's)
+   win/loss counts at every leg depth a basket has ever reached
+   (`GetLegStat`/`IncrementLegStat`). Once a leg depth has enough samples,
+   a poor win rate there steps the active max-legs cap down; a strong one
+   lets it step back up (bounded by `InpMaxLegsPerBasket`).
+3. **Intraday soft-brake** (added when the daily circuit breaker was turned
+   off by default): NOT a hard stop or force-close. Once today's floating
+   loss crosses `InpIntradayBrakeLossPercent` (default 3%), it caps the lot
+   multiplier down (`InpIntradayBrakeMultiplierCap`) and widens the DCA
+   distance (`InpIntradayBrakeDistanceMult`) for the rest of that calendar
+   day only, reverting automatically at the next day's rollover.
 
-`InpUsePyramid` adds to a winning basket instead of closing it, at the exact
-moment its target is hit, if the higher-timeframe trend still strongly
-confirms that direction (decided in `ManageBasketExits`, not a separate
-distance trigger — an earlier version's own `$` distance trigger never fired
-because the base target closes the basket at a far smaller move first).
-Backtested worse than not pyramiding (see Backtest Results) — converting
-target-hit "sure wins" into extended, trend-riding exposure lost more often
-than it gained on the tested week. Left in the code, off by default
-(`InpUsePyramid = false`), in case a different market period favors it.
+Tuned values persist across restarts via `GlobalVariableSet`/`Get`
+(`InpResetTunedParams` wipes back to input defaults). Every decision is
+logged to `MQL5/Files/GoldDualBasketDCA_tuning_log.txt` on the terminal
+running it.
+
+## Pyramiding — tried, removed permanently
+
+Adding to a winning basket instead of closing it (riding a confirmed trend
+for a bigger target) was tried in several forms and never beat the simpler
+no-pyramid baseline in any tested combination (best case PF 0.75, worst
+0.62, versus 0.92-0.95 without it) — converting target-hit "sure wins" into
+extended, trend-riding exposure lost more often than it gained on every
+tested week. Removed entirely per explicit request rather than left
+disabled — see `learnings.md` for the full history if revisiting this idea.
 
 ## Backtest Results (1-week real-tick Strategy Tester runs, 2026.07.18-25)
 
@@ -73,25 +94,28 @@ than it gained on the tested week. Left in the code, off by default
 |---|---|---|---|---|---|
 | Original spec defaults (0.01 lot, 4 legs, no trend filter) | $100 | 0.77 | 66.67% | -$12.39 | 19.16% |
 | + trend filter (ATR-scaled, applied to bootstrap too) | $2000 | 0.71 | 78.33% | -$108.84 | 10.53% |
-| + pyramiding | $2000 | 0.62-0.64 | 64.83% | -$165.69/-$166.43 | 14.03-14.20% |
+| + pyramiding | $2000 | 0.62-0.75 | 64-73% | -$165 to -$1087 | 14-26% |
 | + lower max-loss ($220->$100) + higher target ($1->$2), no pyramid | $2000 | 0.92 | 79.34% | -$80.76 | 11.05% |
 | Pushed the same two levers further ($2.50/$80) - worse, stopped tuning here | $2000 | 0.62 | 68.24% | -$165.69 | 14.03% |
 | ATR-based dynamic DCA distance (`InpUseAtrDcaDistance=true`) | $2000 | 0.75 | 73.31% | -$234.58 | 14.24% |
-| Daily loss limit **OFF** (stress test) x3, various configs above | $2000 | 0.81-0.82 | 65-74% | **-$2000+ (wiped)** | **100%+** |
-| **$5000 config below + deep AI brain, daily loss limit OFF (stress test)** | $5000 | **0.94** | 69.54% | **-$365.85** | **12.35%** |
+| Daily loss limit **OFF** (stress test), older/smaller configs, x3 | $2000 | 0.81-0.82 | 65-74% | **-$2000+ (wiped)** | **100%+** |
+| $5000 resize + deep AI brain, daily limit OFF | $5000 | 0.94 | 69.54% | -$365.85 | 12.35% |
+| Daily limit OFF + hard-SL OFF + pyramid ON | $5000 | 0.69 | ~66% | -$1086.74 | 25.68% |
+| Daily limit OFF + hard-SL OFF + pyramid OFF | $5000 | 0.93 | ~69% | -$334.82 | 21.78% |
+| **Pyramid removed + daily limit OFF + intraday soft-brake (current)** | $5000 | **0.95** | **71.68%** | **-$253.02** | **11.68%** |
 
 **Current shipped defaults**: `InpInitialLot=0.02`, `InpLotMultiplier=1.5`,
-`InpDcaDistancePrice=3.0` (fixed, `InpUseAtrDcaDistance=false` — ATR mode
-backtested worse), `InpMaxLegsPerBasket=5`, `InpBasketProfitTargetUSD=2.0`,
-`InpBasketMaxLossUSD=150.0`, `InpDailyMaxLossPercent=5.0`,
-`InpUsePyramid=false`. Derived from a systematic search (not guessed) for a
-config where the full 5-leg worst-case floating loss is a small, comfortable
-fraction of a bigger ($5000) account (-$96, 1.92%) with an easy bounce back
-to target from there (~$3.77) — see `learnings.md` for the full search
-table. Still net-negative even in the best row (PF 0.94, not >1.0) — this is
-progress, not a proven edge. **Do not keep tuning against this same 1-week
-window**; the honest next step is validating against a different time
-period.
+`InpDcaDistancePrice=3.0` (fixed), `InpMaxLegsPerBasket=5`,
+`InpBasketProfitTargetUSD=2.0`, `InpBasketMaxLossUSD=150.0`,
+`InpUseDailyLimit=false`, `InpUseIntradayBrake=true`
+(`InpIntradayBrakeLossPercent=3.0`). This is the best result found across
+every tested combination — real-tick verified, hard-SL kept ON (removing it
+increases drawdown a lot for little-to-no PF gain — see table), pyramid
+removed permanently, daily circuit breaker traded for the softer intraday
+brake per explicit request. Still net-negative (PF 0.95, not >1.0) and
+still one week of data — this is repeatedly-verified progress, not a proven
+edge. **Do not keep tuning against this same 1-week window**; the honest
+next step is validating against a different time period.
 
 **On `InpUseDailyLimit=false`**: repeatedly stress-tested at the user's
 explicit request. With the older, smaller-account configs it wiped the

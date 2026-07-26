@@ -57,7 +57,7 @@ input group "=== Basket Core ==="
 // multi-thousand-dollar account to represent a sane risk fraction, not the
 // $100 demo this was first tested on.
 input double   InpInitialLot            = 0.05;   // Starting lot size per basket
-input double   InpBasketProfitTargetUSD = 1.0;    // Close whole basket once floating profit reaches this ($)
+input double   InpBasketProfitTargetUSD = 2.0;    // Close whole basket once floating profit reaches this ($)
 input int      InpMaxLegsPerBasket      = 5;      // Hard cap on DCA legs per basket
 
 input group "=== DCA / Martingale ==="
@@ -74,7 +74,11 @@ input group "=== Pyramiding (add to winners on a confirmed trend) ==="
 // earlier version used its own $ distance here, but the base target is hit
 // at such a small price move - ~$0.20 at 0.05 lots - that a wider distance
 // trigger never got a chance to fire before the basket already closed).
-input bool     InpUsePyramid           = true;   // Add to winners (at target, trend-confirmed) instead of closing
+// Disabled: backtested worse (PF 0.71->0.64, win rate 78.33%->64.83%, net
+// -$108.84->-$166.43) - converting target-hit "sure wins" into extended,
+// trend-riding exposure lost more often than it gained here. Kept in code
+// (not deleted) in case a future test period favors it, but off by default.
+input bool     InpUsePyramid           = false;  // Add to winners (at target, trend-confirmed) instead of closing
 input double   InpPyramidLot           = 0.05;   // Flat lot size per pyramid leg (not martingale - this is profit-taking, not recovery)
 input int      InpMaxPyramidLegs       = 2;      // Hard cap on pyramid legs per basket
 input double   InpPyramidTargetBoost   = 1.0;    // Raise the basket's profit target by this much ($) per pyramid leg added
@@ -96,12 +100,14 @@ input int              InpTrendAtrPeriod    = 14;         // ATR period (on InpT
 input double           InpTrendStrengthATRMult = 0.5;     // Close must be this many ATRs past the MA to count as trending
 
 input group "=== Basket Safety ==="
-// Sized to comfortably exceed the leg-5 worst-case (straight-line adverse,
-// no bounce) floating loss of about -$195 at InpInitialLot=0.05/1.3x/5legs/
-// $3 distance - see InpInitialLot comment above. Without this margin, the
-// hard stop would fire before the last leg(s) ever got real room to work,
-// same problem the original $15 default had at the smaller lot scale.
-input double   InpBasketMaxLossUSD        = 220.0; // Force-close a basket if its floating loss reaches this ($)
+// Lowered from 220 (which comfortably covered the leg-5 worst-case of about
+// -$195) down to 100, deliberately trading DCA "room to work" for smaller
+// realized losses when it doesn't - the same trade-off as before, just
+// leaning the other way this time: baskets will now often hard-stop around
+// leg 3-4 rather than reaching leg 5, same structural effect the original
+// $15/0.01-lot default had (see leg-by-leg math in git history) - but at
+// least this time it's a deliberate choice being tested, not an oversight.
+input double   InpBasketMaxLossUSD        = 100.0; // Force-close a basket if its floating loss reaches this ($)
 input int      InpBasketSLCooldownMinutes = 30;    // Minutes to wait before reopening a basket after a hard-SL close
 input bool     InpUseCatastrophicSL       = true;  // Attach a wide backstop SL to every leg (dead-man's switch)
 input double   InpCatastrophicSLMultiple  = 2.0;   // Backstop SL = DcaDistance * (MaxLegs + this), beyond entry

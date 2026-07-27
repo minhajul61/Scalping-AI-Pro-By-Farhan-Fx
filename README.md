@@ -39,14 +39,17 @@ breaker.
 
 ## Safety (beyond the original spec — added deliberately)
 
-- `InpBasketMaxLossUSD`: hard stop-loss per basket, independent of the leg
-  cap — a maxed-out basket that keeps losing otherwise has no exit.
-- `InpBasketSLCooldownMinutes`: after a hard-SL close (not a profit-target
-  close), the basket waits before reopening rather than instantly re-entering
-  into the move that just stopped it out.
-- `InpUseCatastrophicSL`: a wide backstop SL attached to every leg at order
-  time — invisible in normal operation, only matters if the EA/VPS stops
-  running and nothing is left enforcing the basket-level stop.
+- `InpBasketMaxLossUSD` (default `0.0`, **OFF per explicit request**): hard
+  stop-loss per basket, independent of the leg cap — a maxed-out basket that
+  keeps losing otherwise has no exit. Currently disabled.
+- `InpBasketSLCooldownMinutes` (default `0`, off): after a hard-SL close
+  (not a profit-target close), the basket would wait before reopening
+  rather than instantly re-entering into the move that just stopped it out
+  — moot while the hard-SL above is off.
+- `InpUseCatastrophicSL` (default `false`, **OFF per explicit request**): a
+  wide backstop SL attached to every leg at order time — the very last
+  layer of protection, only mattering if the EA/VPS stops running and
+  nothing else is left enforcing anything. Currently disabled.
 - `InpExpectedLogin` (default `416045126`): refuses to run (`INIT_FAILED`) if
   the connected account doesn't match — same wrong-account guard used in this
   user's other bots after a prior incident.
@@ -57,6 +60,21 @@ breaker.
   (`InpDailyLimitForceCloses = true`) rather than just halting new entries.
 - Intraday soft-brake (part of the AI brain, see below) — the substitute
   mechanism now that the daily circuit breaker defaults off.
+
+**⚠️ Current state (2026-07-27, per explicit request): every stop-loss in
+this EA is off** — basket hard-SL (`InpBasketMaxLossUSD=0`), the
+catastrophic per-leg backstop SL (`InpUseCatastrophicSL=false`), and the
+daily circuit breaker (`InpUseDailyLimit=false`) are all disabled at once.
+No open position anywhere in this EA has any server-side stop attached.
+The intraday soft-brake is the only remaining risk control, and it is
+soft by design (slows DCA growth, does not close anything). Concretely:
+if the EA, terminal, or VPS goes offline while a basket is deep in DCA
+legs and losing, there is nothing left to close it — it will sit open,
+uncapped, until something (EA restart, manual close, or the broker's own
+stop-out level) intervenes. This was stress-tested with just the daily
+limit off (see below) and wiped the account outright multiple times
+before other safeguards existed; with every stop-loss now off
+simultaneously, that risk is larger, not smaller.
 
 **On `InpUseDailyLimit=false`**: stress-tested repeatedly. With earlier,
 smaller-account configs it wiped the account completely every single time

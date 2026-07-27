@@ -65,13 +65,13 @@ input double           InpTrendStrengthATRMult = 0.5;     // How strong the tren
 
 input group "=== Basket Safety ==="
 input double   InpBasketMaxLossUSD        = 0.0;   // Force-close a basket at this loss ($) - 0 = OFF (turned off per request)
-input int      InpBasketSLCooldownMinutes = 30;    // Wait this many minutes before reopening after a stop-loss
-input bool     InpUseCatastrophicSL       = true;  // Emergency backup stop-loss on every trade (safety net if EA/VPS goes offline)
-input double   InpCatastrophicSLMultiple  = 2.0;   // How far away the emergency stop-loss sits
+input int      InpBasketSLCooldownMinutes = 0;     // Wait this many minutes before reopening after a stop-loss - 0 = OFF (turned off per request)
+input bool     InpUseCatastrophicSL       = false; // Emergency backup stop-loss on every trade - OFF (turned off per request, see warning below)
+input double   InpCatastrophicSLMultiple  = 0.0;   // How far away the emergency stop-loss sits - unused while the line above is OFF
 
 input group "=== Daily Stop (currently OFF per request) ==="
 input bool     InpUseDailyLimit         = false;  // Stop trading for the day after a big loss - OFF (turned off per request)
-input double   InpDailyMaxLossPercent   = 5.0;    // Daily loss limit (% of balance) - only matters if the line above is ON
+input double   InpDailyMaxLossPercent   = 0.0;    // Daily loss limit (% of balance) - 0 = OFF (turned off per request, unused while the line above is OFF anyway)
 input bool     InpDailyLimitForceCloses = true;   // Also close open trades when the daily limit hits (if ON above)
 
 input group "=== Auto-Adjust Settings (AI Brain) ==="

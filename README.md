@@ -104,6 +104,20 @@ brain (confirmed with the user as the realistic scope). Two layers:
    multiplier down (`InpIntradayBrakeMultiplierCap`) and widens the DCA
    distance (`InpIntradayBrakeDistanceMult`) for the rest of that calendar
    day only, reverting automatically at the next day's rollover.
+4. **Stuck-basket relief** (`InpUseStuckBasketRelief`, added 2026-07-27 after
+   a real-tick backtest showed exactly this failure mode — see
+   learnings.md): a basket that reaches max DCA legs has nowhere left to
+   add, and with every stop-loss now off (see above), it would otherwise
+   just sit open indefinitely waiting for the full `ProfitTarget` no matter
+   how long that takes. Once a basket has been maxed out and stuck for
+   `InpStuckBasketHours` (default 4h) with no target hit, its required
+   profit linearly shrinks over the next `InpStuckBasketDecayHours`
+   (default 8h) down toward `InpStuckBasketTargetFloor` (default `$0`,
+   i.e. breakeven) — so it takes the first real exit chance instead of
+   holding out for the original target. **This is not a guaranteed exit**:
+   price still has to come back up to at least the floor for it to fire at
+   all. It only shrinks *how much* bounce is required, not the chance that
+   a bounce happens.
 
 Tuned values persist across restarts via `GlobalVariableSet`/`Get`
 (`InpResetTunedParams` wipes back to input defaults). Every decision is

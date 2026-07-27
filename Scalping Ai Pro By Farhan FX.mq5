@@ -80,6 +80,11 @@ input double   InpIntradayBrakeLossPercent    = 3.0;    // Today's loss (%) that
 input double   InpIntradayBrakeMultiplierCap  = 1.15;   // Smaller DCA growth allowed once slowed down
 input double   InpIntradayBrakeDistanceMult   = 1.5;    // DCA gap gets this much wider once slowed down
 
+input bool     InpUseStuckBasketRelief   = true;  // Let a maxed-out basket accept a smaller profit to get out (instead of waiting forever)
+input double   InpStuckBasketHours       = 4.0;   // Hours stuck at max DCA trades before the target starts shrinking
+input double   InpStuckBasketDecayHours  = 8.0;   // Hours over which the target shrinks from full down to the floor below
+input double   InpStuckBasketTargetFloor = 0.0;   // Smallest target ($) it will shrink to - 0 = will accept breakeven
+
 input bool     InpEnableSelfTuning = true;   // Let the EA auto-adjust its own settings daily from results
 input double   InpDcaDistanceMin   = 2.0;   // Auto-tuning: smallest DCA gap ($) it may use
 input double   InpDcaDistanceMax   = 6.0;   // Auto-tuning: largest DCA gap ($) it may use
@@ -334,6 +339,36 @@ void RefreshBaskets()
 //+------------------------------------------------------------------+
 //| Exits: profit target and basket-level hard stop-loss              |
 //+------------------------------------------------------------------+
+//+------------------------------------------------------------------+
+//| Stuck-basket relief: a basket at max DCA legs with nowhere left   |
+//| to add and no bounce in sight would otherwise just sit open        |
+//| indefinitely waiting for the full target. Once it's been maxed     |
+//| out and stuck for InpStuckBasketHours, linearly shrink the         |
+//| required profit down toward InpStuckBasketTargetFloor over the     |
+//| next InpStuckBasketDecayHours - so it takes the first real exit    |
+//| opportunity instead of holding out for the original target.        |
+//| This does NOT guarantee an exit: price still has to come back up   |
+//| to at least the floor for this to fire at all.                     |
+//+------------------------------------------------------------------+
+double GetEffectiveProfitTarget(const SBasket &b)
+  {
+   double target = g_tunedProfitTarget;
+   if(!InpUseStuckBasketRelief || b.legCount < g_tunedMaxLegs || b.lastLegTime == 0)
+      return target;
+
+   double hoursStuck = (double)(TimeCurrent() - b.lastLegTime) / 3600.0;
+   if(hoursStuck <= InpStuckBasketHours)
+      return target;
+
+   double decayHours = MathMax(InpStuckBasketDecayHours, 0.01);
+   double progress = (hoursStuck - InpStuckBasketHours) / decayHours;
+   if(progress > 1.0)
+      progress = 1.0;
+
+   double eased = target - (target - InpStuckBasketTargetFloor) * progress;
+   return MathMax(eased, InpStuckBasketTargetFloor);
+  }
+
 void ManageBasketExits(ENUM_BASKET_SIDE side)
   {
    SBasket b;
@@ -345,10 +380,12 @@ void ManageBasketExits(ENUM_BASKET_SIDE side)
    if(b.legCount == 0)
       return;
 
-   if(b.floatingPL >= g_tunedProfitTarget)
+   double effTarget = GetEffectiveProfitTarget(b);
+   if(b.floatingPL >= effTarget)
      {
-      CloseBasket(side, StringFormat("BASKET TARGET HIT (floatingPL=%.2f >= target=%.2f)",
-                                      b.floatingPL, g_tunedProfitTarget));
+      string tag = (effTarget < g_tunedProfitTarget - 0.001) ? "BASKET TARGET HIT (stuck-basket relief)" : "BASKET TARGET HIT";
+      CloseBasket(side, StringFormat("%s (floatingPL=%.2f >= target=%.2f, full target=%.2f)",
+                                      tag, b.floatingPL, effTarget, g_tunedProfitTarget));
       return;
      }
 
@@ -1032,7 +1069,7 @@ void UpdateDashboard()
    DbLabel("BuyPL", lx, y, PadRight("Floating", lblW) + "$" + DoubleToString(g_buyBasket.floatingPL, 2),
            (g_buyBasket.floatingPL >= 0 ? clrLime : clrRed), 8);
    y += lh;
-   double buyToTarget = g_tunedProfitTarget - g_buyBasket.floatingPL;
+   double buyToTarget = GetEffectiveProfitTarget(g_buyBasket) - g_buyBasket.floatingPL;
    double buyToDca = (g_buyBasket.legCount > 0)
                       ? (SymbolInfoDouble(_Symbol, SYMBOL_BID) - (g_buyBasket.lastLegEntry - GetCurrentDcaDistance())) : 0;
    DbLabel("BuyToTarget", lx, y, PadRight("To Target", lblW) + "$" + DoubleToString(buyToTarget, 2), clrSilver, 8);
@@ -1051,7 +1088,7 @@ void UpdateDashboard()
    DbLabel("SellPL", lx, y, PadRight("Floating", lblW) + "$" + DoubleToString(g_sellBasket.floatingPL, 2),
            (g_sellBasket.floatingPL >= 0 ? clrLime : clrRed), 8);
    y += lh;
-   double sellToTarget = g_tunedProfitTarget - g_sellBasket.floatingPL;
+   double sellToTarget = GetEffectiveProfitTarget(g_sellBasket) - g_sellBasket.floatingPL;
    double sellToDca = (g_sellBasket.legCount > 0)
                        ? ((g_sellBasket.lastLegEntry + GetCurrentDcaDistance()) - SymbolInfoDouble(_Symbol, SYMBOL_ASK)) : 0;
    DbLabel("SellToTarget", lx, y, PadRight("To Target", lblW) + "$" + DoubleToString(sellToTarget, 2), clrSilver, 8);

@@ -184,3 +184,35 @@ human-reviewed summaries and anything the automated log wouldn't capture.)
   the much more common case of a partial, eventual pullback), but it did
   not save this specific traced example, and it's important that stays
   documented rather than glossed over.
+
+- **2026-07-27 (catastrophic SL restored + max legs 5 -> 7, side-by-side
+  retest, same week):** Traced the earlier +$147.10 "profit" run's deal
+  log and found the catastrophic backstop SL had actually fired **52
+  times** during that week — each time trimming one bad leg for a bounded
+  loss (~$20-$100) instead of letting the whole basket ride unbounded to
+  a forced test-end close. That backstop was doing real, load-bearing
+  work, not sitting idle. Restored it (`InpUseCatastrophicSL=true`,
+  `InpCatastrophicSLMultiple=2.0`) and, per request, also raised
+  `InpMaxLegsPerBasket` from 5 to 7 (more room to average down before
+  running out of legs, while the backstop still caps any single leg's
+  worst case). Ran both back-to-back on the identical real-tick week for
+  a direct comparison:
+
+  | | 5 legs | 7 legs |
+  |---|---|---|
+  | Net Profit | +$147.10 | **+$2298.00** |
+  | Profit Factor | 1.02 | **1.56** |
+  | Win Rate | 71.13% | 72.53% |
+  | Balance DD | 26.55% | **4.50%** |
+  | Equity DD | 31.17% | **17.88%** |
+  | Largest single loss | -$299.62 | **-$129.77** |
+  | Worst losing streak | 8 trades / -$1440.11 | **6 trades / -$63.12** |
+
+  A genuinely large improvement across every metric, not just profit -
+  drawdown fell by more than 5x. Mechanism: more legs gives a basket more
+  room to average its entry down (or up) before it runs out of DCA room
+  and has to rely on the backstop, while the backstop SL keeps doing its
+  job of bounding any individual leg's worst case. This is the best
+  result found so far in this file. Same caveat as always: one week of
+  data - validate against a different period before trusting this as a
+  durable edge, not just a good week for a 7-leg config.

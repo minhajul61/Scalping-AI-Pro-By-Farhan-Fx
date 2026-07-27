@@ -46,10 +46,14 @@ breaker.
   (not a profit-target close), the basket would wait before reopening
   rather than instantly re-entering into the move that just stopped it out
   — moot while the hard-SL above is off.
-- `InpUseCatastrophicSL` (default `false`, **OFF per explicit request**): a
-  wide backstop SL attached to every leg at order time — the very last
-  layer of protection, only mattering if the EA/VPS stops running and
-  nothing else is left enforcing anything. Currently disabled.
+- `InpUseCatastrophicSL` (default `true`, **restored 2026-07-27**): a wide
+  backstop SL attached to every leg at order time. Briefly turned off per
+  request, then restored after tracing the trade log of the run where it
+  was on: it fired 52 times over one real-tick test week, each time
+  trimming a single bad leg for a bounded loss (~$20-$100) instead of
+  letting a whole basket ride unbounded — this was the main reason that
+  particular config was net profitable. See learnings.md for the full
+  trace and the side-by-side numbers.
 - `InpExpectedLogin` (default `416045126`): refuses to run (`INIT_FAILED`) if
   the connected account doesn't match — same wrong-account guard used in this
   user's other bots after a prior incident.
@@ -61,20 +65,14 @@ breaker.
 - Intraday soft-brake (part of the AI brain, see below) — the substitute
   mechanism now that the daily circuit breaker defaults off.
 
-**⚠️ Current state (2026-07-27, per explicit request): every stop-loss in
-this EA is off** — basket hard-SL (`InpBasketMaxLossUSD=0`), the
-catastrophic per-leg backstop SL (`InpUseCatastrophicSL=false`), and the
-daily circuit breaker (`InpUseDailyLimit=false`) are all disabled at once.
-No open position anywhere in this EA has any server-side stop attached.
-The intraday soft-brake is the only remaining risk control, and it is
-soft by design (slows DCA growth, does not close anything). Concretely:
-if the EA, terminal, or VPS goes offline while a basket is deep in DCA
-legs and losing, there is nothing left to close it — it will sit open,
-uncapped, until something (EA restart, manual close, or the broker's own
-stop-out level) intervenes. This was stress-tested with just the daily
-limit off (see below) and wiped the account outright multiple times
-before other safeguards existed; with every stop-loss now off
-simultaneously, that risk is larger, not smaller.
+**Current state (2026-07-27)**: basket hard-SL (`InpBasketMaxLossUSD=0`)
+and the daily circuit breaker (`InpUseDailyLimit=false`) remain off per
+explicit request. The catastrophic per-leg backstop SL is back on
+(`InpUseCatastrophicSL=true`) — it is now the only server-side stop any
+position has, and evidence shows it matters (52 real fires in one week,
+see above). Without it, a maxed-out basket with no bounce has nothing
+left to trim a bad leg and can sit open, uncapped, until something
+(EA restart, manual close, or the broker's stop-out level) intervenes.
 
 **On `InpUseDailyLimit=false`**: stress-tested repeatedly. With earlier,
 smaller-account configs it wiped the account completely every single time
@@ -151,10 +149,12 @@ disabled — see `learnings.md` for the full history if revisiting this idea.
 | Pyramid removed + daily limit OFF + intraday soft-brake | $5000 | 0.95 | 71.68% | -$253.02 | 11.68% |
 | + basket hard-SL OFF too (2026-07-19 to 07-26, real ticks) | $5000 | 1.02 | 71.13% | +$147.10 | 31.17% (equity) |
 | + catastrophic backstop SL OFF too, i.e. every SL off (same week) | $5000 | 0.87 | 74.29% | -$562.03 | 35.76% (balance) / 34.54% (equity) |
-| **+ stuck-basket relief added to AI brain (current, same week)** | $5000 | **0.86** | **74.31%** | **-$579.05** | **35.85% (balance) / 34.63% (equity)** |
+| + stuck-basket relief added to AI brain (same week, still no catastrophic SL) | $5000 | 0.86 | 74.31% | -$579.05 | 35.85% (balance) / 34.63% (equity) |
+| Catastrophic SL restored, 5 legs (same week) | $5000 | 1.02 | 71.13% | +$147.10 | 26.55% (balance) / 31.17% (equity) |
+| **Catastrophic SL restored, 7 legs (current, same week)** | $5000 | **1.56** | **72.53%** | **+$2298.00** | **4.50% (balance) / 17.88% (equity)** |
 
 **Current shipped defaults**: `InpInitialLot=0.02`, `InpLotMultiplier=1.5`,
-`InpDcaDistancePrice=3.0` (fixed), `InpMaxLegsPerBasket=5`,
+`InpDcaDistancePrice=3.0` (fixed), `InpMaxLegsPerBasket=7`,
 `InpBasketProfitTargetUSD=2.0`, `InpBasketMaxLossUSD=0.0` (basket hard-SL
 **OFF**, per explicit request 2026-07-27), `InpUseDailyLimit=false`,
 `InpUseIntradayBrake=true` (`InpIntradayBrakeLossPercent=3.0`). The

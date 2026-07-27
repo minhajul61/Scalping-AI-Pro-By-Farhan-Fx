@@ -43,7 +43,7 @@ input int      InpMaxSpreadPoints    = 300;       // Skip new trades if spread i
 input group "=== Basket Core ==="
 input double   InpInitialLot            = 0.02;   // First trade size (lot)
 input double   InpBasketProfitTargetUSD = 2.0;    // Close basket once it earns this much profit ($)
-input int      InpMaxLegsPerBasket      = 5;      // Max number of DCA add-ons allowed per basket
+input int      InpMaxLegsPerBasket      = 7;      // Max number of DCA add-ons allowed per basket
 
 input group "=== DCA / Martingale ==="
 input bool     InpUseAtrDcaDistance   = false;    // Auto-adjust DCA gap by volatility (off = use fixed $ gap below)
@@ -66,8 +66,8 @@ input double           InpTrendStrengthATRMult = 0.5;     // How strong the tren
 input group "=== Basket Safety ==="
 input double   InpBasketMaxLossUSD        = 0.0;   // Force-close a basket at this loss ($) - 0 = OFF (turned off per request)
 input int      InpBasketSLCooldownMinutes = 0;     // Wait this many minutes before reopening after a stop-loss - 0 = OFF (turned off per request)
-input bool     InpUseCatastrophicSL       = false; // Emergency backup stop-loss on every trade - OFF (turned off per request, see warning below)
-input double   InpCatastrophicSLMultiple  = 0.0;   // How far away the emergency stop-loss sits - unused while the line above is OFF
+input bool     InpUseCatastrophicSL       = true;  // Emergency backup stop-loss on every trade - ON (restored: this is what was quietly generating the earlier profit, see learnings.md)
+input double   InpCatastrophicSLMultiple  = 2.0;   // How far away the emergency stop-loss sits
 
 input group "=== Daily Stop (currently OFF per request) ==="
 input bool     InpUseDailyLimit         = false;  // Stop trading for the day after a big loss - OFF (turned off per request)

@@ -118,3 +118,24 @@ human-reviewed summaries and anything the automated log wouldn't capture.)
   the cost of a much rougher equity curve. Still one week of data, still
   not proof of a durable edge — same "validate on another period before
   trusting it" caveat as every prior result in this file.
+
+- **2026-07-27 (every remaining SL turned off, real-tick retest, same
+  week):** Per explicit request, also disabled `InpUseCatastrophicSL`
+  (the last-resort per-leg backstop) and zeroed `InpDailyMaxLossPercent`/
+  `InpBasketSLCooldownMinutes` — combined with the earlier changes, no
+  position this EA opens has any server-side stop anywhere. Re-ran the
+  identical real-tick setup ($5000, 2026-07-19 to 07-26, 100% real ticks):
+
+  Result: **PF dropped to 0.87, net -$562.03** — worse than both prior
+  configs on this exact week, despite a higher raw win rate (74.29%).
+  Balance drawdown 35.76%, equity drawdown 34.54% — both worse than the
+  hard-SL-off-only run. Largest single loss widened further to -$582.63
+  (was -$299.62), and there was a 10-trade losing streak totaling
+  -$2470.62 in one stretch — **49.4% of the $5000 account in one
+  sequence**. The catastrophic backstop SL was a wide, rarely-touched
+  safety net, not a frequent trade-closer — removing it didn't unlock any
+  extra profit potential on this week's data, it just removed the ceiling
+  on how bad one bad stretch could get, and this week that ceiling would
+  have mattered. Same caveat as always: one week of data, not proof of
+  anything durable either way — but this specific change made the result
+  worse, not better, on the data available so far.

@@ -135,7 +135,8 @@ disabled — see `learnings.md` for the full history if revisiting this idea.
 | Daily limit OFF + hard-SL OFF + pyramid ON | $5000 | 0.69 | ~66% | -$1086.74 | 25.68% |
 | Daily limit OFF + hard-SL OFF + pyramid OFF | $5000 | 0.93 | ~69% | -$334.82 | 21.78% |
 | Pyramid removed + daily limit OFF + intraday soft-brake | $5000 | 0.95 | 71.68% | -$253.02 | 11.68% |
-| **+ basket hard-SL OFF too (current, 2026-07-19 to 07-26, real ticks)** | $5000 | **1.02** | **71.13%** | **+$147.10** | **31.17% (equity)** |
+| + basket hard-SL OFF too (2026-07-19 to 07-26, real ticks) | $5000 | 1.02 | 71.13% | +$147.10 | 31.17% (equity) |
+| **+ catastrophic backstop SL OFF too, i.e. every SL off (current, same week)** | $5000 | **0.87** | **74.29%** | **-$562.03** | **35.76% (balance) / 34.54% (equity)** |
 
 **Current shipped defaults**: `InpInitialLot=0.02`, `InpLotMultiplier=1.5`,
 `InpDcaDistancePrice=3.0` (fixed), `InpMaxLegsPerBasket=5`,

@@ -27,6 +27,12 @@
 #property strict
 #property description "Dual-basket (buy+sell) grid/DCA EA for XAUUSD M1. Requires a hedging-mode account."
 
+// Bump this on every change that gets deployed anywhere (local or VPS) so the
+// dashboard can show at a glance whether a given chart is running the latest
+// build - this exact confusion (VPS silently running stale code) came up
+// 2026-07-27 and cost a round of guessing from the leg-count alone.
+#define EA_BUILD_VERSION "2026.07.27.3"
+
 #include <Trade\Trade.mqh>
 
 enum ENUM_BASKET_SIDE
@@ -1018,7 +1024,7 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, InpDashboardX - 10);
       ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, InpDashboardY - 10);
       ObjectSetInteger(0, bg, OBJPROP_XSIZE, 280);
-      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 530);
+      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 545);
       ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'12,12,16');
       ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, bg, OBJPROP_COLOR, C'70,70,80');
@@ -1028,9 +1034,9 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_ZORDER, 0);
      }
 
-   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 456, 260, 24, "X  CLOSE ALL", C'120,20,20');
-   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 484, 126, 22, "Close BUY", C'20,80,20');
-   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 484, 126, 22, "Close SELL", C'20,80,20');
+   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 471, 260, 24, "X  CLOSE ALL", C'120,20,20');
+   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 499, 126, 22, "Close BUY", C'20,80,20');
+   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 499, 126, 22, "Close SELL", C'20,80,20');
   }
 
 void UpdateDashboard()
@@ -1040,6 +1046,8 @@ void UpdateDashboard()
    int x = InpDashboardX, lx = InpDashboardX + 2, y = InpDashboardY, lh = 15, lblW = 12;
 
    DbLabel("Title", x, y, "SCALPING AI PRO BY FARHAN FX", clrWhite, 9);
+   y += lh;
+   DbLabel("Version", lx, y, "Build " + EA_BUILD_VERSION, clrGray, 7);
    y += lh + 6;
 
    bool loginOk = (InpExpectedLogin == 0 || AccountInfoInteger(ACCOUNT_LOGIN) == InpExpectedLogin);

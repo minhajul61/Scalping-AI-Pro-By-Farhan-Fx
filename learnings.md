@@ -139,3 +139,48 @@ human-reviewed summaries and anything the automated log wouldn't capture.)
   have mattered. Same caveat as always: one week of data, not proof of
   anything durable either way — but this specific change made the result
   worse, not better, on the data available so far.
+
+  Traced the exact -$2470.62 streak in the raw deal log to explain it in
+  plain terms: a SELL basket added legs 1-5 as gold rose from ~4023 to
+  4039.77 (2026-07-24 05:54-07:04), hit max legs with nowhere left to add,
+  and then price kept rising for another full day+ with no SL left to
+  close it. At test end (2026-07-25 23:59:58) MT5 force-closed everything
+  at the final price (4052.81) - that one stuck SELL basket alone lost
+  -$2035.07, plus a separately-stuck BUY basket lost -$396.92, together
+  accounting for nearly all of the week's net loss. This is the concrete
+  answer to "why does loss happen if DCA is supposed to prevent it": DCA
+  only helps if price eventually reverses before legs run out; once maxed
+  out with no SL, a non-reverting move just sits open, unrealized, with
+  nothing left to close it.
+
+- **2026-07-27 (stuck-basket relief added to the AI brain, same week
+  retested):** Built directly in response to the traced failure above.
+  New rule: once a basket has been maxed out and stuck for
+  `InpStuckBasketHours` (4h default) with no target hit, its required
+  profit linearly shrinks toward `InpStuckBasketTargetFloor` ($0 /
+  breakeven default) over the next `InpStuckBasketDecayHours` (8h) - so a
+  stuck basket takes the first real exit instead of holding out for the
+  full $2 target.
+
+  Re-ran the identical real-tick week: **PF 0.86, net -$579.05** -
+  essentially unchanged from before this feature existed (was PF 0.87,
+  -$562.03), and the exact same -$2470.62 / 10-trade streak still
+  happened, at the exact same prices, forced-closed at the exact same
+  test-end moment. Traced why: by `InpStuckBasketHours` +
+  `InpStuckBasketDecayHours` (4h + 8h = 12h after maxing out at 07-24
+  07:04), the SELL basket's target had fully decayed to breakeven by
+  ~07-24 19:04 - over 24 hours before the test ended. It never closed
+  anyway, because **price never came back down to breakeven at all**
+  during that entire stretch - it rose monotonically from 4039.77 to
+  4052.81 with no meaningful pullback.
+
+  This is an important, honest negative result: a rule-based "AI brain"
+  can shrink *how much* bounce is needed to exit, but it cannot manufacture
+  a bounce that never happens. When a move trends persistently in one
+  direction with no reversion at all - not even back to entry - no
+  amount of target-easing intelligence gets a maxed-out, SL-less basket
+  out; only price cooperating (a real bounce) or a hard stop that accepts
+  the loss can end it. The feature is still worth keeping (it will help on
+  the much more common case of a partial, eventual pullback), but it did
+  not save this specific traced example, and it's important that stays
+  documented rather than glossed over.

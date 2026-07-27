@@ -216,3 +216,31 @@ human-reviewed summaries and anything the automated log wouldn't capture.)
   result found so far in this file. Same caveat as always: one week of
   data - validate against a different period before trusting this as a
   durable edge, not just a good week for a 7-leg config.
+
+- **2026-07-27 (out-of-sample validation on other periods, per explicit
+  request):** Correction first: real-tick history on this account actually
+  extends back to at least 2026-07-12, not just 2026-07-19 as assumed
+  earlier in this file - confirmed via a probe test ("100% real ticks"
+  quality on 07-12 to 07-19). Ran two more tests with the current shipped
+  config (7 legs, catastrophic SL on, everything else as-is):
+
+  1. **2026-06-01 to 06-08** (Model=1, 1-min OHLC synthetic ticks, since
+     real-tick history doesn't reach back that far): PF 1.80, net
+     +$7531.79, balance DD 22.71% - but **equity DD 72.24%**, i.e. floating
+     loss briefly reached nearly three-quarters of the account before
+     recovering. A profitable week that also passed through a near-wipeout
+     moment - the same "risk that happened to resolve favorably" pattern
+     flagged repeatedly earlier in this file, just on a different config.
+  2. **2026-07-12 to 07-19** (real ticks, genuinely non-overlapping with
+     the 07-19..07-26 week already tested): PF 1.13, net +$936.75, balance
+     DD 12.18%, equity DD 30.14%, win rate 74.12%.
+
+  All three periods tested so far (07-19..07-26, 06-01..06-08,
+  07-12..07-19) came back net profitable with PF > 1.0 - a genuinely
+  encouraging, non-cherry-picked signal that this isn't purely a fit to
+  one lucky week. But drawdown varies a lot between periods (4.50% to
+  72.24% depending on the week) - the config has not yet shown it reliably
+  keeps drawdown small, only that it (so far) always eventually recovers
+  within the tested window. More periods, and ideally a real forward/demo
+  test, are still the honest next step before trusting this as safe for
+  real capital.

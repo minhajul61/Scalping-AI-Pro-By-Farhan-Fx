@@ -96,13 +96,26 @@ brain (confirmed with the user as the realistic scope). Two layers:
    (`GetLegStat`/`IncrementLegStat`). Once a leg depth has enough samples,
    a poor win rate there steps the active max-legs cap down; a strong one
    lets it step back up (bounded by `InpMaxLegsPerBasket`).
-3. **Intraday soft-brake** (added when the daily circuit breaker was turned
+3. **Market regime detection** (`InpUseRegimeDetection`, added 2026-07-30):
+   loads daily history (`InpRegimeHistoryYears`, default 5 - but capped by
+   however much D1 history the terminal actually has; on this account/broker
+   that's only ~480 days / 1.3 years, not the full 5) and ranks today's
+   trend-strength and volatility (ATR) as a percentile against that whole
+   history. Above `InpRegimeTrendPercentile` -> TRENDING (widens DCA
+   distance); above `InpRegimeVolPercentile` -> VOLATILE (caps lot growth);
+   otherwise RANGING (tightens DCA distance, this EA's easiest case).
+   **First backtest was a negative result**: on the 07-19..07-26 week (which
+   classified as RANGING every day, tightening distance to 0.85x), PF fell
+   from 1.56 to 1.37 and drawdown roughly doubled versus the same config
+   without regime detection - see learnings.md. Left on by default with
+   this shipped, but it is not yet a proven improvement.
+4. **Intraday soft-brake** (added when the daily circuit breaker was turned
    off by default): NOT a hard stop or force-close. Once today's floating
    loss crosses `InpIntradayBrakeLossPercent` (default 3%), it caps the lot
    multiplier down (`InpIntradayBrakeMultiplierCap`) and widens the DCA
    distance (`InpIntradayBrakeDistanceMult`) for the rest of that calendar
    day only, reverting automatically at the next day's rollover.
-4. **Stuck-basket relief** (`InpUseStuckBasketRelief`, added 2026-07-27 after
+5. **Stuck-basket relief** (`InpUseStuckBasketRelief`, added 2026-07-27 after
    a real-tick backtest showed exactly this failure mode — see
    learnings.md): a basket that reaches max DCA legs has nowhere left to
    add, and with every stop-loss now off (see above), it would otherwise

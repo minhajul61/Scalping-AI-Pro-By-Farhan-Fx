@@ -244,3 +244,29 @@ human-reviewed summaries and anything the automated log wouldn't capture.)
   within the tested window. More periods, and ideally a real forward/demo
   test, are still the honest next step before trusting this as safe for
   real capital.
+
+- **2026-07-30 ($100k capital test + market regime detection):** User asked
+  to test running the same small lot (0.02) on a $100,000 account instead
+  of $5,000 as a substitute for a hard SL - the reasoning being more capital
+  buffer means DCA can go deeper before running out of room. Backtested
+  (15 max legs, catastrophic SL on) on the same real-tick week: PF 1.58,
+  +$3,975.42, drawdown down to 0.53%/1.47% - much safer, but only a 3.98%
+  return on the $100k versus 45.96% on the $5k/7-leg config, since the same
+  dollar-sized risk is now a smaller fraction of a much bigger account.
+  Re-ran with catastrophic SL fully off too, 20 max legs: identical result,
+  because this week's worst basket only reached leg 14 (worst-case ~$6,792,
+  6.8% of $100k) - the SL was never actually needed this week, which is not
+  proof it's safe, just that this week didn't test that edge.
+
+  Then built real market-regime detection for the AI brain (per explicit
+  request for "smarter AI" + "load years of data"): loads D1 history,
+  ranks today's trend-strength and ATR as a percentile against that
+  history, classifies TRENDING/RANGING/VOLATILE, and adjusts DCA distance/
+  lot-multiplier-cap accordingly. Honest finding #1: this account's
+  terminal only has ~480 days (1.3 years) of D1 history, not the requested
+  5 years - a broker/data limitation, not fixable in code. Honest finding
+  #2: backtesting it on the 07-19..07-26 week (classified RANGING every
+  single day, tightening DCA distance to 0.85x throughout) made things
+  worse, not better - PF 1.56 -> 1.37, drawdown roughly doubled. Shipped
+  on by default anyway (per request) but explicitly flagged as unproven,
+  not a validated improvement, in the README.

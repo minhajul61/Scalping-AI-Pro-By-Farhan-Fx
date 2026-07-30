@@ -31,7 +31,7 @@
 // dashboard can show at a glance whether a given chart is running the latest
 // build - this exact confusion (VPS silently running stale code) came up
 // 2026-07-27 and cost a round of guessing from the leg-count alone.
-#define EA_BUILD_VERSION "2026.07.27.3"
+#define EA_BUILD_VERSION "2026.07.30.1"
 
 #include <Trade\Trade.mqh>
 
@@ -91,6 +91,21 @@ input double   InpStuckBasketHours       = 4.0;   // Hours stuck at max DCA trad
 input double   InpStuckBasketDecayHours  = 8.0;   // Hours over which the target shrinks from full down to the floor below
 input double   InpStuckBasketTargetFloor = 0.0;   // Smallest target ($) it will shrink to - 0 = will accept breakeven
 
+input group "=== Market Regime Detection (AI Brain) ==="
+// Rule-based, not ML - there is no native MQL5 library that "learns" from
+// history in the trained-model sense. This loads years of daily history,
+// computes where TODAY's trend-strength and volatility rank against that
+// whole history (a percentile), and classifies today as trending/ranging/
+// volatile - then nudges DCA distance/lot growth accordingly. It changes
+// how much today's readings are trusted, not what will happen next.
+input bool     InpUseRegimeDetection         = true;  // Compare today's conditions against years of history to classify the regime
+input int      InpRegimeHistoryYears         = 5;     // How many years of daily history to use as the comparison baseline
+input double   InpRegimeTrendPercentile      = 70.0;  // Trend strength must rank above this percentile (vs history) to call today "trending"
+input double   InpRegimeVolPercentile        = 80.0;  // Volatility (ATR) must rank above this percentile (vs history) to call today "volatile"
+input double   InpRegimeTrendingDcaDistanceMult = 1.3; // Widen DCA distance by this much when the regime is trending
+input double   InpRegimeRangingDcaDistanceMult  = 0.85;// Tighten DCA distance by this much when the regime is ranging (this EA's best case)
+input double   InpRegimeVolatileLotMultCap      = 1.2; // Cap the lot growth multiplier to this when the regime is volatile
+
 input bool     InpEnableSelfTuning = true;   // Let the EA auto-adjust its own settings daily from results
 input double   InpDcaDistanceMin   = 2.0;   // Auto-tuning: smallest DCA gap ($) it may use
 input double   InpDcaDistanceMax   = 6.0;   // Auto-tuning: largest DCA gap ($) it may use
@@ -127,9 +142,26 @@ struct SBasket
 
 SBasket g_buyBasket, g_sellBasket;
 
+enum ENUM_MARKET_REGIME
+  {
+   REGIME_RANGING  = 0,
+   REGIME_TRENDING = 1,
+   REGIME_VOLATILE = 2
+  };
+
 int g_atrHandle      = INVALID_HANDLE;
 int g_trendMAHandle  = INVALID_HANDLE;
 int g_trendAtrHandle = INVALID_HANDLE;
+int g_regimeAtrHandle = INVALID_HANDLE; // D1, used only for regime detection's historical baseline
+int g_regimeMaHandle  = INVALID_HANDLE; // D1
+
+ENUM_MARKET_REGIME g_currentRegime         = REGIME_RANGING;
+double             g_regimeDcaDistanceMult = 1.0;
+double             g_regimeLotMultiplierCap = 999.0;
+double             g_regimeTrendPercentileNow = 0.0;
+double             g_regimeVolPercentileNow   = 0.0;
+int                g_lastRegimeDateCode = -1;
+bool               g_regimeDetectionActive = false; // InpUseRegimeDetection, downgraded to false at runtime if setup fails
 
 int    g_dayStartDateCode = -1;
 double g_dayStartBalance  = 0.0;
@@ -191,8 +223,21 @@ int OnInit()
         }
      }
 
+   g_regimeDetectionActive = InpUseRegimeDetection;
+   if(g_regimeDetectionActive)
+     {
+      g_regimeAtrHandle = iATR(_Symbol, PERIOD_D1, InpTrendAtrPeriod);
+      g_regimeMaHandle  = iMA(_Symbol, PERIOD_D1, InpTrendMAPeriod, 0, MODE_SMA, PRICE_CLOSE);
+      if(g_regimeAtrHandle == INVALID_HANDLE || g_regimeMaHandle == INVALID_HANDLE)
+        {
+         Print("GoldDualBasketDCA: regime detection handle creation failed - disabling regime detection.");
+         g_regimeDetectionActive = false;
+        }
+     }
+
    LoadTunedParams();
    UpdateDayTracking();
+   MaybeUpdateMarketRegime();
 
    if(InpShowDashboard)
      {
@@ -212,6 +257,10 @@ void OnDeinit(const int reason)
       IndicatorRelease(g_trendMAHandle);
    if(g_trendAtrHandle != INVALID_HANDLE)
       IndicatorRelease(g_trendAtrHandle);
+   if(g_regimeAtrHandle != INVALID_HANDLE)
+      IndicatorRelease(g_regimeAtrHandle);
+   if(g_regimeMaHandle != INVALID_HANDLE)
+      IndicatorRelease(g_regimeMaHandle);
    EventKillTimer();
    ObjectsDeleteAll(0, DB_PREFIX);
    ChartRedraw();
@@ -257,6 +306,7 @@ void OnTick()
    RefreshBaskets();
    UpdateDayTracking();
    CheckIntradayBrake();
+   MaybeUpdateMarketRegime();
    MaybeRunDailySelfTune();
 
    ManageBasketExits(SIDE_BUY);
@@ -557,6 +607,9 @@ double GetCurrentDcaDistance()
    if(g_intradayBrakeActive)
       dist *= InpIntradayBrakeDistanceMult;
 
+   if(g_regimeDetectionActive)
+      dist *= g_regimeDcaDistanceMult;
+
    return dist;
   }
 
@@ -620,6 +673,112 @@ bool IsAgainstTrend(ENUM_BASKET_SIDE side)
   }
 
 //+------------------------------------------------------------------+
+//| Market regime detection - rule-based, not ML. Loads years of daily |
+//| history and asks: where does TODAY's trend-strength/volatility     |
+//| rank against that whole history (a percentile)? This changes how   |
+//| much today's readings are trusted (wider DCA distance when today   |
+//| looks like a rare, strongly-trending day vs history; tighter when  |
+//| today looks like an ordinary ranging day), not what happens next - |
+//| no native MQL5 library "learns" a predictive model from history.   |
+//+------------------------------------------------------------------+
+double PercentileRankOf(const double &arr[], int count, double value)
+  {
+   if(count <= 0)
+      return 50.0;
+   int countBelowOrEqual = 0;
+   for(int i = 0; i < count; i++)
+      if(arr[i] <= value)
+         countBelowOrEqual++;
+   return 100.0 * countBelowOrEqual / count;
+  }
+
+void UpdateMarketRegime()
+  {
+   if(!g_regimeDetectionActive)
+      return;
+
+   int requested = InpRegimeHistoryYears * 365;
+   int available = iBars(_Symbol, PERIOD_D1);
+   int n = MathMin(requested, available - 5); // leave a small margin for the indicator warm-up
+   if(n < 60)
+     {
+      Print("GoldDualBasketDCA: not enough D1 history yet for regime detection (need 60+, have ", n, ") - skipping today.");
+      return;
+     }
+
+   double atrHist[], maHist[], closeHist[];
+   ArraySetAsSeries(atrHist, true);
+   ArraySetAsSeries(maHist, true);
+   ArraySetAsSeries(closeHist, true);
+
+   if(CopyBuffer(g_regimeAtrHandle, 0, 1, n, atrHist) < n)
+      return;
+   if(CopyBuffer(g_regimeMaHandle, 0, 1, n, maHist) < n)
+      return;
+   if(CopyClose(_Symbol, PERIOD_D1, 1, n, closeHist) < n)
+      return;
+
+   double trendStrengthHist[];
+   ArrayResize(trendStrengthHist, n);
+   for(int i = 0; i < n; i++)
+      trendStrengthHist[i] = (atrHist[i] > 0) ? MathAbs(closeHist[i] - maHist[i]) / atrHist[i] : 0;
+
+   double todayTrendStrength = trendStrengthHist[0]; // most recent CLOSED daily bar (shift 1)
+   double todayAtr           = atrHist[0];
+
+   g_regimeTrendPercentileNow = PercentileRankOf(trendStrengthHist, n, todayTrendStrength);
+   g_regimeVolPercentileNow   = PercentileRankOf(atrHist, n, todayAtr);
+
+   ENUM_MARKET_REGIME newRegime;
+   if(g_regimeTrendPercentileNow >= InpRegimeTrendPercentile)
+      newRegime = REGIME_TRENDING;
+   else if(g_regimeVolPercentileNow >= InpRegimeVolPercentile)
+      newRegime = REGIME_VOLATILE;
+   else
+      newRegime = REGIME_RANGING;
+
+   g_currentRegime = newRegime;
+   if(newRegime == REGIME_TRENDING)
+     {
+      g_regimeDcaDistanceMult  = InpRegimeTrendingDcaDistanceMult;
+      g_regimeLotMultiplierCap = 999.0;
+     }
+   else if(newRegime == REGIME_RANGING)
+     {
+      g_regimeDcaDistanceMult  = InpRegimeRangingDcaDistanceMult;
+      g_regimeLotMultiplierCap = 999.0;
+     }
+   else // REGIME_VOLATILE
+     {
+      g_regimeDcaDistanceMult  = 1.0;
+      g_regimeLotMultiplierCap = InpRegimeVolatileLotMultCap;
+     }
+
+   string regimeName = (newRegime == REGIME_TRENDING) ? "TRENDING" : (newRegime == REGIME_VOLATILE) ? "VOLATILE" : "RANGING";
+   string msg = StringFormat("AI BRAIN regime detection (vs %d years / %d daily bars): trend-strength at %.1f pct, "
+                              "volatility at %.1f pct -> regime=%s (DCA distance x%.2f, lot mult cap %.2f)",
+                              InpRegimeHistoryYears, n, g_regimeTrendPercentileNow, g_regimeVolPercentileNow,
+                              regimeName, g_regimeDcaDistanceMult, g_regimeLotMultiplierCap);
+   Print("GoldDualBasketDCA: " + msg);
+   WriteTuningLog(msg);
+  }
+
+void MaybeUpdateMarketRegime()
+  {
+   if(!g_regimeDetectionActive)
+      return;
+
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   int todayCode = dt.year * 10000 + dt.mon * 100 + dt.day;
+   if(todayCode == g_lastRegimeDateCode)
+      return; // already recalculated today
+
+   UpdateMarketRegime();
+   g_lastRegimeDateCode = todayCode;
+  }
+
+//+------------------------------------------------------------------+
 //| Spread / daily circuit breaker                                    |
 //+------------------------------------------------------------------+
 bool SpreadIsAcceptable()
@@ -672,9 +831,12 @@ void CheckIntradayBrake()
 
 double EffectiveLotMultiplier()
   {
+   double mult = g_tunedLotMultiplier;
    if(g_intradayBrakeActive)
-      return MathMin(g_tunedLotMultiplier, InpIntradayBrakeMultiplierCap);
-   return g_tunedLotMultiplier;
+      mult = MathMin(mult, InpIntradayBrakeMultiplierCap);
+   if(g_regimeDetectionActive)
+      mult = MathMin(mult, g_regimeLotMultiplierCap);
+   return mult;
   }
 
 bool DailyLimitHit()
@@ -1024,7 +1186,7 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, InpDashboardX - 10);
       ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, InpDashboardY - 10);
       ObjectSetInteger(0, bg, OBJPROP_XSIZE, 280);
-      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 545);
+      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 560);
       ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'12,12,16');
       ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, bg, OBJPROP_COLOR, C'70,70,80');
@@ -1034,9 +1196,9 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_ZORDER, 0);
      }
 
-   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 471, 260, 24, "X  CLOSE ALL", C'120,20,20');
-   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 499, 126, 22, "Close BUY", C'20,80,20');
-   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 499, 126, 22, "Close SELL", C'20,80,20');
+   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 486, 260, 24, "X  CLOSE ALL", C'120,20,20');
+   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 514, 126, 22, "Close BUY", C'20,80,20');
+   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 514, 126, 22, "Close SELL", C'20,80,20');
   }
 
 void UpdateDashboard()
@@ -1122,6 +1284,13 @@ void UpdateDashboard()
    y += lh;
    DbLabel("Brake", lx, y, PadRight("Soft Brake", lblW) + (InpUseIntradayBrake ? (g_intradayBrakeActive ? "ON (de-risked today)" : "off (normal)") : "disabled"),
            g_intradayBrakeActive ? clrOrange : clrSilver, 8);
+   y += lh;
+   string regimeText = !g_regimeDetectionActive ? "disabled"
+                        : (g_currentRegime == REGIME_TRENDING) ? "TRENDING"
+                        : (g_currentRegime == REGIME_VOLATILE) ? "VOLATILE" : "RANGING";
+   color regimeColor = (g_currentRegime == REGIME_TRENDING) ? C'0,170,220'
+                        : (g_currentRegime == REGIME_VOLATILE) ? clrOrange : clrLime;
+   DbLabel("Regime", lx, y, PadRight("Regime", lblW) + regimeText, g_regimeDetectionActive ? regimeColor : clrSilver, 8);
    y += lh + 6;
 
    DbDivider("Div4", x, y, 260, C'55,55,65');

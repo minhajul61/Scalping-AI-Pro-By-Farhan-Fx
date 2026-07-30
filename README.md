@@ -94,14 +94,30 @@ it — flagged plainly so this isn't mistaken for a validated improvement.
 - Intraday soft-brake (part of the AI brain, see below) — the substitute
   mechanism now that the daily circuit breaker defaults off.
 
-**Current state (2026-07-27)**: basket hard-SL (`InpBasketMaxLossUSD=0`)
-and the daily circuit breaker (`InpUseDailyLimit=false`) remain off per
-explicit request. The catastrophic per-leg backstop SL is back on
-(`InpUseCatastrophicSL=true`) — it is now the only server-side stop any
-position has, and evidence shows it matters (52 real fires in one week,
-see above). Without it, a maxed-out basket with no bounce has nothing
-left to trim a bad leg and can sit open, uncapped, until something
-(EA restart, manual close, or the broker's stop-out level) intervenes.
+**Current state (2026-07-31, FINAL per explicit request):**
+`InpUseCatastrophicSL=false` and `InpLotMultiplier=2.0` (up from 1.5).
+This reverses the 2026-07-27 restoration above — **every stop-loss in this
+EA is now off, and each DCA leg is sized twice as large as the previous
+one instead of 1.5x.** This was backtested immediately before shipping,
+twice, specifically to check this exact combination:
+
+- $5,000 deposit, same real-tick week (07-19..07-26): **net -$5,351.74,
+  PF 0.51, balance/equity drawdown 104.74%/106.49%. MT5's own broker-side
+  stop-out fired 64% of the way through the week; final balance went
+  negative (-$351.74).** This is not a theoretical worst case — it is what
+  actually happened on real historical price data with this exact config.
+- $10,000 deposit, identical settings, same week: net -$4,712.71, PF 0.61,
+  balance/equity drawdown 59.36%/79.51%. No broker stop-out this time, but
+  nearly 80% of the account was underwater at the worst point, and this is
+  after *doubling* the account size — the underlying imbalance (small,
+  capped wins vs. now-unbounded, doubling-lot-size losses) is not
+  capital-dependent.
+
+**Shipped as the final configuration anyway, per explicit user decision
+made after reviewing both results above.** This is documented in full
+here and in learnings.md (2026-07-31 entries) so it is unambiguous that
+this was a deliberate choice made with the real numbers in hand, not an
+oversight or a claim that it is safe.
 
 **On `InpUseDailyLimit=false`**: stress-tested repeatedly. With earlier,
 smaller-account configs it wiped the account completely every single time
@@ -195,7 +211,8 @@ disabled — see `learnings.md` for the full history if revisiting this idea.
 | Catastrophic SL restored, 5 legs (same week) | $5000 | 1.02 | 71.13% | +$147.10 | 26.55% (balance) / 31.17% (equity) |
 | **Catastrophic SL restored, 7 legs (current, same week)** | $5000 | **1.56** | **72.53%** | **+$2298.00** | **4.50% (balance) / 17.88% (equity)** |
 
-**Current shipped defaults**: `InpInitialLot=0.02`, `InpLotMultiplier=1.5`,
+**Historical note (superseded — see "Current state (2026-07-31, FINAL)" above
+for what's actually shipped now)**: `InpInitialLot=0.02`, `InpLotMultiplier=1.5`,
 `InpDcaDistancePrice=3.0` (fixed), `InpMaxLegsPerBasket=7`,
 `InpBasketProfitTargetUSD=2.0`, `InpBasketMaxLossUSD=0.0` (basket hard-SL
 **OFF**, per explicit request 2026-07-27), `InpUseDailyLimit=false`,

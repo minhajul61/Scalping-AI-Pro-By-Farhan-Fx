@@ -31,7 +31,7 @@
 // dashboard can show at a glance whether a given chart is running the latest
 // build - this exact confusion (VPS silently running stale code) came up
 // 2026-07-27 and cost a round of guessing from the leg-count alone.
-#define EA_BUILD_VERSION "2026.07.31.1"
+#define EA_BUILD_VERSION "2026.07.31.2"
 
 #include <Trade\Trade.mqh>
 
@@ -57,7 +57,7 @@ input group "=== DCA / Martingale ==="
 input bool     InpUseAtrDcaDistance   = false;    // Auto-adjust DCA gap by volatility (off = use fixed $ gap below)
 input double   InpDcaDistanceAtrMult  = 1.5;      // Only used if the above is ON: how wide the auto gap is
 input double   InpDcaDistancePrice  = 3.0;        // Price move ($) before adding the next DCA trade
-input double   InpLotMultiplier     = 1.5;        // How much bigger each new DCA trade is (1.5 = 50% bigger)
+input double   InpLotMultiplier     = 2.0;        // How much bigger each new DCA trade is (2.0 = double each leg - moves the average faster, per request)
 
 
 input group "=== DCA Filters (skip adding on bad conditions) ==="
@@ -74,7 +74,7 @@ input double           InpTrendStrengthATRMult = 0.5;     // How strong the tren
 input group "=== Basket Safety ==="
 input double   InpBasketMaxLossUSD        = 0.0;   // Force-close a basket at this loss ($) - 0 = OFF (turned off per request)
 input int      InpBasketSLCooldownMinutes = 0;     // Wait this many minutes before reopening after a stop-loss - 0 = OFF (turned off per request)
-input bool     InpUseCatastrophicSL       = true;  // Emergency backup stop-loss on every trade - ON (restored: this is what was quietly generating the earlier profit, see learnings.md)
+input bool     InpUseCatastrophicSL       = false; // Emergency backup stop-loss on every trade - OFF per explicit request
 input double   InpCatastrophicSLMultiple  = 2.0;   // How far away the emergency stop-loss sits
 
 input group "=== Daily Stop (currently OFF per request) ==="
@@ -114,7 +114,7 @@ input double   InpDcaDistanceMax   = 6.0;   // Auto-tuning: largest DCA gap ($) 
 input double   InpDcaAtrMultMin    = 1.0;   // Auto-tuning: smallest auto-gap multiplier it may use
 input double   InpDcaAtrMultMax    = 3.0;   // Auto-tuning: largest auto-gap multiplier it may use
 input double   InpLotMultiplierMin = 1.2;   // Auto-tuning: smallest DCA size growth it may use
-input double   InpLotMultiplierMax = 1.8;   // Auto-tuning: largest DCA size growth it may use
+input double   InpLotMultiplierMax = 2.0;   // Auto-tuning: largest DCA size growth it may use
 input double   InpProfitTargetMin  = 0.5;   // Auto-tuning: smallest profit target ($) it may use
 input double   InpProfitTargetMax  = 3.0;   // Auto-tuning: largest profit target ($) it may use
 input int      InpMaxLegsFloor        = 2;    // Auto-tuning will never drop max DCA trades below this

@@ -307,3 +307,31 @@ human-reviewed summaries and anything the automated log wouldn't capture.)
   Shipped as the default behavior. This is documented plainly so it is
   understood as a deliberate preference, not a validated improvement - the
   same honesty standard as every other result in this file.
+
+- **2026-07-31 (final decision: all SL off + 2.0x lot multiplier, shipped
+  despite backtest evidence):** Per explicit request, disabled the
+  catastrophic backstop SL again (`InpUseCatastrophicSL=false`) and raised
+  `InpLotMultiplier` from 1.5 to 2.0 (each DCA leg now doubles instead of
+  growing 50%), reasoning given: "increase lot size to escape a losing
+  trade faster." Backtested this exact combination twice before shipping:
+
+  - **$5,000, same real-tick week (07-19..07-26): net -$5,351.74, PF 0.51,
+    balance/equity drawdown 104.74%/106.49%.** The tester log shows MT5's
+    own broker-side stop-out firing 64% of the way through the week
+    (`stop out occurred on 64% of testing interval`) and a final balance
+    of **-$351.74 - negative**. This is a real, mechanically-simulated
+    broker margin call, not an abstract worst-case estimate.
+  - **$10,000, identical settings, same week: net -$4,712.71, PF 0.61,
+    balance/equity drawdown 59.36%/79.51%.** No stop-out this time, but
+    the account still lost nearly half its value and peaked at ~80%
+    underwater. Doubling the capital did not fix the underlying problem,
+    it only postponed it - directly disproving the idea that "just add
+    more capital as a buffer" rescues an unbounded-loss, doubling-lot-size
+    system.
+
+  Both results were shown in full before this config was finalized. User's
+  explicit decision after reviewing both: ship it anyway ("risky version
+  everywhere, this is final"). Recorded here in full, unedited, so the
+  reasoning and the real numbers behind this choice are never in question
+  later - this was a deliberate, informed decision, not an oversight, a
+  bug, or something I recommended.

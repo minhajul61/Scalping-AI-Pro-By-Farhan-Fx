@@ -31,7 +31,7 @@
 // dashboard can show at a glance whether a given chart is running the latest
 // build - this exact confusion (VPS silently running stale code) came up
 // 2026-07-27 and cost a round of guessing from the leg-count alone.
-#define EA_BUILD_VERSION "2026.07.30.2"
+#define EA_BUILD_VERSION "2026.07.31.1"
 
 #include <Trade\Trade.mqh>
 
@@ -127,6 +127,7 @@ input group "=== Dashboard ==="
 input bool     InpShowDashboard = true;   // Show the on-chart info panel
 input int      InpDashboardX    = 10;     // Panel position - distance from left edge
 input int      InpDashboardY    = 20;     // Panel position - distance from top edge
+input bool     InpSetWhiteChartTheme = true; // Set the chart background to white (the dashboard panel stays dark/readable on top)
 
 CTrade trade;
 
@@ -181,6 +182,26 @@ int    g_lastTuneDateCode = -1;
 #define GV_PREFIX  "GDSE_"
 #define DB_PREFIX  "GDSE_DB_"
 
+// Switches the chart itself to a white background - the dashboard panel
+// below draws its own dark box on top (fixed OBJPROP_BGCOLOR), so it stays
+// readable regardless of this setting.
+void ApplyWhiteChartTheme()
+  {
+   ChartSetInteger(0, CHART_COLOR_BACKGROUND, clrWhite);
+   ChartSetInteger(0, CHART_COLOR_FOREGROUND, clrBlack);
+   ChartSetInteger(0, CHART_COLOR_GRID, C'225,225,225');
+   ChartSetInteger(0, CHART_COLOR_CANDLE_BULL, clrForestGreen);
+   ChartSetInteger(0, CHART_COLOR_CANDLE_BEAR, clrCrimson);
+   ChartSetInteger(0, CHART_COLOR_CHART_UP, clrForestGreen);
+   ChartSetInteger(0, CHART_COLOR_CHART_DOWN, clrCrimson);
+   ChartSetInteger(0, CHART_COLOR_CHART_LINE, clrBlack);
+   ChartSetInteger(0, CHART_COLOR_VOLUME, C'120,120,200');
+   ChartSetInteger(0, CHART_COLOR_BID, clrBlue);
+   ChartSetInteger(0, CHART_COLOR_ASK, clrRed);
+   ChartSetInteger(0, CHART_COLOR_STOP_LEVEL, clrRed);
+   ChartRedraw();
+  }
+
 //+------------------------------------------------------------------+
 int OnInit()
   {
@@ -200,6 +221,9 @@ int OnInit()
             "positions on the same symbol, which a netting account cannot hold. Refusing to run.");
       return(INIT_FAILED);
      }
+
+   if(InpSetWhiteChartTheme)
+      ApplyWhiteChartTheme();
 
    g_atrHandle = iATR(_Symbol, PERIOD_M1, InpAtrPeriod);
    if(g_atrHandle == INVALID_HANDLE)

@@ -31,7 +31,7 @@
 // dashboard can show at a glance whether a given chart is running the latest
 // build - this exact confusion (VPS silently running stale code) came up
 // 2026-07-27 and cost a round of guessing from the leg-count alone.
-#define EA_BUILD_VERSION "2026.07.30.1"
+#define EA_BUILD_VERSION "2026.07.30.2"
 
 #include <Trade\Trade.mqh>
 
@@ -48,8 +48,10 @@ input int      InpMaxSpreadPoints    = 300;       // Skip new trades if spread i
 
 input group "=== Basket Core ==="
 input double   InpInitialLot            = 0.02;   // First trade size (lot)
-input double   InpBasketProfitTargetUSD = 2.0;    // Close basket once it earns this much profit ($)
-input int      InpMaxLegsPerBasket      = 7;      // Max number of DCA add-ons allowed per basket
+input double   InpBasketProfitTargetUSD = 2.0;    // Close basket once it earns this much profit ($) - base value, grows per cycle (see below)
+input int      InpMaxLegsPerBasket      = 7;      // Legs per DCA "cycle" - after this many, a new cycle starts (lot size resets) instead of stopping
+input int      InpAbsoluteMaxLegsPerBasket = 50;  // Hard safety ceiling on total legs across all cycles (should rarely if ever be reached)
+input double   InpCycleTargetGrowth     = 0.5;    // Each completed cycle raises the profit target by this fraction (e.g. 0.5 = +50% per cycle)
 
 input group "=== DCA / Martingale ==="
 input bool     InpUseAtrDcaDistance   = false;    // Auto-adjust DCA gap by volatility (off = use fixed $ gap below)
@@ -406,9 +408,22 @@ void RefreshBaskets()
 //| This does NOT guarantee an exit: price still has to come back up   |
 //| to at least the floor for this to fire at all.                     |
 //+------------------------------------------------------------------+
+// The target is not a flat number - it scales with how many full DCA cycles
+// this basket has already gone through (0 cycles = base target; each
+// completed cycle raises it by InpCycleTargetGrowth). A basket that has
+// survived several cycles has more capital and more adverse distance
+// behind it, so it demands proportionally more profit before it's worth
+// closing, rather than settling for the same small target regardless of
+// how much risk is currently open.
+double GetBaseProfitTarget(const SBasket &b)
+  {
+   int completedCycles = (g_tunedMaxLegs > 0) ? (b.legCount / g_tunedMaxLegs) : 0;
+   return g_tunedProfitTarget * (1.0 + completedCycles * InpCycleTargetGrowth);
+  }
+
 double GetEffectiveProfitTarget(const SBasket &b)
   {
-   double target = g_tunedProfitTarget;
+   double target = GetBaseProfitTarget(b);
    if(!InpUseStuckBasketRelief || b.legCount < g_tunedMaxLegs || b.lastLegTime == 0)
       return target;
 
@@ -520,14 +535,20 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
    else
       adverse = (ask >= b.lastLegEntry + dcaDistance);
 
-   if(adverse && b.legCount < g_tunedMaxLegs)
+   if(adverse && b.legCount < InpAbsoluteMaxLegsPerBasket)
      {
       if(InpUseAtrSpikeFilter && IsAtrSpiking())
          return; // "news proxy" - don't average into a volatility spike
       if(InpUseTrendFilter && IsAgainstTrend(side))
          return; // don't keep averaging into a strong opposing higher-timeframe trend
 
-      OpenLeg(side, b.legCount, b.lastLegLots);
+      // Cycling: once a full cycle (g_tunedMaxLegs) is used up, the next leg
+      // restarts lot sizing from InpInitialLot instead of continuing to
+      // compound the multiplier indefinitely - keeps a basket that's been
+      // going against for a long time from ever needing an unaffordable lot
+      // size, while still letting it keep averaging if price keeps moving.
+      int legIndexForSizing = b.legCount % g_tunedMaxLegs;
+      OpenLeg(side, legIndexForSizing, b.lastLegLots);
       return;
      }
   }
@@ -1231,8 +1252,9 @@ void UpdateDashboard()
    DbDivider("Div1", x, y, 260, C'55,55,65');
    y += 9;
 
-   DbLabel("BuyHdr", lx, y, StringFormat("BUY BASKET  (%d/%d legs)",
-           g_buyBasket.legCount, g_tunedMaxLegs), C'0,170,220', 8);
+   DbLabel("BuyHdr", lx, y, StringFormat("BUY BASKET  (leg %d/%d, cycle %d)",
+           (g_tunedMaxLegs > 0 ? g_buyBasket.legCount % g_tunedMaxLegs : g_buyBasket.legCount), g_tunedMaxLegs,
+           (g_tunedMaxLegs > 0 ? g_buyBasket.legCount / g_tunedMaxLegs + 1 : 1)), C'0,170,220', 8);
    y += lh;
    DbLabel("BuyAvg", lx, y, PadRight("Avg Entry", lblW) + DoubleToString(g_buyBasket.weightedAvgEntry, 2), clrWhite, 8);
    y += lh;
@@ -1250,8 +1272,9 @@ void UpdateDashboard()
    DbDivider("Div2", x, y, 260, C'55,55,65');
    y += 9;
 
-   DbLabel("SellHdr", lx, y, StringFormat("SELL BASKET (%d/%d legs)",
-           g_sellBasket.legCount, g_tunedMaxLegs), C'0,170,220', 8);
+   DbLabel("SellHdr", lx, y, StringFormat("SELL BASKET (leg %d/%d, cycle %d)",
+           (g_tunedMaxLegs > 0 ? g_sellBasket.legCount % g_tunedMaxLegs : g_sellBasket.legCount), g_tunedMaxLegs,
+           (g_tunedMaxLegs > 0 ? g_sellBasket.legCount / g_tunedMaxLegs + 1 : 1)), C'0,170,220', 8);
    y += lh;
    DbLabel("SellAvg", lx, y, PadRight("Avg Entry", lblW) + DoubleToString(g_sellBasket.weightedAvgEntry, 2), clrWhite, 8);
    y += lh;

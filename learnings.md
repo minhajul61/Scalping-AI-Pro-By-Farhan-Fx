@@ -270,3 +270,40 @@ human-reviewed summaries and anything the automated log wouldn't capture.)
   worse, not better - PF 1.56 -> 1.37, drawdown roughly doubled. Shipped
   on by default anyway (per request) but explicitly flagged as unproven,
   not a validated improvement, in the README.
+
+- **2026-07-30 (DCA cycling + dynamic profit target, per explicit request):**
+  User asked for two changes together: (1) keep max legs at 7, but once a
+  full cycle is used up without hitting target, start a new cycle instead
+  of just waiting - lot sizing resets to `InpInitialLot` rather than
+  compounding further; (2) the profit target should not be a flat number -
+  it should scale up with how deep/risky the basket currently is. Built
+  both: `InpMaxLegsPerBasket` is now a cycle length (real ceiling is the
+  new `InpAbsoluteMaxLegsPerBasket`, default 50), and
+  `GetBaseProfitTarget()` scales target by `(1 + completedCycles *
+  InpCycleTargetGrowth)`.
+
+  Backtested on the same real-tick week (07-19..07-26) against the proven
+  flat 7-leg hard-cap config:
+
+  | Config | Deposit | PF | Net | Balance DD | Equity DD |
+  |---|---|---|---|---|---|
+  | Flat hard-cap (previous best) | $5,000 | 1.56 | +$2,298.00 | 4.50% | 17.88% |
+  | Cycling + dynamic target | $5,000 | 0.84 | -$1,068.77 | 50.30% | 54.48% |
+  | Cycling + dynamic target | $20,000 | 1.12 | +$940.97 | 9.71% | 11.92% |
+
+  Cycling underperforms the flat hard-cap at every capital level tested -
+  worse PF, much worse drawdown, and even the $20k cycling run's *dollar*
+  profit is smaller than the $5k hard-cap run's, despite 4x the capital
+  (4.7% return vs 45.96%). The mechanism: hard-cap-and-wait freezes a
+  basket's total exposure once maxed out and lets stuck-basket relief ease
+  the exit over time; cycling instead keeps committing fresh capital in the
+  same adverse direction every time a cycle completes, which compounds
+  badly on exactly the kind of multi-day one-directional move this file has
+  already documented (the traced SELL-basket example). More capital
+  cushions this (the $20k run recovered to a small profit) but does not fix
+  the underlying inefficiency.
+
+  **User's explicit decision after seeing this data: keep cycling anyway.**
+  Shipped as the default behavior. This is documented plainly so it is
+  understood as a deliberate preference, not a validated improvement - the
+  same honesty standard as every other result in this file.

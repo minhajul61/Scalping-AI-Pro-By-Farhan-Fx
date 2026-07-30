@@ -26,16 +26,45 @@ breaker.
 ## Core logic
 
 - Bootstrap: if a basket is empty, open one `InpInitialLot` leg.
-- Profit target: once a basket's summed floating P/L reaches
-  `InpBasketProfitTargetUSD`, close every leg in that basket and reopen fresh.
+- Profit target: once a basket's summed floating P/L reaches its current
+  target, close every leg in that basket and reopen fresh. The target is
+  **not flat** — see "DCA cycling" below.
 - DCA: if price moves `InpDcaDistancePrice` adverse past the basket's last
-  leg, add another leg sized at `InpLotMultiplier`x the initial lot (per leg
-  count, not compounded off the previous leg, to avoid rounding drift), up to
-  `InpMaxLegsPerBasket` legs.
+  leg, add another leg sized at `InpLotMultiplier`x the initial lot (per
+  position-in-cycle, not compounded off the previous leg, to avoid rounding
+  drift), up to `InpAbsoluteMaxLegsPerBasket` legs total (hard safety
+  ceiling, default 50).
 - DCA filters: skips the add if `IsAtrSpiking()` (a volatility-spike "news
   proxy" — real economic-calendar integration wasn't wanted) or if
   `InpUseTrendFilter` finds a strong higher-timeframe trend against the
   basket's direction.
+
+### DCA cycling (added 2026-07-30, per explicit request)
+
+`InpMaxLegsPerBasket` is a **cycle length**, not a hard stop. Once a basket
+uses up a full cycle (e.g. 7 legs) without hitting target, it doesn't just
+sit and wait — the next leg resets lot sizing back to `InpInitialLot` and a
+new cycle begins (leg 8 is sized like leg 1, leg 9 like leg 2, etc.),
+continuing until `InpAbsoluteMaxLegsPerBasket` (the real ceiling). This
+avoids the earlier problem of lot size compounding to an unaffordable size
+by leg 15-20 (see learnings.md for the exact math), at the cost of
+committing more capital into a move that has already proven to go against
+the basket for a full cycle.
+
+To compensate, the profit target itself scales up with depth instead of
+staying flat: `target = InpBasketProfitTargetUSD * (1 + completedCycles *
+InpCycleTargetGrowth)` — a basket that has survived more cycles carries
+more risk, so it demands proportionally more profit before it's worth
+closing. `GetBaseProfitTarget()` computes this; stuck-basket relief (below)
+still eases down from whatever this scaled target currently is, not from
+the flat base.
+
+**Backtested and found to underperform the simple hard-cap approach** (see
+learnings.md 2026-07-30) — tested at $5,000 (net -$1,068.77, PF 0.84) and
+$20,000 (net +$940.97, PF 1.12) on the same week where the flat 7-leg
+hard-cap scored +$2,298, PF 1.56. **Kept anyway per explicit user
+preference** after seeing these results, not because backtesting supports
+it — flagged plainly so this isn't mistaken for a validated improvement.
 
 ## Safety (beyond the original spec — added deliberately)
 

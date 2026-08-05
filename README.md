@@ -140,10 +140,14 @@ trained ML research effort in `ml/` (full story in `ml/README.md` and
   hours-stuck basket) via an ONNX model (`OnnxCreate`/`OnnxRun`), holdout
   AUC 0.81 on genuinely held-out historical episodes. Additive/veto-only —
   can skip or damp a DCA-add, never overrides the rule-based filters to be
-  *less* conservative. **The MQL5-side ONNX inference has not been
-  runtime-verified** (compiles clean, but live execution couldn't be
-  confirmed this session — see `ml/learnings.md`). Check the Experts log
-  for "ML stuck-risk model loaded successfully" before enabling.
+  *less* conservative. **Runtime-verified in the real MT5 Strategy Tester
+  (2026-08-06)** — two real bugs found and fixed (model needs
+  `ONNX_COMMON_FOLDER`; both `OnnxSetOutputShape()` calls were missing).
+  Backtested ML ON vs OFF, same $10,000/real-tick week: net loss roughly
+  halved, PF 0.61->0.71, drawdown cut 18-31 points, shorter losing
+  streaks — a genuine, verified improvement (still net-negative overall,
+  since ML doesn't touch the no-SL/2.0x-multiplier configuration itself).
+  Full story in `ml/learnings.md`.
 
 ## Self-tuning "AI brain"
 

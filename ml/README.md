@@ -41,14 +41,16 @@ backtested against the EA's own documented baselines.
   by default).** Holdout AUC **0.81** on 526 genuinely held-out episodes —
   a real signal. Exported to ONNX (109KB, numerically validated against
   the source model to 8.96e-08) and wired into `ManageBasketEntries()`/
-  `EffectiveLotMultiplier()` in the EA. **The MQL5-side `OnnxRun()` call
-  has NOT been runtime-verified** (only compile-checked) — a concurrent,
-  unrelated process occupied the local testing terminal every time
-  verification was attempted. Check the Experts/Journal log for "ML
-  stuck-risk model loaded successfully" before trusting
-  `InpUseMLStuckRiskFilter=true` — the fallback is non-fatal (degrades to
-  "no effect", not a crash) but that also means a silent binding mismatch
-  wouldn't be obvious without checking the log.
+  `EffectiveLotMultiplier()` in the EA. **Runtime-verified in the real MT5
+  Strategy Tester (2026-08-06)** — two real bugs found and fixed (model
+  file needs `ONNX_COMMON_FOLDER`, not the per-agent sandbox that gets
+  wiped every run; `OnnxSetOutputShape()` was missing for both outputs).
+  Backtested ML ON vs OFF on the same $10,000/real-tick week: net loss
+  roughly halved (-$4,712.71 -> -$2,461.29), PF 0.61 -> 0.71, drawdown cut
+  18-31 percentage points, shorter losing streaks — a genuine, verified
+  improvement (though one metric, largest single loss, got worse, and the
+  EA is still net-negative overall given the no-SL/2.0x-multiplier
+  configuration ML doesn't touch). Full story in `learnings.md`.
 
 ## Why this might not work — stated upfront (written before training)
 

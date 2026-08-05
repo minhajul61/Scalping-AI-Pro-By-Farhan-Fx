@@ -31,7 +31,7 @@
 // dashboard can show at a glance whether a given chart is running the latest
 // build - this exact confusion (VPS silently running stale code) came up
 // 2026-07-27 and cost a round of guessing from the leg-count alone.
-#define EA_BUILD_VERSION "2026.08.05.1"
+#define EA_BUILD_VERSION "2026.08.05.3"
 
 #include <Trade\Trade.mqh>
 
@@ -289,7 +289,13 @@ int OnInit()
    if(InpUseMLStuckRiskFilter)
      {
       string modelPath = InpMLModelSubfolder + "\\stuck_basket_risk.onnx";
-      g_mlStuckHandle = OnnxCreate(modelPath, ONNX_DEFAULT);
+      // ONNX_COMMON_FOLDER (shared MQL5\Files under Terminal\Common\, not the
+      // terminal/agent-specific one) - discovered the hard way: the Strategy
+      // Tester's per-agent MQL5\Files sandbox gets wiped/regenerated on every
+      // run, so a model file dropped there manually does not survive to the
+      // next run. The Common folder is genuinely persistent and shared across
+      // every terminal install and every tester agent on this machine.
+      g_mlStuckHandle = OnnxCreate(modelPath, ONNX_COMMON_FOLDER);
       if(g_mlStuckHandle == INVALID_HANDLE)
         {
          PrintFormat("GoldDualBasketDCA: ML stuck-risk model failed to load (%s, err=%d) - "
@@ -298,10 +304,15 @@ int OnInit()
         }
       else
         {
-         ulong inputShape[] = {1, ML_STUCK_FEATURE_COUNT};
-         if(!OnnxSetInputShape(g_mlStuckHandle, 0, inputShape))
+         ulong inputShape[]  = {1, ML_STUCK_FEATURE_COUNT};
+         ulong labelShape[]  = {1};    // output 0: int64 predicted label
+         ulong probShape[]   = {1, 2}; // output 1: float probabilities [P(class=0), P(class=1)]
+         bool shapesOk = OnnxSetInputShape(g_mlStuckHandle, 0, inputShape)
+                         && OnnxSetOutputShape(g_mlStuckHandle, 0, labelShape)
+                         && OnnxSetOutputShape(g_mlStuckHandle, 1, probShape);
+         if(!shapesOk)
            {
-            PrintFormat("GoldDualBasketDCA: OnnxSetInputShape failed for ML stuck-risk model (err=%d) - "
+            PrintFormat("GoldDualBasketDCA: Onnx*Shape setup failed for ML stuck-risk model (err=%d) - "
                         "continuing on rule-based logic alone (non-fatal).", GetLastError());
             OnnxRelease(g_mlStuckHandle);
             g_mlStuckHandle = INVALID_HANDLE;
@@ -860,6 +871,8 @@ double GetMLStuckRisk(const SBasket &b, double prospectiveLots, double dcaDistan
    // We only need P(class=1) from the second output.
    long  labelOut[];
    float probOut[];
+   ArrayResize(labelOut, 1);
+   ArrayResize(probOut, 2);
    if(!OnnxRun(g_mlStuckHandle, ONNX_DEFAULT, onnxInput, labelOut, probOut))
      {
       PrintFormat("GoldDualBasketDCA: OnnxRun failed for ML stuck-risk model (err=%d) - "

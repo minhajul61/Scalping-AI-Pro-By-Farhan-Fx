@@ -185,3 +185,67 @@ Farhan Fx` Python project's `learnings.md`.)
   (risk always reads as 0) rather than crashing, but that also means it
   could silently do nothing useful without the log confirming it's really
   running.
+
+- **2026-08-06 (ONNX runtime verification: two real bugs found and fixed,
+  then a genuine, verified positive backtest result):** Got exclusive
+  access to an isolated MT5 install (a separate Vantage Markets terminal,
+  own data folder, never conflicts with any other concurrent session) and
+  finally ran the ML-augmented EA through the real MT5 Strategy Tester -
+  not just a compile check. Found two real runtime bugs the compile
+  couldn't catch:
+
+  1. **File not found (err 5019) despite the file being right where the
+     code looked.** The Strategy Tester runs each test in an isolated
+     per-agent sandbox (`...\Tester\<terminal-hash>\Agent-127.0.0.1-3000\
+     MQL5\Files\`) that gets wiped/regenerated on every single run - a
+     model file copied there manually does not survive to the next test.
+     **Fix**: changed `OnnxCreate()` to use the `ONNX_COMMON_FOLDER` flag
+     instead, which reads from `Terminal\Common\Files\` - a location that
+     is genuinely shared and persistent across every terminal install and
+     every tester agent on the machine, not per-instance.
+  2. **"ONNX: parameter is empty" (err 5805) on every `OnnxRun()` call.**
+     `OnnxSetInputShape()` was called but the two OUTPUT shapes (int64
+     label `[1]`, float probabilities `[1,2]`) were never set - the model
+     genuinely loaded but couldn't run. **Fix**: added two
+     `OnnxSetOutputShape()` calls alongside the input one, plus
+     defensively pre-sizing the output arrays with `ArrayResize()` before
+     each `OnnxRun()` call.
+
+  After both fixes, confirmed via the Experts log that inference is
+  genuinely running and producing sensible decisions in real time, e.g.:
+  `ML stuck-risk filter SKIPPED BUY DCA-add (leg 6): risk 0.68 >= skip
+  threshold 0.60`.
+
+  **Backtested ML ON vs OFF, identical settings otherwise, $10,000
+  deposit, same real-tick week (07-19..07-26):**
+
+  | Metric | ML OFF | ML ON |
+  |---|---|---|
+  | Net Profit | -$4,712.71 | **-$2,461.29** |
+  | Profit Factor | 0.61 | **0.71** |
+  | Balance Drawdown | 59.36% | **41.49%** |
+  | Equity Drawdown | 79.51% | **48.35%** |
+  | Worst losing streak | 25 trades / -$7,716.99 | **14 trades / -$5,345.46** |
+  | Largest single loss | -$741.03 | -$1,780.82 (worse) |
+
+  A genuine, verified improvement across net P/L, profit factor, both
+  drawdown measures, and losing-streak length - roughly halving the net
+  loss and cutting max drawdown by 18-31 percentage points, by correctly
+  skipping DCA-adds the model flagged as high stuck-risk in real time.
+  One metric got worse (largest single loss, likely because skipping legs
+  changes which legs are still open when a basket eventually unwinds, so
+  the remaining ones each carry more of the loss) - noted honestly rather
+  than only reporting the wins.
+
+  **Still net-negative overall** - the ML filter measurably reduces harm
+  within the EA's current no-SL/2.0x-multiplier configuration, it does
+  not fix the underlying structural risk of that configuration (which
+  remains an explicit, informed user decision, not something ML is meant
+  to solve). One notable performance cost: real-tick testing with ML
+  enabled runs dramatically slower than without it (a single stuck-basket
+  episode can trigger ONNX inference on nearly every tick for hours of
+  simulated time) - worth optimizing (e.g. only re-checking once per new
+  adverse-trigger event rather than every tick) in a future revision if
+  this becomes a live-trading latency concern, though M1-bar-level
+  decision frequency in live trading is unlikely to hit the same
+  every-real-tick volume seen in Strategy Tester's Model=4.

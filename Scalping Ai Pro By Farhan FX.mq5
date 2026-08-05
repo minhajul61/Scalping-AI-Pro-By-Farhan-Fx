@@ -31,7 +31,7 @@
 // dashboard can show at a glance whether a given chart is running the latest
 // build - this exact confusion (VPS silently running stale code) came up
 // 2026-07-27 and cost a round of guessing from the leg-count alone.
-#define EA_BUILD_VERSION "2026.07.31.2"
+#define EA_BUILD_VERSION "2026.08.05.1"
 
 #include <Trade\Trade.mqh>
 
@@ -123,6 +123,20 @@ input double   InpLegStatWinRateFloor = 0.30;  // Win rate below this lowers the
 input double   InpLegStatWinRateCeil  = 0.70;  // Win rate above this raises the max DCA trades allowed back up
 input bool     InpResetTunedParams = false; // Reset all auto-tuned values back to the defaults above
 
+input group "=== ML (ONNX) ==="
+// Trained externally in Python (E:\XAUUSD Dual Basket DCA EA\ml\), loaded
+// here via MQL5's built-in ONNX inference support. Additive/veto-only on
+// top of the existing rule-based system, never a replacement - both
+// default OFF until backtested against this EA's own documented
+// baselines. See ml\README.md and ml\learnings.md for the full research
+// story, including a trend-continuation model that was tried and did NOT
+// clear a meaningful bar (honest negative result, not integrated here).
+input bool   InpUseMLStuckRiskFilter    = false; // Use the trained stuck-basket-risk model to skip/shrink risky DCA-adds
+input double InpMLStuckRiskSkipThreshold = 0.60; // Skip this DCA-add entirely if predicted stuck-risk exceeds this
+input double InpMLStuckRiskShrinkStart   = 0.35; // Start damping lot growth once predicted risk exceeds this
+input double InpMLStuckRiskShrinkEnd     = 0.60; // Lot growth fully damped to 1.0x by this risk level
+input string InpMLModelSubfolder         = "DCA_ML"; // Subfolder under MQL5\Files\ where the .onnx model lives
+
 input group "=== Dashboard ==="
 input bool     InpShowDashboard = true;   // Show the on-chart info panel
 input int      InpDashboardX    = 10;     // Panel position - distance from left edge
@@ -141,6 +155,7 @@ struct SBasket
    double   lastLegEntry;
    double   lastLegLots;
    datetime lastLegTime;
+   datetime bootstrapTime;   // time of this basket's first (oldest) leg - for ML stuck-risk features
   };
 
 SBasket g_buyBasket, g_sellBasket;
@@ -165,6 +180,16 @@ double             g_regimeTrendPercentileNow = 0.0;
 double             g_regimeVolPercentileNow   = 0.0;
 int                g_lastRegimeDateCode = -1;
 bool               g_regimeDetectionActive = false; // InpUseRegimeDetection, downgraded to false at runtime if setup fails
+
+// --- ML (ONNX) stuck-basket-risk model ---
+// Trained/validated in Python (ml\src\dca_ml\modeling\train_stuck_model.py,
+// holdout AUC 0.81) on 12 features in this exact order - MUST match
+// ml\models\stuck_basket_risk\v1\onnx_input_spec.json.
+#define ML_STUCK_FEATURE_COUNT 12
+long g_mlStuckHandle    = INVALID_HANDLE;
+bool g_mlStuckAvailable = false; // downgraded to false at runtime if the model file is missing/fails to load - non-fatal,
+                                  // the EA keeps trading on rule-based logic alone (there is no SL to fall back on otherwise)
+double g_mlStuckRiskNow = 0.0;    // set right before a DCA-add decision, read by EffectiveLotMultiplier(), reset after
 
 int    g_dayStartDateCode = -1;
 double g_dayStartBalance  = 0.0;
@@ -261,6 +286,35 @@ int OnInit()
         }
      }
 
+   if(InpUseMLStuckRiskFilter)
+     {
+      string modelPath = InpMLModelSubfolder + "\\stuck_basket_risk.onnx";
+      g_mlStuckHandle = OnnxCreate(modelPath, ONNX_DEFAULT);
+      if(g_mlStuckHandle == INVALID_HANDLE)
+        {
+         PrintFormat("GoldDualBasketDCA: ML stuck-risk model failed to load (%s, err=%d) - "
+                     "continuing on rule-based logic alone (non-fatal).", modelPath, GetLastError());
+         g_mlStuckAvailable = false;
+        }
+      else
+        {
+         ulong inputShape[] = {1, ML_STUCK_FEATURE_COUNT};
+         if(!OnnxSetInputShape(g_mlStuckHandle, 0, inputShape))
+           {
+            PrintFormat("GoldDualBasketDCA: OnnxSetInputShape failed for ML stuck-risk model (err=%d) - "
+                        "continuing on rule-based logic alone (non-fatal).", GetLastError());
+            OnnxRelease(g_mlStuckHandle);
+            g_mlStuckHandle = INVALID_HANDLE;
+            g_mlStuckAvailable = false;
+           }
+         else
+           {
+            g_mlStuckAvailable = true;
+            Print("GoldDualBasketDCA: ML stuck-risk model loaded successfully.");
+           }
+        }
+     }
+
    LoadTunedParams();
    UpdateDayTracking();
    MaybeUpdateMarketRegime();
@@ -287,6 +341,8 @@ void OnDeinit(const int reason)
       IndicatorRelease(g_regimeAtrHandle);
    if(g_regimeMaHandle != INVALID_HANDLE)
       IndicatorRelease(g_regimeMaHandle);
+   if(g_mlStuckHandle != INVALID_HANDLE)
+      OnnxRelease(g_mlStuckHandle);
    EventKillTimer();
    ObjectsDeleteAll(0, DB_PREFIX);
    ChartRedraw();
@@ -367,6 +423,7 @@ void ResetBasket(SBasket &b)
    b.lastLegEntry     = 0;
    b.lastLegLots      = 0;
    b.lastLegTime      = 0;
+   b.bootstrapTime    = 0;
   }
 
 void ScanBasket(ENUM_BASKET_SIDE side, SBasket &b)
@@ -406,6 +463,8 @@ void ScanBasket(ENUM_BASKET_SIDE side, SBasket &b)
          b.lastLegLots   = lots;
          b.lastLegTicket = ticket;
         }
+      if(b.bootstrapTime == 0 || t < b.bootstrapTime)
+         b.bootstrapTime = t;
      }
 
    if(b.totalLots > 0)
@@ -572,7 +631,31 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
       // going against for a long time from ever needing an unaffordable lot
       // size, while still letting it keep averaging if price keeps moving.
       int legIndexForSizing = b.legCount % g_tunedMaxLegs;
+
+      if(InpUseMLStuckRiskFilter)
+        {
+         g_mlStuckRiskNow = 0.0; // baseline (un-shrunk) prospective lot, matching how the model was trained
+         double prospectiveLots = NextLotSize(legIndexForSizing, b.lastLegLots);
+         double risk = GetMLStuckRisk(b, prospectiveLots, dcaDistance, false, false);
+
+         if(risk >= InpMLStuckRiskSkipThreshold)
+           {
+            string msg = StringFormat("ML stuck-risk filter SKIPPED %s DCA-add (leg %d): risk %.2f >= skip threshold %.2f",
+                                       (side == SIDE_BUY ? "BUY" : "SELL"), b.legCount + 1, risk, InpMLStuckRiskSkipThreshold);
+            Print("GoldDualBasketDCA: " + msg);
+            WriteTuningLog(msg);
+            g_mlStuckRiskNow = 0.0;
+            return;
+           }
+
+         g_mlStuckRiskNow = risk; // EffectiveLotMultiplier(), called inside OpenLeg below, picks this up
+         if(risk > InpMLStuckRiskShrinkStart)
+            WriteTuningLog(StringFormat("ML stuck-risk filter damping %s DCA-add (leg %d): risk %.2f",
+                                         (side == SIDE_BUY ? "BUY" : "SELL"), b.legCount + 1, risk));
+        }
+
       OpenLeg(side, legIndexForSizing, b.lastLegLots);
+      g_mlStuckRiskNow = 0.0; // don't let this leak into the other side's sizing this same tick
       return;
      }
   }
@@ -715,6 +798,77 @@ bool IsAgainstTrend(ENUM_BASKET_SIDE side)
    if(side == SIDE_BUY)
       return(trend == -1);
    return(trend == 1);
+  }
+
+//+------------------------------------------------------------------+
+//| ML stuck-basket-risk model (ONNX, trained externally in Python -   |
+//| see ml\README.md / ml\learnings.md). Predicts P(this DCA-add leads |
+//| to a multi-cycle, hours-stuck basket) - additive/veto-only, never  |
+//| replaces the rule-based filters above. Holdout AUC 0.81 on a       |
+//| genuinely held-out set of historical episodes as of ml\models\     |
+//| stuck_basket_risk\v1\ - a real signal, but NOT live-verified in    |
+//| MQL5 yet (no way to execute MQL5 ONNX calls outside a live/demo    |
+//| chart) - this is exactly why InpUseMLStuckRiskFilter defaults to   |
+//| false, and why every failure path below degrades to "no opinion"   |
+//| (risk=0, changes nothing) rather than blocking trades on a guess.  |
+//+------------------------------------------------------------------+
+// MUST match the exact order in ml\models\stuck_basket_risk\v1\onnx_input_spec.json:
+// leg_count_before, completed_cycles_before, floating_pl_before,
+// hours_since_bootstrap, hours_since_last_leg, dca_distance_in_effect,
+// lots, is_against_trend_now, is_atr_spiking_now,
+// regime_RANGING, regime_TRENDING, regime_VOLATILE
+void BuildStuckFeatures(const SBasket &b, double prospectiveLots, double dcaDistance,
+                        bool againstTrend, bool atrSpiking, double &features[])
+  {
+   ArrayResize(features, ML_STUCK_FEATURE_COUNT);
+   int completedCycles = (g_tunedMaxLegs > 0) ? (b.legCount / g_tunedMaxLegs) : 0;
+   double hoursSinceBootstrap = (b.bootstrapTime > 0) ? (double)(TimeCurrent() - b.bootstrapTime) / 3600.0 : 0.0;
+   double hoursSinceLastLeg   = (b.lastLegTime > 0)   ? (double)(TimeCurrent() - b.lastLegTime) / 3600.0   : 0.0;
+
+   features[0]  = (double)b.legCount;
+   features[1]  = (double)completedCycles;
+   features[2]  = b.floatingPL;
+   features[3]  = hoursSinceBootstrap;
+   features[4]  = hoursSinceLastLeg;
+   features[5]  = dcaDistance;
+   features[6]  = prospectiveLots;
+   features[7]  = againstTrend ? 1.0 : 0.0;
+   features[8]  = atrSpiking ? 1.0 : 0.0;
+   features[9]  = (g_currentRegime == REGIME_RANGING)  ? 1.0 : 0.0;
+   features[10] = (g_currentRegime == REGIME_TRENDING) ? 1.0 : 0.0;
+   features[11] = (g_currentRegime == REGIME_VOLATILE) ? 1.0 : 0.0;
+  }
+
+// Returns P(stuck) in [0,1], or 0.0 (i.e. "no opinion, change nothing")
+// if the model isn't loaded or inference fails for any reason.
+double GetMLStuckRisk(const SBasket &b, double prospectiveLots, double dcaDistance,
+                       bool againstTrend, bool atrSpiking)
+  {
+   if(!g_mlStuckAvailable)
+      return 0.0;
+
+   double featD[];
+   BuildStuckFeatures(b, prospectiveLots, dcaDistance, againstTrend, atrSpiking, featD);
+
+   float onnxInput[];
+   ArrayResize(onnxInput, ML_STUCK_FEATURE_COUNT);
+   for(int i = 0; i < ML_STUCK_FEATURE_COUNT; i++)
+      onnxInput[i] = (float)featD[i];
+
+   // skl2onnx classifier exported with zipmap=False produces two outputs in
+   // this order: int64 predicted labels [N], float probabilities [N, 2].
+   // We only need P(class=1) from the second output.
+   long  labelOut[];
+   float probOut[];
+   if(!OnnxRun(g_mlStuckHandle, ONNX_DEFAULT, onnxInput, labelOut, probOut))
+     {
+      PrintFormat("GoldDualBasketDCA: OnnxRun failed for ML stuck-risk model (err=%d) - "
+                  "treating as risk=0 this tick (no change to behavior).", GetLastError());
+      return 0.0;
+     }
+   if(ArraySize(probOut) < 2)
+      return 0.0;
+   return (double)probOut[1];
   }
 
 //+------------------------------------------------------------------+
@@ -881,6 +1035,16 @@ double EffectiveLotMultiplier()
       mult = MathMin(mult, InpIntradayBrakeMultiplierCap);
    if(g_regimeDetectionActive)
       mult = MathMin(mult, g_regimeLotMultiplierCap);
+   if(InpUseMLStuckRiskFilter && g_mlStuckRiskNow > InpMLStuckRiskShrinkStart)
+     {
+      // Linearly damp the multiplier from its current value down to 1.0x
+      // (no growth at all) as predicted risk rises from ShrinkStart to
+      // ShrinkEnd - same pattern as the intraday-brake/regime caps above.
+      double range = MathMax(InpMLStuckRiskShrinkEnd - InpMLStuckRiskShrinkStart, 0.0001);
+      double progress = MathMin((g_mlStuckRiskNow - InpMLStuckRiskShrinkStart) / range, 1.0);
+      double mlCap = mult - (mult - 1.0) * progress;
+      mult = MathMin(mult, mlCap);
+     }
    return mult;
   }
 
@@ -1231,7 +1395,7 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, InpDashboardX - 10);
       ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, InpDashboardY - 10);
       ObjectSetInteger(0, bg, OBJPROP_XSIZE, 280);
-      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 560);
+      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 575);
       ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'12,12,16');
       ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, bg, OBJPROP_COLOR, C'70,70,80');
@@ -1241,9 +1405,9 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_ZORDER, 0);
      }
 
-   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 486, 260, 24, "X  CLOSE ALL", C'120,20,20');
-   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 514, 126, 22, "Close BUY", C'20,80,20');
-   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 514, 126, 22, "Close SELL", C'20,80,20');
+   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 501, 260, 24, "X  CLOSE ALL", C'120,20,20');
+   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 529, 126, 22, "Close BUY", C'20,80,20');
+   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 529, 126, 22, "Close SELL", C'20,80,20');
   }
 
 void UpdateDashboard()
@@ -1338,6 +1502,13 @@ void UpdateDashboard()
    color regimeColor = (g_currentRegime == REGIME_TRENDING) ? C'0,170,220'
                         : (g_currentRegime == REGIME_VOLATILE) ? clrOrange : clrLime;
    DbLabel("Regime", lx, y, PadRight("Regime", lblW) + regimeText, g_regimeDetectionActive ? regimeColor : clrSilver, 8);
+   y += lh;
+   string mlText = !InpUseMLStuckRiskFilter ? "off"
+                   : !g_mlStuckAvailable ? "model not loaded"
+                   : StringFormat("ON (risk now %.0f%%)", g_mlStuckRiskNow * 100.0);
+   color mlColor = (InpUseMLStuckRiskFilter && !g_mlStuckAvailable) ? clrRed
+                   : (g_mlStuckRiskNow > InpMLStuckRiskShrinkStart) ? clrOrange : clrSilver;
+   DbLabel("MlStuckRisk", lx, y, PadRight("ML Stuck-Risk", lblW) + mlText, mlColor, 8);
    y += lh + 6;
 
    DbDivider("Div4", x, y, 260, C'55,55,65');

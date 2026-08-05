@@ -1,0 +1,8 @@
+{
+  "n_dca_add_decisions": 5214,
+  "n_positive_stuck": 337,
+  "n_negative": 4877,
+  "n_dropped_censored": 8,
+  "gate_floor": 30,
+  "gate_passed": true
+}

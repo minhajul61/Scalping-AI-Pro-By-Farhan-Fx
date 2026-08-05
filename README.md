@@ -126,6 +126,25 @@ meaningful safety layer being deliberately given up per explicit request,
 not a redundant one. The intraday soft-brake below is a genuine mitigation,
 not an equivalent guarantee.
 
+## Trained ML models (`ml/` subfolder, 2026-08-05)
+
+Beyond the rule-based "AI brain" below, this project has a genuine, Python-
+trained ML research effort in `ml/` (full story in `ml/README.md` and
+`ml/learnings.md`). Two models were researched:
+
+- **Trend-continuation**: NOT shipped — no honest edge found (matches the
+  sibling `Scalping AI Pro By Farhan Fx` project's own conclusion on raw
+  XAUUSD direction prediction).
+- **Stuck-basket-risk**: shipped, gated behind `InpUseMLStuckRiskFilter`
+  (default **false**). Predicts P(this DCA-add leads to a multi-cycle,
+  hours-stuck basket) via an ONNX model (`OnnxCreate`/`OnnxRun`), holdout
+  AUC 0.81 on genuinely held-out historical episodes. Additive/veto-only —
+  can skip or damp a DCA-add, never overrides the rule-based filters to be
+  *less* conservative. **The MQL5-side ONNX inference has not been
+  runtime-verified** (compiles clean, but live execution couldn't be
+  confirmed this session — see `ml/learnings.md`). Check the Experts log
+  for "ML stuck-risk model loaded successfully" before enabling.
+
 ## Self-tuning "AI brain"
 
 Native MQL5 has no ML libraries, so this is a **rule-based, not trained**

@@ -1,0 +1,12 @@
+MetaTrader5
+pandas
+numpy
+scikit-learn
+lightgbm
+joblib
+python-dotenv
+onnx
+onnxruntime
+skl2onnx
+onnxmltools
+pyarrow

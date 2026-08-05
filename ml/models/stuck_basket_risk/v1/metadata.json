@@ -1,0 +1,38 @@
+{
+  "n_positive": 337,
+  "n_episodes_positive": 25,
+  "best_model_name": "shallow_rf",
+  "val_metrics": {
+    "logistic": {
+      "auc": 0.9141696152145069,
+      "log_loss": 0.2956943809359499,
+      "brier": 0.06870218614985091,
+      "n": 990,
+      "positive_rate": 0.03838383838383838
+    },
+    "shallow_rf": {
+      "auc": 0.9244250331711632,
+      "log_loss": 0.3310795482539667,
+      "brier": 0.08901669023310124,
+      "n": 990,
+      "positive_rate": 0.03838383838383838
+    },
+    "shallow_lgbm": {
+      "auc": 0.9232640424590888,
+      "log_loss": 0.24172540493422223,
+      "brier": 0.06260386219352539,
+      "n": 990,
+      "positive_rate": 0.03838383838383838
+    }
+  },
+  "holdout_metrics": {
+    "auc": 0.8104059182826306,
+    "log_loss": 0.45537333447640743,
+    "brier": 0.13536845644880383,
+    "n": 1088,
+    "positive_rate": 0.06066176470588235
+  },
+  "majority_baseline_holdout_accuracy": 0.9393382352941176,
+  "shipped": true,
+  "conclusion": "shallow_rf reaches holdout AUC=0.8104 - a real, meaningfully-above-chance signal, candidate for shipping (still gated behind InpUseMLStuckRiskFilter=false by default)."
+}

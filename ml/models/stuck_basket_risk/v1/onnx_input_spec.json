@@ -1,0 +1,18 @@
+{
+  "feature_cols": [
+    "leg_count_before",
+    "completed_cycles_before",
+    "floating_pl_before",
+    "hours_since_bootstrap",
+    "hours_since_last_leg",
+    "dca_distance_in_effect",
+    "lots",
+    "is_against_trend_now",
+    "is_atr_spiking_now",
+    "regime_RANGING",
+    "regime_TRENDING",
+    "regime_VOLATILE"
+  ],
+  "model_type": "shallow_rf",
+  "holdout_auc": 0.8104059182826306
+}

@@ -1,0 +1,122 @@
+{
+  "results_per_horizon": [
+    {
+      "horizon": 30,
+      "best_model_name": "logistic",
+      "val_metrics": {
+        "logistic": {
+          "auc": 0.5140511180329695,
+          "log_loss": 0.6933552569876399,
+          "brier": 0.25010040454895577,
+          "n": 15733,
+          "positive_rate": 0.4735905421725037
+        },
+        "random_forest": {
+          "auc": 0.4926997816953723,
+          "log_loss": 0.7045227670672006,
+          "brier": 0.255561973545832,
+          "n": 15733,
+          "positive_rate": 0.4735905421725037
+        },
+        "lightgbm": {
+          "auc": 0.4883250842637972,
+          "log_loss": 0.8351116362144876,
+          "brier": 0.30306193076133114,
+          "n": 15733,
+          "positive_rate": 0.4735905421725037
+        }
+      },
+      "holdout_metrics": {
+        "auc": 0.5127052609899315,
+        "log_loss": 0.7011900124366685,
+        "brier": 0.253951368731883,
+        "n": 15735,
+        "positive_rate": 0.49799809342230694
+      },
+      "rule_baseline_val": 0.4735905421725037,
+      "rule_baseline_holdout": 0.49799809342230694,
+      "holdout_filtered_rate": 0.5459119496855346,
+      "beats_rule": false
+    },
+    {
+      "horizon": 60,
+      "best_model_name": "random_forest",
+      "val_metrics": {
+        "logistic": {
+          "auc": 0.5269561451384316,
+          "log_loss": 0.69270783271017,
+          "brier": 0.24976731487245388,
+          "n": 15979,
+          "positive_rate": 0.4703673571562676
+        },
+        "random_forest": {
+          "auc": 0.5350416335025513,
+          "log_loss": 0.6995239597299371,
+          "brier": 0.2529657447264996,
+          "n": 15979,
+          "positive_rate": 0.4703673571562676
+        },
+        "lightgbm": {
+          "auc": 0.516660365563351,
+          "log_loss": 0.8193912682152972,
+          "brier": 0.29464267032788144,
+          "n": 15979,
+          "positive_rate": 0.4703673571562676
+        }
+      },
+      "holdout_metrics": {
+        "auc": 0.5101875136957489,
+        "log_loss": 0.7045117602278574,
+        "brier": 0.25552776232020047,
+        "n": 15980,
+        "positive_rate": 0.4892991239048811
+      },
+      "rule_baseline_val": 0.4703673571562676,
+      "rule_baseline_holdout": 0.4892991239048811,
+      "holdout_filtered_rate": 0.48287240729101194,
+      "beats_rule": false
+    },
+    {
+      "horizon": 120,
+      "best_model_name": "lightgbm",
+      "val_metrics": {
+        "logistic": {
+          "auc": 0.5433575709074094,
+          "log_loss": 0.6923143561562373,
+          "brier": 0.24949337718494635,
+          "n": 16249,
+          "positive_rate": 0.4654440273247584
+        },
+        "random_forest": {
+          "auc": 0.5446858713158383,
+          "log_loss": 0.7003138369168794,
+          "brier": 0.25342738666316067,
+          "n": 16249,
+          "positive_rate": 0.4654440273247584
+        },
+        "lightgbm": {
+          "auc": 0.5559055031449844,
+          "log_loss": 0.9009072441117321,
+          "brier": 0.3112906494700057,
+          "n": 16249,
+          "positive_rate": 0.4654440273247584
+        }
+      },
+      "holdout_metrics": {
+        "auc": 0.49529101831673916,
+        "log_loss": 0.8805532262870147,
+        "brier": 0.3167650276206464,
+        "n": 16249,
+        "positive_rate": 0.4832912794633516
+      },
+      "rule_baseline_val": 0.4654440273247584,
+      "rule_baseline_holdout": 0.4832912794633516,
+      "holdout_filtered_rate": 0.4375667022411953,
+      "beats_rule": false
+    }
+  ],
+  "winner_horizon": null,
+  "winner_model": null,
+  "shipped": false,
+  "conclusion": "NO horizon/model combination beat the existing rule's blind continuation rate on genuine holdout. Honest result: no trained model earns a place over the current simple rule for this target, on this data. Not shipped."
+}

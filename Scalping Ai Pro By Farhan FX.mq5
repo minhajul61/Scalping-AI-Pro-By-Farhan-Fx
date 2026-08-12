@@ -45,7 +45,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v4"
+#define EA_BUILD_VERSION "v5"
 
 #include <Trade\Trade.mqh>
 
@@ -187,6 +187,26 @@ int OnInit()
      }
 
    UpdateDayTracking();
+
+   // Diagnostic only (does not affect trading) - confirms whether the
+   // calendar is actually reachable at all, using a wide 7-day window
+   // instead of the live filter's narrow before/after window. Without this,
+   // "no news right now" and "calendar access silently broken" both look
+   // identical (News: clear) - added 2026-08-13 specifically so this can be
+   // verified right after attaching, instead of waiting to line up with a
+   // real event's exact 30-min window.
+   if(InpUseNewsFilter)
+     {
+      MqlCalendarValue diag[];
+      int diagN = CalendarValueHistory(diag, TimeCurrent() - 7 * 24 * 3600, TimeCurrent() + 7 * 24 * 3600, NULL, InpNewsCurrency);
+      if(diagN < 0)
+         PrintFormat("GoldDualBasketDCA: news calendar diagnostic FAILED (err=%d) - the News Filter will silently do nothing until this is fixed.",
+                     GetLastError());
+      else
+         PrintFormat("GoldDualBasketDCA: news calendar diagnostic OK - found %d %s event(s) in the past/next 7 days "
+                     "(this check alone does not affect trading, it only confirms calendar access works).",
+                     diagN, InpNewsCurrency);
+     }
 
    if(InpShowDashboard)
      {

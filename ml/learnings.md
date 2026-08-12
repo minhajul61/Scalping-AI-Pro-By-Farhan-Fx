@@ -249,3 +249,31 @@ Farhan Fx` Python project's `learnings.md`.)
   this becomes a live-trading latency concern, though M1-bar-level
   decision frequency in live trading is unlikely to hit the same
   every-real-tick volume seen in Strategy Tester's Model=4.
+
+- **2026-08-12 (live demo: user overrode the ML skip-gate, turned it back
+  off, an explicit and informed decision):** Deployed to a fresh isolated
+  VPS demo (Exness-MT5Trial14, login 416045126, hedging confirmed) with
+  `InpUseMLStuckRiskFilter=true`. Within hours a SELL basket sat at leg
+  5/7, floating roughly -$736 to -$798, with the model correctly
+  identifying the next leg-add as high stuck-risk and skipping it
+  (exactly the verified backtest behavior). The user found this
+  unacceptable in practice: their original spec from project inception
+  was "always martingale against-trend positions until profit, no
+  exceptions" - a basket sitting non-progressing for hours, even for a
+  statistically-justified reason, directly conflicts with that intent.
+  User's explicit final instruction: turn `InpUseMLStuckRiskFilter` back
+  to `false` live on the running VPS chart (Inputs tab, no recompile
+  needed - it's already the compiled default), restoring unconditional
+  martingale-until-profit behavior gated only by the pre-existing
+  ATR-spike/trend filters.
+
+  **The lesson:** a verified statistical improvement (lower average net
+  loss, better PF, smaller drawdowns) is not automatically the answer if
+  it conflicts with the user's actual behavioral requirement - here,
+  guaranteed eventual martingale-through rather than expected-value
+  optimization with occasional multi-hour non-progress. The ML stuck-risk
+  model and its ONNX integration remain fully built, tested, and
+  available (just gated off by default and live) if the user wants to
+  re-enable it later, e.g. with a much higher skip threshold, or a
+  bounded-delay skip (wait N hours, then force the leg anyway) rather
+  than an unconditional skip. Not revisited unless the user asks.

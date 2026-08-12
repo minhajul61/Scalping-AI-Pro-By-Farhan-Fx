@@ -38,9 +38,11 @@
 
 // Bump this on every change that gets deployed anywhere (local or VPS) so the
 // dashboard can show at a glance whether a given chart is running the latest
-// build - this exact confusion (VPS silently running stale code) came up
-// 2026-07-27 and cost a round of guessing from the leg-count alone.
-#define EA_BUILD_VERSION "2026.08.12.4"
+// version - this exact confusion (VPS silently running stale code) came up
+// 2026-07-27 and cost a round of guessing from the leg-count alone. Simple
+// v1, v2, v3... per explicit request (2026-08-12) - easier to compare at a
+// glance than a date-based build string.
+#define EA_BUILD_VERSION "v1"
 
 #include <Trade\Trade.mqh>
 
@@ -710,7 +712,7 @@ void UpdateDashboard()
 
    DbLabel("Title", x, y, "SCALPING AI PRO BY FARHAN FX", clrWhite, 9);
    y += lh;
-   DbLabel("Version", lx, y, "Build " + EA_BUILD_VERSION, clrGray, 7);
+   DbLabel("Version", lx, y, EA_BUILD_VERSION, clrGray, 7);
    y += lh + 6;
 
    bool loginOk = (InpExpectedLogin == 0 || AccountInfoInteger(ACCOUNT_LOGIN) == InpExpectedLogin);

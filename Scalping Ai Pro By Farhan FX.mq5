@@ -4,13 +4,13 @@
 //|  baskets (requires a hedging-mode account), each targeting a      |
 //|  floating-profit dollar amount, then closing and immediately      |
 //|  reopening. On a $-price adverse move past the last leg, adds a   |
-//|  martingale DCA leg, capped at a max legs/basket. ATR-spike       |
-//|  ("news proxy") + higher-timeframe trend filters gate DCA adds.   |
-//|  Basket-level hard stop-loss (with reopen cooldown) and an        |
-//|  account login allow-list guard against the wrong-account         |
-//|  incident seen on this user's other bots - both OFF by default,   |
-//|  per explicit user request (no SL, always martingale against-     |
-//|  trend positions until profit, no exceptions).                    |
+//|  martingale DCA leg, capped at a max legs/basket. ATR-spike,      |
+//|  higher-timeframe trend, and economic-news filters gate DCA adds. |
+//|  No stop-loss anywhere, ever - per explicit, repeated user        |
+//|  request (always martingale an against-trend basket until it     |
+//|  hits its profit target, no exceptions, no pauses). An account    |
+//|  login allow-list guards against the wrong-account incident seen  |
+//|  on this user's other bots.                                      |
 //|                                                                    |
 //|  2026-08-12: simplified per explicit user request. Earlier         |
 //|  versions of this EA also had a daily self-tuner, a historical     |
@@ -40,7 +40,7 @@
 // dashboard can show at a glance whether a given chart is running the latest
 // build - this exact confusion (VPS silently running stale code) came up
 // 2026-07-27 and cost a round of guessing from the leg-count alone.
-#define EA_BUILD_VERSION "2026.08.12.2"
+#define EA_BUILD_VERSION "2026.08.12.3"
 
 #include <Trade\Trade.mqh>
 
@@ -63,7 +63,7 @@ input int      InpAbsoluteMaxLegsPerBasket = 50;  // Hard emergency limit - shou
 input double   InpCycleTargetGrowth     = 0.5;    // Each new cycle raises the profit target by this fraction (0.5 = +50%)
 
 input group "=== DCA / Martingale (When Price Goes Against) ==="
-input double   InpDcaDistancePrice  = 3.0;        // Price move ($) before adding the next DCA trade
+input double   InpDcaDistancePrice  = 2.0;        // Price move ($) before adding the next DCA trade
 input double   InpLotMultiplier     = 2.0;        // How much bigger each new DCA trade is (2.0 = double each time)
 
 input group "=== Filters (When NOT To Add A DCA Trade) ==="
@@ -82,15 +82,6 @@ input bool     InpUseNewsFilter       = true;   // Pause new trades around mediu
 input string   InpNewsCurrency        = "USD";  // Currency to watch for news
 input int      InpNewsMinutesBefore   = 30;     // Stop trading this many minutes before the news
 input int      InpNewsMinutesAfter    = 30;     // Resume trading this many minutes after the news
-
-input group "=== Safety (Currently All OFF Per Your Request) ==="
-input double   InpBasketMaxLossUSD        = 0.0;   // Force-close a basket at this loss ($) - 0 = off
-input int      InpBasketSLCooldownMinutes = 0;     // Minutes to wait before reopening after a stop-loss
-input bool     InpUseCatastrophicSL       = false; // Emergency backup stop-loss - off, per your request (no SL)
-input double   InpCatastrophicSLMultiple  = 2.0;   // (only used if the setting above is ON)
-input bool     InpUseDailyLimit         = false;  // Daily loss limit - off
-input double   InpDailyMaxLossPercent   = 0.0;    // (only used if the setting above is ON)
-input bool     InpDailyLimitForceCloses = true;   // (only used if the setting above is ON)
 
 input group "=== Dashboard ==="
 input bool     InpShowDashboard = true;   // Show the on-chart info panel
@@ -120,8 +111,6 @@ int g_trendAtrHandle = INVALID_HANDLE;
 
 int    g_dayStartDateCode = -1;
 double g_dayStartBalance  = 0.0;
-
-datetime g_cooldownUntil[2] = {0, 0}; // indexed by ENUM_BASKET_SIDE
 
 #define DB_PREFIX  "GDSE_DB_"
 
@@ -262,9 +251,7 @@ void OnTick()
 
    RefreshBaskets(); // re-scan after any exits this tick before deciding on entries/DCA
 
-   bool dailyHalt = (InpUseDailyLimit && DailyLimitHit());
-
-   if(!dailyHalt && SpreadIsAcceptable())
+   if(SpreadIsAcceptable())
      {
       ManageBasketEntries(SIDE_BUY);
       ManageBasketEntries(SIDE_SELL);
@@ -341,7 +328,8 @@ void RefreshBaskets()
   }
 
 //+------------------------------------------------------------------+
-//| Exits: profit target and basket-level hard stop-loss              |
+//| Exits: profit target only - no stop-loss, ever, per explicit      |
+//| request.                                                           |
 //+------------------------------------------------------------------+
 // The target is not a flat number - it scales with how many full DCA cycles
 // this basket has already gone through (0 cycles = base target; each
@@ -370,13 +358,6 @@ void ManageBasketExits(ENUM_BASKET_SIDE side)
    if(b.floatingPL >= target)
      {
       CloseBasket(side, StringFormat("BASKET TARGET HIT (floatingPL=%.2f >= target=%.2f)", b.floatingPL, target));
-      return;
-     }
-
-   if(InpBasketMaxLossUSD > 0 && b.floatingPL <= -InpBasketMaxLossUSD)
-     {
-      CloseBasket(side, StringFormat("BASKET SL HIT (floatingPL=%.2f <= -%.2f)", b.floatingPL, InpBasketMaxLossUSD));
-      g_cooldownUntil[side] = TimeCurrent() + InpBasketSLCooldownMinutes * 60;
       return;
      }
   }
@@ -422,9 +403,6 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
       b = g_buyBasket;
    else
       b = g_sellBasket;
-
-   if(TimeCurrent() < g_cooldownUntil[side])
-      return;
 
    if(InpUseNewsFilter && IsNewsBlackout())
       return; // paused around medium/high-impact news, both bootstrap and DCA-adds
@@ -492,26 +470,21 @@ void OpenLeg(ENUM_BASKET_SIDE side, int legIndexForSizing, double previousLegLot
    if(lots <= 0)
       return;
 
-   int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
-   double backstopDist = InpUseCatastrophicSL
-                          ? InpDcaDistancePrice * (InpMaxLegsPerBasket + InpCatastrophicSLMultiple)
-                          : 0;
-
-   double price, sl;
+   double price;
    bool ok;
    string comment = StringFormat("FarhanFx-%s-leg%d", (side == SIDE_BUY ? "buy" : "sell"), legIndexForSizing + 1);
 
+   // No stop-loss on any leg, ever - per explicit, repeated request. Basket
+   // exits only happen via the profit target in ManageBasketExits().
    if(side == SIDE_BUY)
      {
       price = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-      sl    = (backstopDist > 0) ? NormalizeDouble(price - backstopDist, digits) : 0;
-      ok    = trade.Buy(lots, _Symbol, price, sl, 0, comment);
+      ok    = trade.Buy(lots, _Symbol, price, 0, 0, comment);
      }
    else
      {
       price = SymbolInfoDouble(_Symbol, SYMBOL_BID);
-      sl    = (backstopDist > 0) ? NormalizeDouble(price + backstopDist, digits) : 0;
-      ok    = trade.Sell(lots, _Symbol, price, sl, 0, comment);
+      ok    = trade.Sell(lots, _Symbol, price, 0, 0, comment);
      }
 
    if(!ok)
@@ -630,24 +603,6 @@ void UpdateDayTracking()
       g_dayStartDateCode = todayCode;
       g_dayStartBalance  = AccountInfoDouble(ACCOUNT_BALANCE);
      }
-  }
-
-bool DailyLimitHit()
-  {
-   if(g_dayStartBalance <= 0)
-      return false;
-
-   double equity     = AccountInfoDouble(ACCOUNT_EQUITY);
-   double changePct  = (equity - g_dayStartBalance) / g_dayStartBalance * 100.0;
-   bool   hit        = (changePct <= -InpDailyMaxLossPercent);
-
-   if(hit && InpDailyLimitForceCloses)
-     {
-      CloseBasket(SIDE_BUY, "daily loss limit force-close");
-      CloseBasket(SIDE_SELL, "daily loss limit force-close");
-     }
-
-   return hit;
   }
 
 //+------------------------------------------------------------------+

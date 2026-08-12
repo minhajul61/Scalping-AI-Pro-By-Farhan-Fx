@@ -357,3 +357,31 @@ Farhan Fx` Python project's `learnings.md`.)
   support/behavior specifically has not been checked yet for this EA. Flag
   this as unverified until watched live through an actual news event or
   confirmed working in a tester run that spans one.
+
+- **2026-08-12 (same day, second follow-up): DCA distance to $2.00 default,
+  and the entire Safety input group removed - not just left off.** Three
+  more requests in one message: (1) change the default DCA distance -
+  user said "2 point"; asked directly whether they meant a literal MT5
+  point ($0.002, which would fire on almost every tick) or $2.00 in price
+  terms (matching how they'd used "point" earlier in this same
+  conversation to mean the dollar DCA-distance figure) - confirmed $2.00.
+  Good example of a case worth an explicit clarifying question rather than
+  guessing: the two readings differ by 1000x and a wrong guess would have
+  broken live trading on the VPS demo silently. (2) Delete whichever
+  settings aren't actually used - by this point the only remaining inert
+  group was `=== Safety ===` (basket-level SL + cooldown, catastrophic
+  per-leg SL, daily loss limit), all permanently at OFF/0 per the
+  project's original, repeatedly-reconfirmed "no SL, no safety SL, ever"
+  decision (see the EA's own `learnings.md`, 2026-07-31). Removed the
+  whole group and its code (`DailyLimitHit()`, the `g_cooldownUntil[]`
+  reopen-cooldown mechanism, `OpenLeg()`'s catastrophic-SL backstop
+  price) entirely - every `trade.Buy`/`trade.Sell` call now always passes
+  `sl=0`, no code path can ever attach a stop-loss to a leg again. Kept
+  `UpdateDayTracking()`/`g_dayStartBalance` (Daily P/L is still a useful
+  dashboard readout, independent of the removed daily-limit feature). (3)
+  Confirmed the news filter's before/after minutes were already
+  per-user-configurable inputs (`InpNewsMinutesBefore`/`InpNewsMinutesAfter`,
+  added the same day) and its status was already on the dashboard - no
+  change needed, just confirmed back to the user.
+
+  Build `2026.08.12.3`, recompiled clean (0 errors, 0 warnings).

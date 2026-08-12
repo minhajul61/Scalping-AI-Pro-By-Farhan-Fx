@@ -6,16 +6,25 @@
 //|  reopening. On a $-price adverse move past the last leg, adds a   |
 //|  martingale DCA leg, capped at a max legs/basket. ATR-spike       |
 //|  ("news proxy") + higher-timeframe trend filters gate DCA adds.   |
-//|  Basket-level hard stop-loss (with reopen cooldown), daily        |
-//|  circuit breaker, and an account login allow-list guard against   |
-//|  the wrong-account incident seen on this user's other bots.       |
+//|  Basket-level hard stop-loss (with reopen cooldown) and an        |
+//|  account login allow-list guard against the wrong-account         |
+//|  incident seen on this user's other bots - both OFF by default,   |
+//|  per explicit user request (no SL, always martingale against-     |
+//|  trend positions until profit, no exceptions).                    |
 //|                                                                    |
-//|  Rule-based daily self-tuner ("AI brain" - no ML libraries exist  |
-//|  in native MQL5): once per new day, reviews yesterday's closed    |
-//|  trades and nudges DCA distance / lot multiplier / profit target  |
-//|  within safe bounds. Conservative by design - it only ever widens |
-//|  distance / lowers multiplier on trouble signals, never tightens  |
-//|  risk just because a good day happened.                          |
+//|  2026-08-12: simplified per explicit user request. Earlier         |
+//|  versions of this EA also had a daily self-tuner, a historical     |
+//|  market-regime detector, and a trained ML (ONNX) stuck-basket-     |
+//|  risk filter - rule-based/statistical additions layered on top     |
+//|  of the core logic below. All three, live-tested, changed          |
+//|  behavior in ways the user found harder to predict, and the ML     |
+//|  filter specifically sometimes deliberately paused martingale on   |
+//|  a risk read - which conflicted with the user's actual             |
+//|  requirement (always martingale through against-trend positions    |
+//|  until profit, unconditionally). Removed rather than just          |
+//|  disabled, so the input list matches exactly what the EA does.     |
+//|  See ml\learnings.md in this project for the full history if       |
+//|  this is ever revisited.                                          |
 //|                                                                    |
 //|  See E:\Straddle Ai Buy Sell Pending EA\StraddleAI_EA.mq5 for the  |
 //|  anti-pattern this was built to avoid: uniform lot sizing, no     |
@@ -31,7 +40,7 @@
 // dashboard can show at a glance whether a given chart is running the latest
 // build - this exact confusion (VPS silently running stale code) came up
 // 2026-07-27 and cost a round of guessing from the leg-count alone.
-#define EA_BUILD_VERSION "2026.08.05.3"
+#define EA_BUILD_VERSION "2026.08.12.1"
 
 #include <Trade\Trade.mqh>
 
@@ -41,107 +50,47 @@ enum ENUM_BASKET_SIDE
    SIDE_SELL = 1
   };
 
-input group "=== Trade Settings ==="
-input ulong    InpMagicNumber        = 20270115;  // ID number for this EA's trades (leave as is)
-input long     InpExpectedLogin      = 416045126; // Your account number (0 = don't check)
-input int      InpMaxSpreadPoints    = 300;       // Skip new trades if spread is too wide
+input group "=== Account & Basic Settings ==="
+input ulong    InpMagicNumber        = 20270115;  // EA-r ID number - change korar dorkar nai
+input long     InpExpectedLogin      = 416045126; // Tomar account number - na mille EA cholbe na (0 dile check off)
+input int      InpMaxSpreadPoints    = 300;       // Spread eto point-er beshi hole notun trade nibe na
 
-input group "=== Basket Core ==="
-input double   InpInitialLot            = 0.02;   // First trade size (lot)
-input double   InpBasketProfitTargetUSD = 2.0;    // Close basket once it earns this much profit ($) - base value, grows per cycle (see below)
-input int      InpMaxLegsPerBasket      = 7;      // Legs per DCA "cycle" - after this many, a new cycle starts (lot size resets) instead of stopping
-input int      InpAbsoluteMaxLegsPerBasket = 50;  // Hard safety ceiling on total legs across all cycles (should rarely if ever be reached)
-input double   InpCycleTargetGrowth     = 0.5;    // Each completed cycle raises the profit target by this fraction (e.g. 0.5 = +50% per cycle)
+input group "=== Basket O Profit Target ==="
+input double   InpInitialLot            = 0.02;   // Prothom trade koto lot-er
+input double   InpBasketProfitTargetUSD = 2.0;    // Eto dollar profit hole basket close hobe (cycle barle target-o barbe)
+input int      InpMaxLegsPerBasket      = 7;      // Eto DCA trade porjonto nibe, tarpor notun cycle shuru hobe (lot abar choto theke)
+input int      InpAbsoluteMaxLegsPerBasket = 50;  // Emergency hard limit - eto beshi kokhono normally lagbe na
+input double   InpCycleTargetGrowth     = 0.5;    // Protibar notun cycle shuru hole target koto % barbe (0.5 = +50%)
 
-input group "=== DCA / Martingale ==="
-input bool     InpUseAtrDcaDistance   = false;    // Auto-adjust DCA gap by volatility (off = use fixed $ gap below)
-input double   InpDcaDistanceAtrMult  = 1.5;      // Only used if the above is ON: how wide the auto gap is
-input double   InpDcaDistancePrice  = 3.0;        // Price move ($) before adding the next DCA trade
-input double   InpLotMultiplier     = 2.0;        // How much bigger each new DCA trade is (2.0 = double each leg - moves the average faster, per request)
+input group "=== DCA / Martingale (Against Gele) ==="
+input double   InpDcaDistancePrice  = 3.0;        // Price koto dollar against gele porer DCA trade hobe
+input double   InpLotMultiplier     = 2.0;        // Protibar lot koto gun barbe (2.0 = protibar dwigun)
 
+input group "=== Filter (Kokhon DCA Add Korbe Na) ==="
+input bool             InpUseAtrSpikeFilter = true;      // Hothat boro spike (news-er moto move) hole DCA add korbe na
+input int              InpAtrPeriod         = 14;        // Volatility mapar candle shonkha
+input int              InpAtrBaselineBars   = 20;        // "Normal" volatility bujhte koyta candle dekhbe
+input double           InpMaxAtrRatio       = 1.5;       // Normal-er koto gun beshi hole "spike" bole dhorbe
+input bool             InpUseTrendFilter    = true;      // Boro trend-er ULTO dike DCA add korbe na - sob shomoy trend-e trade
+input ENUM_TIMEFRAMES  InpTrendTF           = PERIOD_H1; // Trend bujhte kon timeframe dekhbe
+input int              InpTrendMAPeriod     = 50;        // Trend line-er length
+input int              InpTrendAtrPeriod    = 14;        // Trend koto strong seta mapar volatility period
+input double           InpTrendStrengthATRMult = 0.5;    // Trend koto strong hole "real trend" bole dhorbe
 
-input group "=== DCA Filters (skip adding on bad conditions) ==="
-input bool             InpUseAtrSpikeFilter = true;      // Don't add DCA trades during a sudden volatility spike
-input int              InpAtrPeriod         = 14;        // Volatility measuring period (candles)
-input int              InpAtrBaselineBars   = 20;         // Candles used to calculate "normal" volatility
-input double           InpMaxAtrRatio       = 1.5;        // How many times above normal counts as a "spike"
-input bool             InpUseTrendFilter    = true;       // Don't add DCA trades against a strong trend
-input ENUM_TIMEFRAMES  InpTrendTF           = PERIOD_H1;  // Timeframe used to judge the trend
-input int              InpTrendMAPeriod     = 50;         // Moving average length used for the trend check
-input int              InpTrendAtrPeriod    = 14;         // Volatility period used to judge trend strength
-input double           InpTrendStrengthATRMult = 0.5;     // How strong the trend must be before it blocks a trade
-
-input group "=== Basket Safety ==="
-input double   InpBasketMaxLossUSD        = 0.0;   // Force-close a basket at this loss ($) - 0 = OFF (turned off per request)
-input int      InpBasketSLCooldownMinutes = 0;     // Wait this many minutes before reopening after a stop-loss - 0 = OFF (turned off per request)
-input bool     InpUseCatastrophicSL       = false; // Emergency backup stop-loss on every trade - OFF per explicit request
-input double   InpCatastrophicSLMultiple  = 2.0;   // How far away the emergency stop-loss sits
-
-input group "=== Daily Stop (currently OFF per request) ==="
-input bool     InpUseDailyLimit         = false;  // Stop trading for the day after a big loss - OFF (turned off per request)
-input double   InpDailyMaxLossPercent   = 0.0;    // Daily loss limit (% of balance) - 0 = OFF (turned off per request, unused while the line above is OFF anyway)
-input bool     InpDailyLimitForceCloses = true;   // Also close open trades when the daily limit hits (if ON above)
-
-input group "=== Auto-Adjust Settings (AI Brain) ==="
-input bool     InpUseIntradayBrake            = true;  // Auto slow-down (not a full stop) after a bad day so far
-input double   InpIntradayBrakeLossPercent    = 3.0;    // Today's loss (%) that triggers the slow-down
-input double   InpIntradayBrakeMultiplierCap  = 1.15;   // Smaller DCA growth allowed once slowed down
-input double   InpIntradayBrakeDistanceMult   = 1.5;    // DCA gap gets this much wider once slowed down
-
-input bool     InpUseStuckBasketRelief   = true;  // Let a maxed-out basket accept a smaller profit to get out (instead of waiting forever)
-input double   InpStuckBasketHours       = 4.0;   // Hours stuck at max DCA trades before the target starts shrinking
-input double   InpStuckBasketDecayHours  = 8.0;   // Hours over which the target shrinks from full down to the floor below
-input double   InpStuckBasketTargetFloor = 0.0;   // Smallest target ($) it will shrink to - 0 = will accept breakeven
-
-input group "=== Market Regime Detection (AI Brain) ==="
-// Rule-based, not ML - there is no native MQL5 library that "learns" from
-// history in the trained-model sense. This loads years of daily history,
-// computes where TODAY's trend-strength and volatility rank against that
-// whole history (a percentile), and classifies today as trending/ranging/
-// volatile - then nudges DCA distance/lot growth accordingly. It changes
-// how much today's readings are trusted, not what will happen next.
-input bool     InpUseRegimeDetection         = true;  // Compare today's conditions against years of history to classify the regime
-input int      InpRegimeHistoryYears         = 5;     // How many years of daily history to use as the comparison baseline
-input double   InpRegimeTrendPercentile      = 70.0;  // Trend strength must rank above this percentile (vs history) to call today "trending"
-input double   InpRegimeVolPercentile        = 80.0;  // Volatility (ATR) must rank above this percentile (vs history) to call today "volatile"
-input double   InpRegimeTrendingDcaDistanceMult = 1.3; // Widen DCA distance by this much when the regime is trending
-input double   InpRegimeRangingDcaDistanceMult  = 0.85;// Tighten DCA distance by this much when the regime is ranging (this EA's best case)
-input double   InpRegimeVolatileLotMultCap      = 1.2; // Cap the lot growth multiplier to this when the regime is volatile
-
-input bool     InpEnableSelfTuning = true;   // Let the EA auto-adjust its own settings daily from results
-input double   InpDcaDistanceMin   = 2.0;   // Auto-tuning: smallest DCA gap ($) it may use
-input double   InpDcaDistanceMax   = 6.0;   // Auto-tuning: largest DCA gap ($) it may use
-input double   InpDcaAtrMultMin    = 1.0;   // Auto-tuning: smallest auto-gap multiplier it may use
-input double   InpDcaAtrMultMax    = 3.0;   // Auto-tuning: largest auto-gap multiplier it may use
-input double   InpLotMultiplierMin = 1.2;   // Auto-tuning: smallest DCA size growth it may use
-input double   InpLotMultiplierMax = 2.0;   // Auto-tuning: largest DCA size growth it may use
-input double   InpProfitTargetMin  = 0.5;   // Auto-tuning: smallest profit target ($) it may use
-input double   InpProfitTargetMax  = 3.0;   // Auto-tuning: largest profit target ($) it may use
-input int      InpMaxLegsFloor        = 2;    // Auto-tuning will never drop max DCA trades below this
-input int      InpLegStatMinSample    = 8;     // Min past baskets needed before auto-tuning trusts the win rate
-input double   InpLegStatWinRateFloor = 0.30;  // Win rate below this lowers the max DCA trades allowed
-input double   InpLegStatWinRateCeil  = 0.70;  // Win rate above this raises the max DCA trades allowed back up
-input bool     InpResetTunedParams = false; // Reset all auto-tuned values back to the defaults above
-
-input group "=== ML (ONNX) ==="
-// Trained externally in Python (E:\XAUUSD Dual Basket DCA EA\ml\), loaded
-// here via MQL5's built-in ONNX inference support. Additive/veto-only on
-// top of the existing rule-based system, never a replacement - both
-// default OFF until backtested against this EA's own documented
-// baselines. See ml\README.md and ml\learnings.md for the full research
-// story, including a trend-continuation model that was tried and did NOT
-// clear a meaningful bar (honest negative result, not integrated here).
-input bool   InpUseMLStuckRiskFilter    = false; // Use the trained stuck-basket-risk model to skip/shrink risky DCA-adds
-input double InpMLStuckRiskSkipThreshold = 0.60; // Skip this DCA-add entirely if predicted stuck-risk exceeds this
-input double InpMLStuckRiskShrinkStart   = 0.35; // Start damping lot growth once predicted risk exceeds this
-input double InpMLStuckRiskShrinkEnd     = 0.60; // Lot growth fully damped to 1.0x by this risk level
-input string InpMLModelSubfolder         = "DCA_ML"; // Subfolder under MQL5\Files\ where the .onnx model lives
+input group "=== Safety (Tomar Request-e Ekhon Sob OFF) ==="
+input double   InpBasketMaxLossUSD        = 0.0;   // Basket SL - 0 mane bondho
+input int      InpBasketSLCooldownMinutes = 0;     // SL hit hole abar shuru korar age koto minute wait
+input bool     InpUseCatastrophicSL       = false; // Emergency backup SL - bondho, tumi bolechile SL lagbe na
+input double   InpCatastrophicSLMultiple  = 2.0;   // (upore-r ta ON thakle koto dure emergency SL boshbe)
+input bool     InpUseDailyLimit         = false;  // Daily loss limit - bondho
+input double   InpDailyMaxLossPercent   = 0.0;    // (upore-r ta ON thakle koto % loss-e daily stop hobe)
+input bool     InpDailyLimitForceCloses = true;   // (upore-r ta ON thakle open trade-o close kore debe kina)
 
 input group "=== Dashboard ==="
-input bool     InpShowDashboard = true;   // Show the on-chart info panel
-input int      InpDashboardX    = 10;     // Panel position - distance from left edge
-input int      InpDashboardY    = 20;     // Panel position - distance from top edge
-input bool     InpSetWhiteChartTheme = true; // Set the chart background to white (the dashboard panel stays dark/readable on top)
+input bool     InpShowDashboard = true;   // Chart-e info panel dekhabe kina
+input int      InpDashboardX    = 10;     // Panel-er position - left theke koto dure
+input int      InpDashboardY    = 20;     // Panel-er position - upor theke koto dure
+input bool     InpSetWhiteChartTheme = true; // Chart background shada kore debe
 
 CTrade trade;
 
@@ -155,56 +104,19 @@ struct SBasket
    double   lastLegEntry;
    double   lastLegLots;
    datetime lastLegTime;
-   datetime bootstrapTime;   // time of this basket's first (oldest) leg - for ML stuck-risk features
   };
 
 SBasket g_buyBasket, g_sellBasket;
 
-enum ENUM_MARKET_REGIME
-  {
-   REGIME_RANGING  = 0,
-   REGIME_TRENDING = 1,
-   REGIME_VOLATILE = 2
-  };
-
 int g_atrHandle      = INVALID_HANDLE;
 int g_trendMAHandle  = INVALID_HANDLE;
 int g_trendAtrHandle = INVALID_HANDLE;
-int g_regimeAtrHandle = INVALID_HANDLE; // D1, used only for regime detection's historical baseline
-int g_regimeMaHandle  = INVALID_HANDLE; // D1
-
-ENUM_MARKET_REGIME g_currentRegime         = REGIME_RANGING;
-double             g_regimeDcaDistanceMult = 1.0;
-double             g_regimeLotMultiplierCap = 999.0;
-double             g_regimeTrendPercentileNow = 0.0;
-double             g_regimeVolPercentileNow   = 0.0;
-int                g_lastRegimeDateCode = -1;
-bool               g_regimeDetectionActive = false; // InpUseRegimeDetection, downgraded to false at runtime if setup fails
-
-// --- ML (ONNX) stuck-basket-risk model ---
-// Trained/validated in Python (ml\src\dca_ml\modeling\train_stuck_model.py,
-// holdout AUC 0.81) on 12 features in this exact order - MUST match
-// ml\models\stuck_basket_risk\v1\onnx_input_spec.json.
-#define ML_STUCK_FEATURE_COUNT 12
-long g_mlStuckHandle    = INVALID_HANDLE;
-bool g_mlStuckAvailable = false; // downgraded to false at runtime if the model file is missing/fails to load - non-fatal,
-                                  // the EA keeps trading on rule-based logic alone (there is no SL to fall back on otherwise)
-double g_mlStuckRiskNow = 0.0;    // set right before a DCA-add decision, read by EffectiveLotMultiplier(), reset after
 
 int    g_dayStartDateCode = -1;
 double g_dayStartBalance  = 0.0;
-bool   g_intradayBrakeActive = false; // AI brain's soft de-risk for the rest of today, reset on day rollover
 
 datetime g_cooldownUntil[2] = {0, 0}; // indexed by ENUM_BASKET_SIDE
 
-double g_tunedDcaDistance;   // fixed-$ mode (InpUseAtrDcaDistance = false)
-double g_tunedDcaAtrMult;    // ATR mode (InpUseAtrDcaDistance = true) - the "smart" default
-double g_tunedLotMultiplier;
-double g_tunedProfitTarget;
-int    g_tunedMaxLegs;      // max legs cap, adapted from real per-leg-depth win/loss history
-int    g_lastTuneDateCode = -1;
-
-#define GV_PREFIX  "GDSE_"
 #define DB_PREFIX  "GDSE_DB_"
 
 // Switches the chart itself to a white background - the dashboard panel
@@ -274,61 +186,7 @@ int OnInit()
         }
      }
 
-   g_regimeDetectionActive = InpUseRegimeDetection;
-   if(g_regimeDetectionActive)
-     {
-      g_regimeAtrHandle = iATR(_Symbol, PERIOD_D1, InpTrendAtrPeriod);
-      g_regimeMaHandle  = iMA(_Symbol, PERIOD_D1, InpTrendMAPeriod, 0, MODE_SMA, PRICE_CLOSE);
-      if(g_regimeAtrHandle == INVALID_HANDLE || g_regimeMaHandle == INVALID_HANDLE)
-        {
-         Print("GoldDualBasketDCA: regime detection handle creation failed - disabling regime detection.");
-         g_regimeDetectionActive = false;
-        }
-     }
-
-   if(InpUseMLStuckRiskFilter)
-     {
-      string modelPath = InpMLModelSubfolder + "\\stuck_basket_risk.onnx";
-      // ONNX_COMMON_FOLDER (shared MQL5\Files under Terminal\Common\, not the
-      // terminal/agent-specific one) - discovered the hard way: the Strategy
-      // Tester's per-agent MQL5\Files sandbox gets wiped/regenerated on every
-      // run, so a model file dropped there manually does not survive to the
-      // next run. The Common folder is genuinely persistent and shared across
-      // every terminal install and every tester agent on this machine.
-      g_mlStuckHandle = OnnxCreate(modelPath, ONNX_COMMON_FOLDER);
-      if(g_mlStuckHandle == INVALID_HANDLE)
-        {
-         PrintFormat("GoldDualBasketDCA: ML stuck-risk model failed to load (%s, err=%d) - "
-                     "continuing on rule-based logic alone (non-fatal).", modelPath, GetLastError());
-         g_mlStuckAvailable = false;
-        }
-      else
-        {
-         ulong inputShape[]  = {1, ML_STUCK_FEATURE_COUNT};
-         ulong labelShape[]  = {1};    // output 0: int64 predicted label
-         ulong probShape[]   = {1, 2}; // output 1: float probabilities [P(class=0), P(class=1)]
-         bool shapesOk = OnnxSetInputShape(g_mlStuckHandle, 0, inputShape)
-                         && OnnxSetOutputShape(g_mlStuckHandle, 0, labelShape)
-                         && OnnxSetOutputShape(g_mlStuckHandle, 1, probShape);
-         if(!shapesOk)
-           {
-            PrintFormat("GoldDualBasketDCA: Onnx*Shape setup failed for ML stuck-risk model (err=%d) - "
-                        "continuing on rule-based logic alone (non-fatal).", GetLastError());
-            OnnxRelease(g_mlStuckHandle);
-            g_mlStuckHandle = INVALID_HANDLE;
-            g_mlStuckAvailable = false;
-           }
-         else
-           {
-            g_mlStuckAvailable = true;
-            Print("GoldDualBasketDCA: ML stuck-risk model loaded successfully.");
-           }
-        }
-     }
-
-   LoadTunedParams();
    UpdateDayTracking();
-   MaybeUpdateMarketRegime();
 
    if(InpShowDashboard)
      {
@@ -348,12 +206,6 @@ void OnDeinit(const int reason)
       IndicatorRelease(g_trendMAHandle);
    if(g_trendAtrHandle != INVALID_HANDLE)
       IndicatorRelease(g_trendAtrHandle);
-   if(g_regimeAtrHandle != INVALID_HANDLE)
-      IndicatorRelease(g_regimeAtrHandle);
-   if(g_regimeMaHandle != INVALID_HANDLE)
-      IndicatorRelease(g_regimeMaHandle);
-   if(g_mlStuckHandle != INVALID_HANDLE)
-      OnnxRelease(g_mlStuckHandle);
    EventKillTimer();
    ObjectsDeleteAll(0, DB_PREFIX);
    ChartRedraw();
@@ -398,9 +250,6 @@ void OnTick()
   {
    RefreshBaskets();
    UpdateDayTracking();
-   CheckIntradayBrake();
-   MaybeUpdateMarketRegime();
-   MaybeRunDailySelfTune();
 
    ManageBasketExits(SIDE_BUY);
    ManageBasketExits(SIDE_SELL);
@@ -434,7 +283,6 @@ void ResetBasket(SBasket &b)
    b.lastLegEntry     = 0;
    b.lastLegLots      = 0;
    b.lastLegTime      = 0;
-   b.bootstrapTime    = 0;
   }
 
 void ScanBasket(ENUM_BASKET_SIDE side, SBasket &b)
@@ -474,8 +322,6 @@ void ScanBasket(ENUM_BASKET_SIDE side, SBasket &b)
          b.lastLegLots   = lots;
          b.lastLegTicket = ticket;
         }
-      if(b.bootstrapTime == 0 || t < b.bootstrapTime)
-         b.bootstrapTime = t;
      }
 
    if(b.totalLots > 0)
@@ -491,47 +337,16 @@ void RefreshBaskets()
 //+------------------------------------------------------------------+
 //| Exits: profit target and basket-level hard stop-loss              |
 //+------------------------------------------------------------------+
-//+------------------------------------------------------------------+
-//| Stuck-basket relief: a basket at max DCA legs with nowhere left   |
-//| to add and no bounce in sight would otherwise just sit open        |
-//| indefinitely waiting for the full target. Once it's been maxed     |
-//| out and stuck for InpStuckBasketHours, linearly shrink the         |
-//| required profit down toward InpStuckBasketTargetFloor over the     |
-//| next InpStuckBasketDecayHours - so it takes the first real exit    |
-//| opportunity instead of holding out for the original target.        |
-//| This does NOT guarantee an exit: price still has to come back up   |
-//| to at least the floor for this to fire at all.                     |
-//+------------------------------------------------------------------+
 // The target is not a flat number - it scales with how many full DCA cycles
 // this basket has already gone through (0 cycles = base target; each
 // completed cycle raises it by InpCycleTargetGrowth). A basket that has
 // survived several cycles has more capital and more adverse distance
 // behind it, so it demands proportionally more profit before it's worth
-// closing, rather than settling for the same small target regardless of
-// how much risk is currently open.
-double GetBaseProfitTarget(const SBasket &b)
+// closing - this is the "if it martingales, try for more profit" behavior.
+double GetProfitTarget(const SBasket &b)
   {
-   int completedCycles = (g_tunedMaxLegs > 0) ? (b.legCount / g_tunedMaxLegs) : 0;
-   return g_tunedProfitTarget * (1.0 + completedCycles * InpCycleTargetGrowth);
-  }
-
-double GetEffectiveProfitTarget(const SBasket &b)
-  {
-   double target = GetBaseProfitTarget(b);
-   if(!InpUseStuckBasketRelief || b.legCount < g_tunedMaxLegs || b.lastLegTime == 0)
-      return target;
-
-   double hoursStuck = (double)(TimeCurrent() - b.lastLegTime) / 3600.0;
-   if(hoursStuck <= InpStuckBasketHours)
-      return target;
-
-   double decayHours = MathMax(InpStuckBasketDecayHours, 0.01);
-   double progress = (hoursStuck - InpStuckBasketHours) / decayHours;
-   if(progress > 1.0)
-      progress = 1.0;
-
-   double eased = target - (target - InpStuckBasketTargetFloor) * progress;
-   return MathMax(eased, InpStuckBasketTargetFloor);
+   int completedCycles = (InpMaxLegsPerBasket > 0) ? (b.legCount / InpMaxLegsPerBasket) : 0;
+   return InpBasketProfitTargetUSD * (1.0 + completedCycles * InpCycleTargetGrowth);
   }
 
 void ManageBasketExits(ENUM_BASKET_SIDE side)
@@ -545,12 +360,10 @@ void ManageBasketExits(ENUM_BASKET_SIDE side)
    if(b.legCount == 0)
       return;
 
-   double effTarget = GetEffectiveProfitTarget(b);
-   if(b.floatingPL >= effTarget)
+   double target = GetProfitTarget(b);
+   if(b.floatingPL >= target)
      {
-      string tag = (effTarget < g_tunedProfitTarget - 0.001) ? "BASKET TARGET HIT (stuck-basket relief)" : "BASKET TARGET HIT";
-      CloseBasket(side, StringFormat("%s (floatingPL=%.2f >= target=%.2f, full target=%.2f)",
-                                      tag, b.floatingPL, effTarget, g_tunedProfitTarget));
+      CloseBasket(side, StringFormat("BASKET TARGET HIT (floatingPL=%.2f >= target=%.2f)", b.floatingPL, target));
       return;
      }
 
@@ -610,9 +423,8 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
    if(b.legCount == 0)
      {
       // Don't even start a basket fighting a strong higher-timeframe trend -
-      // this is what let earlier testing repeatedly run BUY baskets to their
-      // hard-SL: DCA was trend-filtered, but the doomed bootstrap entry that
-      // started each of those baskets was not.
+      // the doomed bootstrap entry itself is what runs a basket into trouble,
+      // not just the DCA-adds after it.
       if(InpUseTrendFilter && IsAgainstTrend(side))
          return;
       OpenLeg(side, 0, 0);
@@ -621,13 +433,12 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
 
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-   double dcaDistance = GetCurrentDcaDistance();
 
    bool adverse;
    if(side == SIDE_BUY)
-      adverse = (bid <= b.lastLegEntry - dcaDistance);
+      adverse = (bid <= b.lastLegEntry - InpDcaDistancePrice);
    else
-      adverse = (ask >= b.lastLegEntry + dcaDistance);
+      adverse = (ask >= b.lastLegEntry + InpDcaDistancePrice);
 
    if(adverse && b.legCount < InpAbsoluteMaxLegsPerBasket)
      {
@@ -636,44 +447,21 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
       if(InpUseTrendFilter && IsAgainstTrend(side))
          return; // don't keep averaging into a strong opposing higher-timeframe trend
 
-      // Cycling: once a full cycle (g_tunedMaxLegs) is used up, the next leg
-      // restarts lot sizing from InpInitialLot instead of continuing to
+      // Cycling: once a full cycle (InpMaxLegsPerBasket) is used up, the next
+      // leg restarts lot sizing from InpInitialLot instead of continuing to
       // compound the multiplier indefinitely - keeps a basket that's been
       // going against for a long time from ever needing an unaffordable lot
-      // size, while still letting it keep averaging if price keeps moving.
-      int legIndexForSizing = b.legCount % g_tunedMaxLegs;
-
-      if(InpUseMLStuckRiskFilter)
-        {
-         g_mlStuckRiskNow = 0.0; // baseline (un-shrunk) prospective lot, matching how the model was trained
-         double prospectiveLots = NextLotSize(legIndexForSizing, b.lastLegLots);
-         double risk = GetMLStuckRisk(b, prospectiveLots, dcaDistance, false, false);
-
-         if(risk >= InpMLStuckRiskSkipThreshold)
-           {
-            string msg = StringFormat("ML stuck-risk filter SKIPPED %s DCA-add (leg %d): risk %.2f >= skip threshold %.2f",
-                                       (side == SIDE_BUY ? "BUY" : "SELL"), b.legCount + 1, risk, InpMLStuckRiskSkipThreshold);
-            Print("GoldDualBasketDCA: " + msg);
-            WriteTuningLog(msg);
-            g_mlStuckRiskNow = 0.0;
-            return;
-           }
-
-         g_mlStuckRiskNow = risk; // EffectiveLotMultiplier(), called inside OpenLeg below, picks this up
-         if(risk > InpMLStuckRiskShrinkStart)
-            WriteTuningLog(StringFormat("ML stuck-risk filter damping %s DCA-add (leg %d): risk %.2f",
-                                         (side == SIDE_BUY ? "BUY" : "SELL"), b.legCount + 1, risk));
-        }
-
+      // size, while still letting it keep averaging (unconditionally, no
+      // pause) if price keeps moving, per explicit request.
+      int legIndexForSizing = b.legCount % InpMaxLegsPerBasket;
       OpenLeg(side, legIndexForSizing, b.lastLegLots);
-      g_mlStuckRiskNow = 0.0; // don't let this leak into the other side's sizing this same tick
       return;
      }
   }
 
 double NextLotSize(int legCount, double previousLegLots)
   {
-   double raw = InpInitialLot * MathPow(EffectiveLotMultiplier(), legCount);
+   double raw = InpInitialLot * MathPow(InpLotMultiplier, legCount);
 
    double minLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double maxLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
@@ -697,7 +485,7 @@ void OpenLeg(ENUM_BASKET_SIDE side, int legIndexForSizing, double previousLegLot
 
    int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
    double backstopDist = InpUseCatastrophicSL
-                          ? GetCurrentDcaDistance() * (InpMaxLegsPerBasket + InpCatastrophicSLMultiple)
+                          ? InpDcaDistancePrice * (InpMaxLegsPerBasket + InpCatastrophicSLMultiple)
                           : 0;
 
    double price, sl;
@@ -720,36 +508,6 @@ void OpenLeg(ENUM_BASKET_SIDE side, int legIndexForSizing, double previousLegLot
    if(!ok)
       PrintFormat("GoldDualBasketDCA: %s leg open failed (lot=%.2f): retcode=%d %s",
                   (side == SIDE_BUY ? "BUY" : "SELL"), lots, trade.ResultRetcode(), trade.ResultRetcodeDescription());
-  }
-
-//+------------------------------------------------------------------+
-//| DCA distance - "smart"/adaptive when InpUseAtrDcaDistance is on:   |
-//| scales with current M1 ATR instead of a fixed $ amount, so it     |
-//| widens automatically in a genuinely more volatile market and      |
-//| tightens in a quiet one, rather than needing a human to guess a   |
-//| single $ figure that fits every condition.                        |
-//+------------------------------------------------------------------+
-double GetCurrentDcaDistance()
-  {
-   double dist;
-   if(!InpUseAtrDcaDistance)
-      dist = g_tunedDcaDistance;
-   else
-     {
-      double atrBuf[1];
-      if(CopyBuffer(g_atrHandle, 0, 1, 1, atrBuf) <= 0 || atrBuf[0] <= 0)
-         dist = g_tunedDcaDistance; // fallback if ATR unavailable this tick
-      else
-         dist = atrBuf[0] * g_tunedDcaAtrMult;
-     }
-
-   if(g_intradayBrakeActive)
-      dist *= InpIntradayBrakeDistanceMult;
-
-   if(g_regimeDetectionActive)
-      dist *= g_regimeDcaDistanceMult;
-
-   return dist;
   }
 
 //+------------------------------------------------------------------+
@@ -812,185 +570,6 @@ bool IsAgainstTrend(ENUM_BASKET_SIDE side)
   }
 
 //+------------------------------------------------------------------+
-//| ML stuck-basket-risk model (ONNX, trained externally in Python -   |
-//| see ml\README.md / ml\learnings.md). Predicts P(this DCA-add leads |
-//| to a multi-cycle, hours-stuck basket) - additive/veto-only, never  |
-//| replaces the rule-based filters above. Holdout AUC 0.81 on a       |
-//| genuinely held-out set of historical episodes as of ml\models\     |
-//| stuck_basket_risk\v1\ - a real signal, but NOT live-verified in    |
-//| MQL5 yet (no way to execute MQL5 ONNX calls outside a live/demo    |
-//| chart) - this is exactly why InpUseMLStuckRiskFilter defaults to   |
-//| false, and why every failure path below degrades to "no opinion"   |
-//| (risk=0, changes nothing) rather than blocking trades on a guess.  |
-//+------------------------------------------------------------------+
-// MUST match the exact order in ml\models\stuck_basket_risk\v1\onnx_input_spec.json:
-// leg_count_before, completed_cycles_before, floating_pl_before,
-// hours_since_bootstrap, hours_since_last_leg, dca_distance_in_effect,
-// lots, is_against_trend_now, is_atr_spiking_now,
-// regime_RANGING, regime_TRENDING, regime_VOLATILE
-void BuildStuckFeatures(const SBasket &b, double prospectiveLots, double dcaDistance,
-                        bool againstTrend, bool atrSpiking, double &features[])
-  {
-   ArrayResize(features, ML_STUCK_FEATURE_COUNT);
-   int completedCycles = (g_tunedMaxLegs > 0) ? (b.legCount / g_tunedMaxLegs) : 0;
-   double hoursSinceBootstrap = (b.bootstrapTime > 0) ? (double)(TimeCurrent() - b.bootstrapTime) / 3600.0 : 0.0;
-   double hoursSinceLastLeg   = (b.lastLegTime > 0)   ? (double)(TimeCurrent() - b.lastLegTime) / 3600.0   : 0.0;
-
-   features[0]  = (double)b.legCount;
-   features[1]  = (double)completedCycles;
-   features[2]  = b.floatingPL;
-   features[3]  = hoursSinceBootstrap;
-   features[4]  = hoursSinceLastLeg;
-   features[5]  = dcaDistance;
-   features[6]  = prospectiveLots;
-   features[7]  = againstTrend ? 1.0 : 0.0;
-   features[8]  = atrSpiking ? 1.0 : 0.0;
-   features[9]  = (g_currentRegime == REGIME_RANGING)  ? 1.0 : 0.0;
-   features[10] = (g_currentRegime == REGIME_TRENDING) ? 1.0 : 0.0;
-   features[11] = (g_currentRegime == REGIME_VOLATILE) ? 1.0 : 0.0;
-  }
-
-// Returns P(stuck) in [0,1], or 0.0 (i.e. "no opinion, change nothing")
-// if the model isn't loaded or inference fails for any reason.
-double GetMLStuckRisk(const SBasket &b, double prospectiveLots, double dcaDistance,
-                       bool againstTrend, bool atrSpiking)
-  {
-   if(!g_mlStuckAvailable)
-      return 0.0;
-
-   double featD[];
-   BuildStuckFeatures(b, prospectiveLots, dcaDistance, againstTrend, atrSpiking, featD);
-
-   float onnxInput[];
-   ArrayResize(onnxInput, ML_STUCK_FEATURE_COUNT);
-   for(int i = 0; i < ML_STUCK_FEATURE_COUNT; i++)
-      onnxInput[i] = (float)featD[i];
-
-   // skl2onnx classifier exported with zipmap=False produces two outputs in
-   // this order: int64 predicted labels [N], float probabilities [N, 2].
-   // We only need P(class=1) from the second output.
-   long  labelOut[];
-   float probOut[];
-   ArrayResize(labelOut, 1);
-   ArrayResize(probOut, 2);
-   if(!OnnxRun(g_mlStuckHandle, ONNX_DEFAULT, onnxInput, labelOut, probOut))
-     {
-      PrintFormat("GoldDualBasketDCA: OnnxRun failed for ML stuck-risk model (err=%d) - "
-                  "treating as risk=0 this tick (no change to behavior).", GetLastError());
-      return 0.0;
-     }
-   if(ArraySize(probOut) < 2)
-      return 0.0;
-   return (double)probOut[1];
-  }
-
-//+------------------------------------------------------------------+
-//| Market regime detection - rule-based, not ML. Loads years of daily |
-//| history and asks: where does TODAY's trend-strength/volatility     |
-//| rank against that whole history (a percentile)? This changes how   |
-//| much today's readings are trusted (wider DCA distance when today   |
-//| looks like a rare, strongly-trending day vs history; tighter when  |
-//| today looks like an ordinary ranging day), not what happens next - |
-//| no native MQL5 library "learns" a predictive model from history.   |
-//+------------------------------------------------------------------+
-double PercentileRankOf(const double &arr[], int count, double value)
-  {
-   if(count <= 0)
-      return 50.0;
-   int countBelowOrEqual = 0;
-   for(int i = 0; i < count; i++)
-      if(arr[i] <= value)
-         countBelowOrEqual++;
-   return 100.0 * countBelowOrEqual / count;
-  }
-
-void UpdateMarketRegime()
-  {
-   if(!g_regimeDetectionActive)
-      return;
-
-   int requested = InpRegimeHistoryYears * 365;
-   int available = iBars(_Symbol, PERIOD_D1);
-   int n = MathMin(requested, available - 5); // leave a small margin for the indicator warm-up
-   if(n < 60)
-     {
-      Print("GoldDualBasketDCA: not enough D1 history yet for regime detection (need 60+, have ", n, ") - skipping today.");
-      return;
-     }
-
-   double atrHist[], maHist[], closeHist[];
-   ArraySetAsSeries(atrHist, true);
-   ArraySetAsSeries(maHist, true);
-   ArraySetAsSeries(closeHist, true);
-
-   if(CopyBuffer(g_regimeAtrHandle, 0, 1, n, atrHist) < n)
-      return;
-   if(CopyBuffer(g_regimeMaHandle, 0, 1, n, maHist) < n)
-      return;
-   if(CopyClose(_Symbol, PERIOD_D1, 1, n, closeHist) < n)
-      return;
-
-   double trendStrengthHist[];
-   ArrayResize(trendStrengthHist, n);
-   for(int i = 0; i < n; i++)
-      trendStrengthHist[i] = (atrHist[i] > 0) ? MathAbs(closeHist[i] - maHist[i]) / atrHist[i] : 0;
-
-   double todayTrendStrength = trendStrengthHist[0]; // most recent CLOSED daily bar (shift 1)
-   double todayAtr           = atrHist[0];
-
-   g_regimeTrendPercentileNow = PercentileRankOf(trendStrengthHist, n, todayTrendStrength);
-   g_regimeVolPercentileNow   = PercentileRankOf(atrHist, n, todayAtr);
-
-   ENUM_MARKET_REGIME newRegime;
-   if(g_regimeTrendPercentileNow >= InpRegimeTrendPercentile)
-      newRegime = REGIME_TRENDING;
-   else if(g_regimeVolPercentileNow >= InpRegimeVolPercentile)
-      newRegime = REGIME_VOLATILE;
-   else
-      newRegime = REGIME_RANGING;
-
-   g_currentRegime = newRegime;
-   if(newRegime == REGIME_TRENDING)
-     {
-      g_regimeDcaDistanceMult  = InpRegimeTrendingDcaDistanceMult;
-      g_regimeLotMultiplierCap = 999.0;
-     }
-   else if(newRegime == REGIME_RANGING)
-     {
-      g_regimeDcaDistanceMult  = InpRegimeRangingDcaDistanceMult;
-      g_regimeLotMultiplierCap = 999.0;
-     }
-   else // REGIME_VOLATILE
-     {
-      g_regimeDcaDistanceMult  = 1.0;
-      g_regimeLotMultiplierCap = InpRegimeVolatileLotMultCap;
-     }
-
-   string regimeName = (newRegime == REGIME_TRENDING) ? "TRENDING" : (newRegime == REGIME_VOLATILE) ? "VOLATILE" : "RANGING";
-   string msg = StringFormat("AI BRAIN regime detection (vs %d years / %d daily bars): trend-strength at %.1f pct, "
-                              "volatility at %.1f pct -> regime=%s (DCA distance x%.2f, lot mult cap %.2f)",
-                              InpRegimeHistoryYears, n, g_regimeTrendPercentileNow, g_regimeVolPercentileNow,
-                              regimeName, g_regimeDcaDistanceMult, g_regimeLotMultiplierCap);
-   Print("GoldDualBasketDCA: " + msg);
-   WriteTuningLog(msg);
-  }
-
-void MaybeUpdateMarketRegime()
-  {
-   if(!g_regimeDetectionActive)
-      return;
-
-   MqlDateTime dt;
-   TimeToStruct(TimeCurrent(), dt);
-   int todayCode = dt.year * 10000 + dt.mon * 100 + dt.day;
-   if(todayCode == g_lastRegimeDateCode)
-      return; // already recalculated today
-
-   UpdateMarketRegime();
-   g_lastRegimeDateCode = todayCode;
-  }
-
-//+------------------------------------------------------------------+
 //| Spread / daily circuit breaker                                    |
 //+------------------------------------------------------------------+
 bool SpreadIsAcceptable()
@@ -1008,57 +587,7 @@ void UpdateDayTracking()
      {
       g_dayStartDateCode = todayCode;
       g_dayStartBalance  = AccountInfoDouble(ACCOUNT_BALANCE);
-      if(g_intradayBrakeActive)
-        {
-         g_intradayBrakeActive = false;
-         Print("GoldDualBasketDCA: AI BRAIN intraday soft-brake reset for the new day.");
-        }
      }
-  }
-
-// Soft, non-closing de-risk: engages once per day, the moment today's
-// floating loss crosses the threshold, and stays on (no un-braking mid-day
-// even if equity recovers) until the next day's rollover resets it. This is
-// deliberately one-directional within a day - flapping on/off as equity
-// wobbles around the threshold would be noise, not a real risk decision.
-void CheckIntradayBrake()
-  {
-   if(!InpUseIntradayBrake || g_intradayBrakeActive || g_dayStartBalance <= 0)
-      return;
-
-   double equity    = AccountInfoDouble(ACCOUNT_EQUITY);
-   double changePct = (equity - g_dayStartBalance) / g_dayStartBalance * 100.0;
-
-   if(changePct <= -InpIntradayBrakeLossPercent)
-     {
-      g_intradayBrakeActive = true;
-      string msg = StringFormat("AI BRAIN intraday soft-brake engaged: today's P/L %.2f%% <= -%.2f%% - "
-                                 "lot multiplier capped to %.2f, DCA distance x%.2f for the rest of today",
-                                 changePct, InpIntradayBrakeLossPercent, InpIntradayBrakeMultiplierCap,
-                                 InpIntradayBrakeDistanceMult);
-      Print("GoldDualBasketDCA: " + msg);
-      WriteTuningLog(msg);
-     }
-  }
-
-double EffectiveLotMultiplier()
-  {
-   double mult = g_tunedLotMultiplier;
-   if(g_intradayBrakeActive)
-      mult = MathMin(mult, InpIntradayBrakeMultiplierCap);
-   if(g_regimeDetectionActive)
-      mult = MathMin(mult, g_regimeLotMultiplierCap);
-   if(InpUseMLStuckRiskFilter && g_mlStuckRiskNow > InpMLStuckRiskShrinkStart)
-     {
-      // Linearly damp the multiplier from its current value down to 1.0x
-      // (no growth at all) as predicted risk rises from ShrinkStart to
-      // ShrinkEnd - same pattern as the intraday-brake/regime caps above.
-      double range = MathMax(InpMLStuckRiskShrinkEnd - InpMLStuckRiskShrinkStart, 0.0001);
-      double progress = MathMin((g_mlStuckRiskNow - InpMLStuckRiskShrinkStart) / range, 1.0);
-      double mlCap = mult - (mult - 1.0) * progress;
-      mult = MathMin(mult, mlCap);
-     }
-   return mult;
   }
 
 bool DailyLimitHit()
@@ -1077,253 +606,6 @@ bool DailyLimitHit()
      }
 
    return hit;
-  }
-
-//+------------------------------------------------------------------+
-//| Self-tuning "AI brain" - rule-based, bounded, conservative daily   |
-//| nudges from yesterday's closed-trade history. No ML libraries      |
-//| exist in native MQL5, so this is a deliberate, auditable heuristic |
-//| rather than a trained model - confirmed acceptable with the user.  |
-//+------------------------------------------------------------------+
-string GVName(string paramName)
-  {
-   return GV_PREFIX + IntegerToString((long)InpMagicNumber) + "_" + paramName;
-  }
-
-void LoadTunedParams()
-  {
-   if(InpResetTunedParams)
-     {
-      GlobalVariableDel(GVName("DcaDistance"));
-      GlobalVariableDel(GVName("DcaAtrMult"));
-      GlobalVariableDel(GVName("LotMultiplier"));
-      GlobalVariableDel(GVName("ProfitTarget"));
-      GlobalVariableDel(GVName("MaxLegs"));
-      GlobalVariableDel(GVName("LastTuneDate"));
-      for(int i = 1; i <= InpMaxLegsPerBasket; i++)
-        {
-         GlobalVariableDel(GVName("LegWins" + IntegerToString(i)));
-         GlobalVariableDel(GVName("LegLosses" + IntegerToString(i)));
-        }
-     }
-
-   g_tunedDcaDistance   = GlobalVariableCheck(GVName("DcaDistance"))
-                          ? GlobalVariableGet(GVName("DcaDistance")) : InpDcaDistancePrice;
-   g_tunedDcaAtrMult    = GlobalVariableCheck(GVName("DcaAtrMult"))
-                          ? GlobalVariableGet(GVName("DcaAtrMult")) : InpDcaDistanceAtrMult;
-   g_tunedLotMultiplier = GlobalVariableCheck(GVName("LotMultiplier"))
-                          ? GlobalVariableGet(GVName("LotMultiplier")) : InpLotMultiplier;
-   g_tunedProfitTarget  = GlobalVariableCheck(GVName("ProfitTarget"))
-                          ? GlobalVariableGet(GVName("ProfitTarget")) : InpBasketProfitTargetUSD;
-   g_tunedMaxLegs       = GlobalVariableCheck(GVName("MaxLegs"))
-                          ? (int)GlobalVariableGet(GVName("MaxLegs")) : InpMaxLegsPerBasket;
-   g_lastTuneDateCode   = GlobalVariableCheck(GVName("LastTuneDate"))
-                          ? (int)GlobalVariableGet(GVName("LastTuneDate")) : -1;
-  }
-
-void SaveTunedParams()
-  {
-   GlobalVariableSet(GVName("DcaDistance"), g_tunedDcaDistance);
-   GlobalVariableSet(GVName("DcaAtrMult"), g_tunedDcaAtrMult);
-   GlobalVariableSet(GVName("LotMultiplier"), g_tunedLotMultiplier);
-   GlobalVariableSet(GVName("ProfitTarget"), g_tunedProfitTarget);
-   GlobalVariableSet(GVName("MaxLegs"), g_tunedMaxLegs);
-   GlobalVariableSet(GVName("LastTuneDate"), g_lastTuneDateCode);
-  }
-
-// Persistent (not reset daily) per-leg-depth win/loss counters - the "deep"
-// part of the AI brain: real accumulated history of whether reaching a
-// given leg depth actually tends to recover, not just yesterday's snapshot.
-double GetLegStat(string kind, int legs)
-  {
-   string name = GVName((kind == "win" ? "LegWins" : "LegLosses") + IntegerToString(legs));
-   return GlobalVariableCheck(name) ? GlobalVariableGet(name) : 0;
-  }
-
-void IncrementLegStat(string kind, int legs)
-  {
-   string name = GVName((kind == "win" ? "LegWins" : "LegLosses") + IntegerToString(legs));
-   GlobalVariableSet(name, GetLegStat(kind, legs) + 1);
-  }
-
-void WriteTuningLog(string msg)
-  {
-   int handle = FileOpen("GoldDualBasketDCA_tuning_log.txt", FILE_READ | FILE_WRITE | FILE_TXT | FILE_SHARE_READ | FILE_ANSI);
-   if(handle == INVALID_HANDLE)
-     {
-      Print("GoldDualBasketDCA: failed to open tuning log file.");
-      return;
-     }
-   FileSeek(handle, 0, SEEK_END);
-   FileWriteString(handle, TimeToString(TimeCurrent(), TIME_DATE | TIME_MINUTES) + " - " + msg + "\r\n");
-   FileClose(handle);
-  }
-
-void MaybeRunDailySelfTune()
-  {
-   if(!InpEnableSelfTuning)
-      return;
-
-   MqlDateTime dt;
-   TimeToStruct(TimeCurrent(), dt);
-   int todayCode = dt.year * 10000 + dt.mon * 100 + dt.day;
-
-   if(todayCode == g_lastTuneDateCode)
-      return; // already tuned today
-
-   datetime todayStart     = StringToTime(StringFormat("%04d.%02d.%02d 00:00:00", dt.year, dt.mon, dt.day));
-   datetime yesterdayStart = todayStart - 24 * 60 * 60;
-
-   RunDailySelfTune(yesterdayStart, todayStart);
-
-   g_lastTuneDateCode = todayCode;
-   SaveTunedParams();
-  }
-
-// Groups yesterday's closing deals into basket-close "cycles" (consecutive
-// same-direction closing deals within ~2 seconds belong to one CloseBasket()
-// call), then applies small, bounded, conservative nudges. Biased toward
-// de-risking: widening distance / lowering multiplier needs real trouble
-// evidence; nothing here ever tightens risk just because a day went well.
-void RunDailySelfTune(datetime fromTime, datetime toTime)
-  {
-   if(!HistorySelect(fromTime, toTime))
-     {
-      Print("GoldDualBasketDCA: self-tune - HistorySelect failed for yesterday's range.");
-      return;
-     }
-
-   int total = HistoryDealsTotal();
-   ulong    dealTickets[];
-   datetime dealTimes[];
-   double   dealProfits[];
-   long     dealTypes[];
-   ArrayResize(dealTickets, total);
-   ArrayResize(dealTimes, total);
-   ArrayResize(dealProfits, total);
-   ArrayResize(dealTypes, total);
-
-   int n = 0;
-   for(int i = 0; i < total; i++)
-     {
-      ulong ticket = HistoryDealGetTicket(i);
-      if(ticket == 0)
-         continue;
-      if(HistoryDealGetString(ticket, DEAL_SYMBOL) != _Symbol)
-         continue;
-      if(HistoryDealGetInteger(ticket, DEAL_MAGIC) != (long)InpMagicNumber)
-         continue;
-      if((int)HistoryDealGetInteger(ticket, DEAL_ENTRY) != DEAL_ENTRY_OUT)
-         continue;
-
-      dealTickets[n] = ticket;
-      dealTimes[n]   = (datetime)HistoryDealGetInteger(ticket, DEAL_TIME);
-      dealProfits[n] = HistoryDealGetDouble(ticket, DEAL_PROFIT)
-                       + HistoryDealGetDouble(ticket, DEAL_SWAP)
-                       + HistoryDealGetDouble(ticket, DEAL_COMMISSION);
-      dealTypes[n]   = HistoryDealGetInteger(ticket, DEAL_TYPE);
-      n++;
-     }
-
-   int    maxedTotal = 0, maxedAndLost = 0, cycleCount = 0, targetHitCount = 0;
-   double totalTargetGapSum = 0;
-
-   int idx = 0;
-   while(idx < n)
-     {
-      int    j         = idx;
-      double sumProfit = dealProfits[idx];
-      int    legs      = 1;
-      while(j + 1 < n && dealTypes[j + 1] == dealTypes[idx] && (dealTimes[j + 1] - dealTimes[j]) <= 2)
-        {
-         j++;
-         sumProfit += dealProfits[j];
-         legs++;
-        }
-
-      cycleCount++;
-      if(legs >= InpMaxLegsPerBasket)
-        {
-         maxedTotal++;
-         if(sumProfit < 0)
-            maxedAndLost++;
-        }
-      if(sumProfit >= 0 && sumProfit < g_tunedProfitTarget * 1.5)
-        {
-         targetHitCount++;
-         totalTargetGapSum += (sumProfit - g_tunedProfitTarget);
-        }
-
-      // Deep AI brain: record real, persistent win/loss history at this
-      // exact leg depth, regardless of whether it happens to be today's
-      // active cap - this builds up a genuine track record over many days.
-      int legsCapped = (int)MathMin(legs, InpMaxLegsPerBasket);
-      IncrementLegStat(sumProfit >= 0 ? "win" : "loss", legsCapped);
-
-      idx = j + 1;
-     }
-
-   double oldDist = InpUseAtrDcaDistance ? g_tunedDcaAtrMult : g_tunedDcaDistance;
-   double oldMult = g_tunedLotMultiplier, oldTarget = g_tunedProfitTarget;
-   int    oldMaxLegs = g_tunedMaxLegs;
-   bool changed = false;
-
-   if(maxedTotal > 0 && maxedAndLost >= MathMax(1, maxedTotal / 2))
-     {
-      if(InpUseAtrDcaDistance)
-         g_tunedDcaAtrMult = MathMin(InpDcaAtrMultMax, g_tunedDcaAtrMult + 0.10);
-      else
-         g_tunedDcaDistance = MathMin(InpDcaDistanceMax, g_tunedDcaDistance + 0.20);
-      g_tunedLotMultiplier = MathMax(InpLotMultiplierMin, g_tunedLotMultiplier - 0.05);
-      changed = true;
-     }
-
-   if(cycleCount >= 20 && targetHitCount > 0 && (totalTargetGapSum / targetHitCount) < 0.05)
-     {
-      g_tunedProfitTarget = MathMin(InpProfitTargetMax, g_tunedProfitTarget + 0.20);
-      changed = true;
-     }
-
-   // Deep AI brain: adjust the max-legs cap itself from real, persistent
-   // (all-time, not just yesterday) win/loss history at the CURRENT cap's
-   // leg depth. Requires a real sample size before trusting it either way -
-   // small samples are noise, not evidence. Reducing needs a poor win rate;
-   // increasing needs a strong one; either way it never leaves
-   // [InpMaxLegsFloor, InpMaxLegsPerBasket].
-   double wins   = GetLegStat("win", g_tunedMaxLegs);
-   double losses = GetLegStat("loss", g_tunedMaxLegs);
-   double sample = wins + losses;
-   string legStatNote = "";
-   if(sample >= InpLegStatMinSample)
-     {
-      double winRate = wins / sample;
-      if(winRate < InpLegStatWinRateFloor && g_tunedMaxLegs > InpMaxLegsFloor)
-        {
-         g_tunedMaxLegs--;
-         changed = true;
-         legStatNote = StringFormat(" | leg-depth %d win rate %.0f%% (n=%.0f) below floor - max legs reduced",
-                                     oldMaxLegs, winRate * 100, sample);
-        }
-      else if(winRate > InpLegStatWinRateCeil && g_tunedMaxLegs < InpMaxLegsPerBasket)
-        {
-         g_tunedMaxLegs++;
-         changed = true;
-         legStatNote = StringFormat(" | leg-depth %d win rate %.0f%% (n=%.0f) above ceiling - max legs increased",
-                                     oldMaxLegs, winRate * 100, sample);
-        }
-     }
-
-   double newDist = InpUseAtrDcaDistance ? g_tunedDcaAtrMult : g_tunedDcaDistance;
-   string distLabel = InpUseAtrDcaDistance ? "DcaAtrMult" : "DcaDistance";
-   string logMsg = StringFormat("Self-tune %s: cycles=%d maxedTotal=%d maxedAndLost=%d targetHits=%d | "
-                                 "%s %.2f->%.2f LotMultiplier %.2f->%.2f ProfitTarget %.2f->%.2f MaxLegs %d->%d%s%s",
-                                 TimeToString(fromTime, TIME_DATE), cycleCount, maxedTotal, maxedAndLost, targetHitCount,
-                                 distLabel, oldDist, newDist, oldMult, g_tunedLotMultiplier, oldTarget, g_tunedProfitTarget,
-                                 oldMaxLegs, g_tunedMaxLegs,
-                                 changed ? "" : " | no change (no clear trouble signal)", legStatNote);
-
-   Print("GoldDualBasketDCA: " + logMsg);
-   WriteTuningLog(logMsg);
   }
 
 //+------------------------------------------------------------------+
@@ -1408,7 +690,7 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, InpDashboardX - 10);
       ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, InpDashboardY - 10);
       ObjectSetInteger(0, bg, OBJPROP_XSIZE, 280);
-      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 575);
+      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 445);
       ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'12,12,16');
       ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, bg, OBJPROP_COLOR, C'70,70,80');
@@ -1418,9 +700,9 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_ZORDER, 0);
      }
 
-   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 501, 260, 24, "X  CLOSE ALL", C'120,20,20');
-   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 529, 126, 22, "Close BUY", C'20,80,20');
-   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 529, 126, 22, "Close SELL", C'20,80,20');
+   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 371, 260, 24, "X  CLOSE ALL", C'120,20,20');
+   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 399, 126, 22, "Close BUY", C'20,80,20');
+   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 399, 126, 22, "Close SELL", C'20,80,20');
   }
 
 void UpdateDashboard()
@@ -1454,17 +736,17 @@ void UpdateDashboard()
    y += 9;
 
    DbLabel("BuyHdr", lx, y, StringFormat("BUY BASKET  (leg %d/%d, cycle %d)",
-           (g_tunedMaxLegs > 0 ? g_buyBasket.legCount % g_tunedMaxLegs : g_buyBasket.legCount), g_tunedMaxLegs,
-           (g_tunedMaxLegs > 0 ? g_buyBasket.legCount / g_tunedMaxLegs + 1 : 1)), C'0,170,220', 8);
+           (InpMaxLegsPerBasket > 0 ? g_buyBasket.legCount % InpMaxLegsPerBasket : g_buyBasket.legCount), InpMaxLegsPerBasket,
+           (InpMaxLegsPerBasket > 0 ? g_buyBasket.legCount / InpMaxLegsPerBasket + 1 : 1)), C'0,170,220', 8);
    y += lh;
    DbLabel("BuyAvg", lx, y, PadRight("Avg Entry", lblW) + DoubleToString(g_buyBasket.weightedAvgEntry, 2), clrWhite, 8);
    y += lh;
    DbLabel("BuyPL", lx, y, PadRight("Floating", lblW) + "$" + DoubleToString(g_buyBasket.floatingPL, 2),
            (g_buyBasket.floatingPL >= 0 ? clrLime : clrRed), 8);
    y += lh;
-   double buyToTarget = GetEffectiveProfitTarget(g_buyBasket) - g_buyBasket.floatingPL;
+   double buyToTarget = GetProfitTarget(g_buyBasket) - g_buyBasket.floatingPL;
    double buyToDca = (g_buyBasket.legCount > 0)
-                      ? (SymbolInfoDouble(_Symbol, SYMBOL_BID) - (g_buyBasket.lastLegEntry - GetCurrentDcaDistance())) : 0;
+                      ? (SymbolInfoDouble(_Symbol, SYMBOL_BID) - (g_buyBasket.lastLegEntry - InpDcaDistancePrice)) : 0;
    DbLabel("BuyToTarget", lx, y, PadRight("To Target", lblW) + "$" + DoubleToString(buyToTarget, 2), clrSilver, 8);
    y += lh;
    DbLabel("BuyToDca", lx, y, PadRight("To DCA", lblW) + "$" + DoubleToString(buyToDca, 2), clrSilver, 8);
@@ -1474,17 +756,17 @@ void UpdateDashboard()
    y += 9;
 
    DbLabel("SellHdr", lx, y, StringFormat("SELL BASKET (leg %d/%d, cycle %d)",
-           (g_tunedMaxLegs > 0 ? g_sellBasket.legCount % g_tunedMaxLegs : g_sellBasket.legCount), g_tunedMaxLegs,
-           (g_tunedMaxLegs > 0 ? g_sellBasket.legCount / g_tunedMaxLegs + 1 : 1)), C'0,170,220', 8);
+           (InpMaxLegsPerBasket > 0 ? g_sellBasket.legCount % InpMaxLegsPerBasket : g_sellBasket.legCount), InpMaxLegsPerBasket,
+           (InpMaxLegsPerBasket > 0 ? g_sellBasket.legCount / InpMaxLegsPerBasket + 1 : 1)), C'0,170,220', 8);
    y += lh;
    DbLabel("SellAvg", lx, y, PadRight("Avg Entry", lblW) + DoubleToString(g_sellBasket.weightedAvgEntry, 2), clrWhite, 8);
    y += lh;
    DbLabel("SellPL", lx, y, PadRight("Floating", lblW) + "$" + DoubleToString(g_sellBasket.floatingPL, 2),
            (g_sellBasket.floatingPL >= 0 ? clrLime : clrRed), 8);
    y += lh;
-   double sellToTarget = GetEffectiveProfitTarget(g_sellBasket) - g_sellBasket.floatingPL;
+   double sellToTarget = GetProfitTarget(g_sellBasket) - g_sellBasket.floatingPL;
    double sellToDca = (g_sellBasket.legCount > 0)
-                       ? ((g_sellBasket.lastLegEntry + GetCurrentDcaDistance()) - SymbolInfoDouble(_Symbol, SYMBOL_ASK)) : 0;
+                       ? ((g_sellBasket.lastLegEntry + InpDcaDistancePrice) - SymbolInfoDouble(_Symbol, SYMBOL_ASK)) : 0;
    DbLabel("SellToTarget", lx, y, PadRight("To Target", lblW) + "$" + DoubleToString(sellToTarget, 2), clrSilver, 8);
    y += lh;
    DbLabel("SellToDca", lx, y, PadRight("To DCA", lblW) + "$" + DoubleToString(sellToDca, 2), clrSilver, 8);
@@ -1505,43 +787,7 @@ void UpdateDashboard()
    y += lh;
    bool hedgingOk = ((ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE) == ACCOUNT_MARGIN_MODE_RETAIL_HEDGING);
    DbLabel("Hedging", lx, y, PadRight("Hedging", lblW) + (hedgingOk ? "OK" : "FAIL"), hedgingOk ? clrLime : clrRed, 8);
-   y += lh;
-   DbLabel("Brake", lx, y, PadRight("Soft Brake", lblW) + (InpUseIntradayBrake ? (g_intradayBrakeActive ? "ON (de-risked today)" : "off (normal)") : "disabled"),
-           g_intradayBrakeActive ? clrOrange : clrSilver, 8);
-   y += lh;
-   string regimeText = !g_regimeDetectionActive ? "disabled"
-                        : (g_currentRegime == REGIME_TRENDING) ? "TRENDING"
-                        : (g_currentRegime == REGIME_VOLATILE) ? "VOLATILE" : "RANGING";
-   color regimeColor = (g_currentRegime == REGIME_TRENDING) ? C'0,170,220'
-                        : (g_currentRegime == REGIME_VOLATILE) ? clrOrange : clrLime;
-   DbLabel("Regime", lx, y, PadRight("Regime", lblW) + regimeText, g_regimeDetectionActive ? regimeColor : clrSilver, 8);
-   y += lh;
-   string mlText = !InpUseMLStuckRiskFilter ? "off"
-                   : !g_mlStuckAvailable ? "model not loaded"
-                   : StringFormat("ON (risk now %.0f%%)", g_mlStuckRiskNow * 100.0);
-   color mlColor = (InpUseMLStuckRiskFilter && !g_mlStuckAvailable) ? clrRed
-                   : (g_mlStuckRiskNow > InpMLStuckRiskShrinkStart) ? clrOrange : clrSilver;
-   DbLabel("MlStuckRisk", lx, y, PadRight("ML Stuck-Risk", lblW) + mlText, mlColor, 8);
-   y += lh + 6;
-
-   DbDivider("Div4", x, y, 260, C'55,55,65');
-   y += 9;
-
-   DbLabel("TuneHdr", lx, y, "SELF-TUNED PARAMS", C'0,170,220', 8);
-   y += lh;
-   string dcaDistText = InpUseAtrDcaDistance
-                         ? DoubleToString(g_tunedDcaAtrMult, 2) + "x ATR ($" + DoubleToString(GetCurrentDcaDistance(), 2) + ")"
-                         : "$" + DoubleToString(g_tunedDcaDistance, 2);
-   DbLabel("TuneDist", lx, y, PadRight("DCA Dist", lblW) + dcaDistText, clrWhite, 8);
-   y += lh;
-   DbLabel("TuneMult", lx, y, PadRight("Multiplier", lblW) + DoubleToString(g_tunedLotMultiplier, 2) + "x", clrWhite, 8);
-   y += lh;
-   DbLabel("TuneTarget", lx, y, PadRight("Target", lblW) + "$" + DoubleToString(g_tunedProfitTarget, 2), clrWhite, 8);
-   y += lh;
-   DbLabel("TuneMaxLegs", lx, y, PadRight("Max Legs", lblW) + IntegerToString(g_tunedMaxLegs) + " (ceil " +
-           IntegerToString(InpMaxLegsPerBasket) + ")", clrWhite, 8);
-   y += lh;
-   DbLabel("LastTune", lx, y, PadRight("Last Tune", lblW) + (g_lastTuneDateCode > 0 ? IntegerToString(g_lastTuneDateCode) : "never"), clrSilver, 8);
+   y += lh + 10;
 
    ChartRedraw();
   }

@@ -277,3 +277,52 @@ Farhan Fx` Python project's `learnings.md`.)
   re-enable it later, e.g. with a much higher skip threshold, or a
   bounded-delay skip (wait N hours, then force the leg anyway) rather
   than an unconditional skip. Not revisited unless the user asks.
+
+- **2026-08-12 (full removal, not just disabling, of self-tuning/regime
+  detection/ML - explicit user instruction):** After the override above,
+  the user reported the Inputs dialog itself ("eto gulo setting kiser ami
+  kichu bujte parchi na" - so many settings, I can't understand what
+  they're for) as the real problem, not just the ML behavior specifically.
+  Explicit final instruction: turn the four feature toggles (self-tuning,
+  regime detection, intraday brake, stuck-basket relief) off as defaults,
+  **remove the rest of those settings** (i.e. delete the now-meaningless
+  parameters under each disabled feature, not just leave them inert), and
+  **simplify the wording** of what remains so it's understandable.
+
+  Rewrote `Scalping Ai Pro By Farhan FX.mq5` (build `2026.08.12.1`): fully
+  removed the self-tuner (`RunDailySelfTune`/`LoadTunedParams`/
+  `SaveTunedParams`/`GetLegStat`/`GlobalVariable*` persistence/
+  `WriteTuningLog`), the market-regime detector (`UpdateMarketRegime`/
+  `PercentileRankOf`/D1 history loading/regime-based DCA-distance and
+  lot-multiplier multipliers), the intraday soft-brake
+  (`CheckIntradayBrake`), the stuck-basket-relief target-shrink, and the
+  entire ML/ONNX stuck-risk integration (`OnnxCreate`/`OnnxRun`/
+  `BuildStuckFeatures`/`GetMLStuckRisk` and their `OnInit`/`OnDeinit`
+  wiring) - along with every now-meaningless input parameter that
+  belonged only to those features (14 inputs removed, 3 whole input
+  groups gone: `Auto-Adjust Settings (AI Brain)`, `Market Regime
+  Detection (AI Brain)`, `ML (ONNX)`). What remains: fixed DCA distance,
+  fixed lot multiplier, per-cycle growing profit target, ATR-spike +
+  trend filters (unchanged), all safety toggles still present but at
+  their already-explicit OFF defaults. Also rewrote every remaining
+  input's inline comment in plain Banglish (the user's own habitual
+  written register) instead of English trading jargon, since the goal
+  was the user being able to read the Inputs dialog and understand it
+  directly, not just have fewer rows.
+
+  Recompiled clean (0 errors, 0 warnings, MetaEditor CLI via the isolated
+  Vantage terminal - `metaeditor64.exe /compile` needs to run through
+  `PowerShell`'s `Start-Process`, not the plain Bash tool, in this
+  environment; the Bash-launched process exited immediately without
+  compiling or producing a log, silently, while PowerShell's
+  `Start-Process -Wait` ran it correctly and captured the full compiler
+  log - worth remembering if this comes up again).
+
+  **The lesson:** "reduce settings" and "disable settings" are different
+  requests. Disabling behavior (what the 2026-08-12 entry above did)
+  keeps every parameter visible and technically re-enablable, which is
+  the right call when the user might want the feature back with a tweak.
+  But when the complaint is the settings list itself being incomprehensible,
+  only actually deleting the dead parameters (and rewriting the survivors
+  in the user's own plain language) fixes the real problem - a disabled-
+  but-still-visible wall of inputs is not simpler, just inert.

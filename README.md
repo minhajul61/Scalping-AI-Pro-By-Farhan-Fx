@@ -23,6 +23,24 @@ filtered, and safety-netted (see below) after this user's prior similar EA
 account with uniform lot sizing, no leg cap, and no floating-loss circuit
 breaker.
 
+## 2026-08-12: simplified back to core logic only (read this first)
+
+Earlier versions of this EA (documented further down, kept for historical
+record) grew a daily self-tuner, a historical market-regime detector, and a
+trained ML (ONNX) stuck-basket-risk filter on top of the core logic below.
+All three were live-tested on a VPS demo and, while individually working as
+designed, made the EA's behavior harder to predict from the input list alone
+— and the ML filter specifically sometimes deliberately paused martingale on
+a risk read, which conflicted with the user's actual, explicit requirement:
+**always martingale through an against-trend position until profit, no
+exceptions, no pauses**. Per direct user instruction, all three were removed
+from the code (not just disabled) as of build `2026.08.12.1`, so the current
+input list matches exactly what the EA does — no hidden auto-adjusting
+behavior anywhere. The self-tuner/regime-detection/ML sections further down
+in this README describe the removed history for context; they are no longer
+part of the running EA. Full removal rationale in `ml/learnings.md`
+(2026-08-12 entries).
+
 ## Core logic
 
 - Bootstrap: if a basket is empty, open one `InpInitialLot` leg.

@@ -40,7 +40,7 @@
 // dashboard can show at a glance whether a given chart is running the latest
 // build - this exact confusion (VPS silently running stale code) came up
 // 2026-07-27 and cost a round of guessing from the leg-count alone.
-#define EA_BUILD_VERSION "2026.08.12.1"
+#define EA_BUILD_VERSION "2026.08.12.2"
 
 #include <Trade\Trade.mqh>
 
@@ -51,46 +51,52 @@ enum ENUM_BASKET_SIDE
   };
 
 input group "=== Account & Basic Settings ==="
-input ulong    InpMagicNumber        = 20270115;  // EA-r ID number - change korar dorkar nai
-input long     InpExpectedLogin      = 416045126; // Tomar account number - na mille EA cholbe na (0 dile check off)
-input int      InpMaxSpreadPoints    = 300;       // Spread eto point-er beshi hole notun trade nibe na
+input ulong    InpMagicNumber        = 20270115;  // ID number for this EA's trades - leave as is
+input long     InpExpectedLogin      = 416045126; // Your account number - EA won't run on a different one (0 = skip this check)
+input int      InpMaxSpreadPoints    = 300;       // Skip new trades if the spread is wider than this
 
-input group "=== Basket O Profit Target ==="
-input double   InpInitialLot            = 0.02;   // Prothom trade koto lot-er
-input double   InpBasketProfitTargetUSD = 2.0;    // Eto dollar profit hole basket close hobe (cycle barle target-o barbe)
-input int      InpMaxLegsPerBasket      = 7;      // Eto DCA trade porjonto nibe, tarpor notun cycle shuru hobe (lot abar choto theke)
-input int      InpAbsoluteMaxLegsPerBasket = 50;  // Emergency hard limit - eto beshi kokhono normally lagbe na
-input double   InpCycleTargetGrowth     = 0.5;    // Protibar notun cycle shuru hole target koto % barbe (0.5 = +50%)
+input group "=== Basket & Profit Target ==="
+input double   InpInitialLot            = 0.02;   // First trade size (lot)
+input double   InpBasketProfitTargetUSD = 2.0;    // Close basket once it earns this much profit ($) - grows each new cycle
+input int      InpMaxLegsPerBasket      = 7;      // How many DCA trades before a new cycle starts (lot size resets)
+input int      InpAbsoluteMaxLegsPerBasket = 50;  // Hard emergency limit - should never normally be reached
+input double   InpCycleTargetGrowth     = 0.5;    // Each new cycle raises the profit target by this fraction (0.5 = +50%)
 
-input group "=== DCA / Martingale (Against Gele) ==="
-input double   InpDcaDistancePrice  = 3.0;        // Price koto dollar against gele porer DCA trade hobe
-input double   InpLotMultiplier     = 2.0;        // Protibar lot koto gun barbe (2.0 = protibar dwigun)
+input group "=== DCA / Martingale (When Price Goes Against) ==="
+input double   InpDcaDistancePrice  = 3.0;        // Price move ($) before adding the next DCA trade
+input double   InpLotMultiplier     = 2.0;        // How much bigger each new DCA trade is (2.0 = double each time)
 
-input group "=== Filter (Kokhon DCA Add Korbe Na) ==="
-input bool             InpUseAtrSpikeFilter = true;      // Hothat boro spike (news-er moto move) hole DCA add korbe na
-input int              InpAtrPeriod         = 14;        // Volatility mapar candle shonkha
-input int              InpAtrBaselineBars   = 20;        // "Normal" volatility bujhte koyta candle dekhbe
-input double           InpMaxAtrRatio       = 1.5;       // Normal-er koto gun beshi hole "spike" bole dhorbe
-input bool             InpUseTrendFilter    = true;      // Boro trend-er ULTO dike DCA add korbe na - sob shomoy trend-e trade
-input ENUM_TIMEFRAMES  InpTrendTF           = PERIOD_H1; // Trend bujhte kon timeframe dekhbe
-input int              InpTrendMAPeriod     = 50;        // Trend line-er length
-input int              InpTrendAtrPeriod    = 14;        // Trend koto strong seta mapar volatility period
-input double           InpTrendStrengthATRMult = 0.5;    // Trend koto strong hole "real trend" bole dhorbe
+input group "=== Filters (When NOT To Add A DCA Trade) ==="
+input bool             InpUseAtrSpikeFilter = true;      // Don't add trades during a sudden volatility spike
+input int              InpAtrPeriod         = 14;        // Volatility measuring period (candles)
+input int              InpAtrBaselineBars   = 20;        // Candles used to work out "normal" volatility
+input double           InpMaxAtrRatio       = 1.5;       // How many times above normal counts as a spike
+input bool             InpUseTrendFilter    = true;      // Don't add trades against a strong trend - always trade with the trend
+input ENUM_TIMEFRAMES  InpTrendTF           = PERIOD_H1; // Timeframe used to judge the trend
+input int              InpTrendMAPeriod     = 50;        // Moving average length used for the trend check
+input int              InpTrendAtrPeriod    = 14;        // Volatility period used to judge trend strength
+input double           InpTrendStrengthATRMult = 0.5;    // How strong the trend must be to count as "real"
 
-input group "=== Safety (Tomar Request-e Ekhon Sob OFF) ==="
-input double   InpBasketMaxLossUSD        = 0.0;   // Basket SL - 0 mane bondho
-input int      InpBasketSLCooldownMinutes = 0;     // SL hit hole abar shuru korar age koto minute wait
-input bool     InpUseCatastrophicSL       = false; // Emergency backup SL - bondho, tumi bolechile SL lagbe na
-input double   InpCatastrophicSLMultiple  = 2.0;   // (upore-r ta ON thakle koto dure emergency SL boshbe)
-input bool     InpUseDailyLimit         = false;  // Daily loss limit - bondho
-input double   InpDailyMaxLossPercent   = 0.0;    // (upore-r ta ON thakle koto % loss-e daily stop hobe)
-input bool     InpDailyLimitForceCloses = true;   // (upore-r ta ON thakle open trade-o close kore debe kina)
+input group "=== News Filter ==="
+input bool     InpUseNewsFilter       = true;   // Pause new trades around medium/high-impact news
+input string   InpNewsCurrency        = "USD";  // Currency to watch for news
+input int      InpNewsMinutesBefore   = 30;     // Stop trading this many minutes before the news
+input int      InpNewsMinutesAfter    = 30;     // Resume trading this many minutes after the news
+
+input group "=== Safety (Currently All OFF Per Your Request) ==="
+input double   InpBasketMaxLossUSD        = 0.0;   // Force-close a basket at this loss ($) - 0 = off
+input int      InpBasketSLCooldownMinutes = 0;     // Minutes to wait before reopening after a stop-loss
+input bool     InpUseCatastrophicSL       = false; // Emergency backup stop-loss - off, per your request (no SL)
+input double   InpCatastrophicSLMultiple  = 2.0;   // (only used if the setting above is ON)
+input bool     InpUseDailyLimit         = false;  // Daily loss limit - off
+input double   InpDailyMaxLossPercent   = 0.0;    // (only used if the setting above is ON)
+input bool     InpDailyLimitForceCloses = true;   // (only used if the setting above is ON)
 
 input group "=== Dashboard ==="
-input bool     InpShowDashboard = true;   // Chart-e info panel dekhabe kina
-input int      InpDashboardX    = 10;     // Panel-er position - left theke koto dure
-input int      InpDashboardY    = 20;     // Panel-er position - upor theke koto dure
-input bool     InpSetWhiteChartTheme = true; // Chart background shada kore debe
+input bool     InpShowDashboard = true;   // Show the on-chart info panel
+input int      InpDashboardX    = 10;     // Panel position - distance from left edge
+input int      InpDashboardY    = 20;     // Panel position - distance from top edge
+input bool     InpSetWhiteChartTheme = true; // Set the chart background to white
 
 CTrade trade;
 
@@ -420,6 +426,9 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
    if(TimeCurrent() < g_cooldownUntil[side])
       return;
 
+   if(InpUseNewsFilter && IsNewsBlackout())
+      return; // paused around medium/high-impact news, both bootstrap and DCA-adds
+
    if(b.legCount == 0)
      {
       // Don't even start a basket fighting a strong higher-timeframe trend -
@@ -569,6 +578,39 @@ bool IsAgainstTrend(ENUM_BASKET_SIDE side)
    return(trend == 1);
   }
 
+// Uses MT5's built-in economic calendar (no external service needed - the
+// terminal syncs it automatically while connected). Blocks new trades and
+// DCA-adds from InpNewsMinutesBefore before a medium/high-impact
+// InpNewsCurrency event until InpNewsMinutesAfter after it. Does not touch
+// already-open positions or profit-target closes - only pauses new adds.
+// NOTE: not yet live-verified in the Strategy Tester specifically (works in
+// live/demo charts, where the calendar is always available) - if the tester
+// ever shows it never blocking, check "Use test calendar events" / calendar
+// availability for the test period first before assuming a code bug.
+bool IsNewsBlackout()
+  {
+   if(!InpUseNewsFilter)
+      return false;
+
+   datetime from = TimeCurrent() - InpNewsMinutesAfter * 60;
+   datetime to   = TimeCurrent() + InpNewsMinutesBefore * 60;
+
+   MqlCalendarValue values[];
+   int n = CalendarValueHistory(values, from, to, NULL, InpNewsCurrency);
+   if(n <= 0)
+      return false;
+
+   for(int i = 0; i < n; i++)
+     {
+      MqlCalendarEvent ev;
+      if(!CalendarEventById(values[i].event_id, ev))
+         continue;
+      if(ev.importance == CALENDAR_IMPORTANCE_MODERATE || ev.importance == CALENDAR_IMPORTANCE_HIGH)
+         return true;
+     }
+   return false;
+  }
+
 //+------------------------------------------------------------------+
 //| Spread / daily circuit breaker                                    |
 //+------------------------------------------------------------------+
@@ -690,7 +732,7 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, InpDashboardX - 10);
       ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, InpDashboardY - 10);
       ObjectSetInteger(0, bg, OBJPROP_XSIZE, 280);
-      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 445);
+      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 460);
       ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'12,12,16');
       ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, bg, OBJPROP_COLOR, C'70,70,80');
@@ -700,9 +742,9 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_ZORDER, 0);
      }
 
-   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 371, 260, 24, "X  CLOSE ALL", C'120,20,20');
-   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 399, 126, 22, "Close BUY", C'20,80,20');
-   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 399, 126, 22, "Close SELL", C'20,80,20');
+   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 386, 260, 24, "X  CLOSE ALL", C'120,20,20');
+   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 414, 126, 22, "Close BUY", C'20,80,20');
+   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 414, 126, 22, "Close SELL", C'20,80,20');
   }
 
 void UpdateDashboard()
@@ -784,6 +826,10 @@ void UpdateDashboard()
    int trend = GetTrend();
    string trendText = (trend == 1) ? "UP" : (trend == -1) ? "DOWN" : "flat/off";
    DbLabel("Trend", lx, y, PadRight("HTF Trend", lblW) + trendText, clrSilver, 8);
+   y += lh;
+   bool newsBlackout = InpUseNewsFilter && IsNewsBlackout();
+   DbLabel("News", lx, y, PadRight("News", lblW) + (InpUseNewsFilter ? (newsBlackout ? "YES (blocking)" : "clear") : "off"),
+           newsBlackout ? clrOrange : clrSilver, 8);
    y += lh;
    bool hedgingOk = ((ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE) == ACCOUNT_MARGIN_MODE_RETAIL_HEDGING);
    DbLabel("Hedging", lx, y, PadRight("Hedging", lblW) + (hedgingOk ? "OK" : "FAIL"), hedgingOk ? clrLime : clrRed, 8);

@@ -326,3 +326,34 @@ Farhan Fx` Python project's `learnings.md`.)
   only actually deleting the dead parameters (and rewriting the survivors
   in the user's own plain language) fixes the real problem - a disabled-
   but-still-visible wall of inputs is not simpler, just inert.
+
+- **2026-08-12 (same day, follow-up): added a news filter, reverted input
+  comments to English, confirmed no learning happens anymore.** User asked
+  for three things in one message: (1) pause new trades/DCA-adds around
+  medium/high-impact USD news (30 min before, 30 min after), (2) switch
+  the just-simplified input comments from Banglish back to plain English,
+  (3) a direct question - does the EA currently learn anything from trade
+  history? Answered honestly: no, not since the same-day removal above -
+  it's purely fixed-parameter/rule-based now (fixed DCA distance, fixed
+  multiplier, trend/ATR/news filters), nothing persists or adapts across
+  trades or days.
+
+  Implemented the news filter (build `2026.08.12.2`) using MT5's built-in
+  economic calendar (`CalendarValueHistory`/`CalendarEventById` -
+  MetaQuotes-hosted, no external API/key needed, syncs automatically while
+  the terminal is connected). New `IsNewsBlackout()` checks for any
+  `CALENDAR_IMPORTANCE_MODERATE`/`HIGH` event in `InpNewsCurrency` within
+  `[now - InpNewsMinutesAfter, now + InpNewsMinutesBefore]`; gated into
+  `ManageBasketEntries()` so it blocks both fresh bootstrap entries and
+  DCA-adds, but never blocks an already-open basket from closing at its
+  profit target. New `=== News Filter ===` input group (4 inputs), plus a
+  dashboard "News" line (clear/blocking/off) next to the existing
+  ATR-spike/trend filter lines.
+
+  **Not yet live-verified** - the calendar functions are well-established
+  for live/demo charts, but this project has already been burned twice by
+  assuming an MQL5 API "should just work" without an actual runtime test
+  (see the two ONNX bugs above) - Strategy Tester calendar-event replay
+  support/behavior specifically has not been checked yet for this EA. Flag
+  this as unverified until watched live through an actual news event or
+  confirmed working in a tester run that spans one.

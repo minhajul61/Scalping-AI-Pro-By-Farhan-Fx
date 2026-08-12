@@ -41,8 +41,11 @@
 // version - this exact confusion (VPS silently running stale code) came up
 // 2026-07-27 and cost a round of guessing from the leg-count alone. Simple
 // v1, v2, v3... per explicit request (2026-08-12) - easier to compare at a
-// glance than a date-based build string.
-#define EA_BUILD_VERSION "v1"
+// glance than a date-based build string. Starts at v4, not v1 - counting
+// the four builds already deployed today under the old date-based scheme
+// (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
+// the real deployment history instead of resetting it.
+#define EA_BUILD_VERSION "v4"
 
 #include <Trade\Trade.mqh>
 

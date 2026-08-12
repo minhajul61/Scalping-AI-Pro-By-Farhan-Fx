@@ -40,7 +40,7 @@
 // dashboard can show at a glance whether a given chart is running the latest
 // build - this exact confusion (VPS silently running stale code) came up
 // 2026-07-27 and cost a round of guessing from the leg-count alone.
-#define EA_BUILD_VERSION "2026.08.12.3"
+#define EA_BUILD_VERSION "2026.08.12.4"
 
 #include <Trade\Trade.mqh>
 
@@ -51,43 +51,43 @@ enum ENUM_BASKET_SIDE
   };
 
 input group "=== Account & Basic Settings ==="
-input ulong    InpMagicNumber        = 20270115;  // ID number for this EA's trades - leave as is
-input long     InpExpectedLogin      = 416045126; // Your account number - EA won't run on a different one (0 = skip this check)
-input int      InpMaxSpreadPoints    = 300;       // Skip new trades if the spread is wider than this
+input ulong    InpMagicNumber        = 20270115;  // Magic Number
+input long     InpExpectedLogin      = 416045126; // Account Login (0 = skip check)
+input int      InpMaxSpreadPoints    = 300;       // Max Spread (points)
 
 input group "=== Basket & Profit Target ==="
-input double   InpInitialLot            = 0.02;   // First trade size (lot)
-input double   InpBasketProfitTargetUSD = 2.0;    // Close basket once it earns this much profit ($) - grows each new cycle
-input int      InpMaxLegsPerBasket      = 7;      // How many DCA trades before a new cycle starts (lot size resets)
-input int      InpAbsoluteMaxLegsPerBasket = 50;  // Hard emergency limit - should never normally be reached
-input double   InpCycleTargetGrowth     = 0.5;    // Each new cycle raises the profit target by this fraction (0.5 = +50%)
+input double   InpInitialLot            = 0.02;   // Initial Lot Size
+input double   InpBasketProfitTargetUSD = 2.0;    // Take Profit ($) - grows each new cycle
+input int      InpMaxLegsPerBasket      = 7;      // Max DCA Legs Per Cycle
+input int      InpAbsoluteMaxLegsPerBasket = 50;  // Absolute Max Legs (emergency hard limit)
+input double   InpCycleTargetGrowth     = 0.5;    // Target Growth Per Cycle (0.5 = +50%)
 
-input group "=== DCA / Martingale (When Price Goes Against) ==="
-input double   InpDcaDistancePrice  = 2.0;        // Price move ($) before adding the next DCA trade
-input double   InpLotMultiplier     = 2.0;        // How much bigger each new DCA trade is (2.0 = double each time)
+input group "=== DCA / Martingale ==="
+input double   InpDcaDistancePrice  = 1.2;        // DCA Distance ($)
+input double   InpLotMultiplier     = 2.0;        // Lot Multiplier
 
-input group "=== Filters (When NOT To Add A DCA Trade) ==="
-input bool             InpUseAtrSpikeFilter = true;      // Don't add trades during a sudden volatility spike
-input int              InpAtrPeriod         = 14;        // Volatility measuring period (candles)
-input int              InpAtrBaselineBars   = 20;        // Candles used to work out "normal" volatility
-input double           InpMaxAtrRatio       = 1.5;       // How many times above normal counts as a spike
-input bool             InpUseTrendFilter    = true;      // Don't add trades against a strong trend - always trade with the trend
-input ENUM_TIMEFRAMES  InpTrendTF           = PERIOD_H1; // Timeframe used to judge the trend
-input int              InpTrendMAPeriod     = 50;        // Moving average length used for the trend check
-input int              InpTrendAtrPeriod    = 14;        // Volatility period used to judge trend strength
-input double           InpTrendStrengthATRMult = 0.5;    // How strong the trend must be to count as "real"
+input group "=== Filters ==="
+input bool             InpUseAtrSpikeFilter = true;      // Use ATR Spike Filter
+input int              InpAtrPeriod         = 14;        // ATR Period
+input int              InpAtrBaselineBars   = 20;        // ATR Baseline Bars
+input double           InpMaxAtrRatio       = 1.5;       // Max ATR Ratio (spike threshold)
+input bool             InpUseTrendFilter    = true;      // Use Trend Filter
+input ENUM_TIMEFRAMES  InpTrendTF           = PERIOD_H1; // Trend Timeframe
+input int              InpTrendMAPeriod     = 50;        // Trend MA Period
+input int              InpTrendAtrPeriod    = 14;        // Trend ATR Period
+input double           InpTrendStrengthATRMult = 0.5;    // Trend Strength (x ATR)
 
 input group "=== News Filter ==="
-input bool     InpUseNewsFilter       = true;   // Pause new trades around medium/high-impact news
-input string   InpNewsCurrency        = "USD";  // Currency to watch for news
-input int      InpNewsMinutesBefore   = 30;     // Stop trading this many minutes before the news
-input int      InpNewsMinutesAfter    = 30;     // Resume trading this many minutes after the news
+input bool     InpUseNewsFilter       = true;   // Use News Filter
+input string   InpNewsCurrency        = "USD";  // News Currency
+input int      InpNewsMinutesBefore   = 30;     // Minutes Before News
+input int      InpNewsMinutesAfter    = 30;     // Minutes After News
 
 input group "=== Dashboard ==="
-input bool     InpShowDashboard = true;   // Show the on-chart info panel
-input int      InpDashboardX    = 10;     // Panel position - distance from left edge
-input int      InpDashboardY    = 20;     // Panel position - distance from top edge
-input bool     InpSetWhiteChartTheme = true; // Set the chart background to white
+input bool     InpShowDashboard = true;   // Show Dashboard
+input int      InpDashboardX    = 10;     // Dashboard X Position
+input int      InpDashboardY    = 20;     // Dashboard Y Position
+input bool     InpSetWhiteChartTheme = true; // White Chart Theme
 
 CTrade trade;
 

@@ -385,3 +385,36 @@ Farhan Fx` Python project's `learnings.md`.)
   change needed, just confirmed back to the user.
 
   Build `2026.08.12.3`, recompiled clean (0 errors, 0 warnings).
+
+- **2026-08-12 (same day, third follow-up): user's own backtest found a
+  better DCA-distance setting - real, verified, not guessed.** User asked
+  how to reduce equity drawdown without sacrificing profit and ran the
+  comparison themselves in the Strategy Tester (2026.08.01-08.12,
+  $15,000 deposit): tightening `InpDcaDistancePrice` from $2.00 to $1.20
+  (lot multiplier left at 2.0x) improved *every* metric at once - net
+  profit $21,203.79 -> $30,006.62, profit factor 1.47 -> 1.54, recovery
+  factor 1.99 -> 4.02, balance DD 7.54% -> 5.18%, **equity DD 35.55% ->
+  18.93%**. Counter to the initial recommendation (which was to *widen*
+  distance to reduce DD) - a tighter grid cycles baskets faster, so less
+  capital stays tied up deep in a basket for as long, which won this
+  test window on both profit and risk simultaneously. Worth remembering:
+  the "widen distance to de-risk" intuition (which was also the old,
+  now-removed self-tuner's actual trouble-signal response) is not
+  universally true - it depends on how mean-reverting the test window
+  is. Set as the new default per explicit request ("eta koro default
+  setting final").
+
+  Also renamed every input's inline comment to short, conventional
+  trading-EA terminology (`Lot Multiplier`, `DCA Distance ($)`,
+  `Take Profit ($)`, `Magic Number`, `Account Login`, etc.) instead of
+  full descriptive sentences, matching the style of the user's other
+  EAs, per explicit request. Build `2026.08.12.4`, recompiled clean.
+
+  **Caveat worth flagging honestly:** this is one comparison on one
+  ~2-week window, not a walk-forward/holdout-validated result - the
+  same discipline this project applied to the ML models (chronological
+  holdout, never trust a single in-sample backtest) technically applies
+  here too, just not practical to enforce on a manual single-parameter
+  tweak done live by the user. If $1.20 turns out to be overfit to this
+  specific window, it should show up as a live-tracking discrepancy
+  later, not as a surprise.

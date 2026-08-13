@@ -473,3 +473,47 @@ Farhan Fx` Python project's `learnings.md`.)
   structured data. Not treated as a final setting change - explicitly
   flagged to the user as one in-sample month, not walk-forward validated,
   same discipline as the DCA-distance-to-$1.20 change above.
+
+- **2026-08-13 (same day, follow-up): multi-timeframe trend confirmation
+  built and tested - genuinely helped, did not save the account.** User's
+  hypothesis: would trading strictly with a more reliably-identified trend
+  (confirmed across multiple timeframes, not just one H1 read) have kept
+  July 2026's account from blowing up? Built `InpUseMultiTFTrend` (build
+  v6, default off): when on, `GetTrend()` requires H1 + H4 + D1 (the new
+  `InpTrendTF2`/`InpTrendTF3`) to all agree on direction before calling it
+  a real trend; otherwise flat/0 - refactored the single-TF MA+ATR check
+  into a reusable `GetTrendOnTF()`.
+
+  Backtested single-TF vs multi-TF, same July 2026 window/$15,000/DCA
+  $1.20/2.0x/legs 7 otherwise:
+
+  | Metric | Single-TF (current default) | Multi-TF confirmed |
+  |---|---|---|
+  | Net Profit | -$16,922.53 | **-$15,211.46** |
+  | Profit Factor | 0.45 | **0.65** |
+  | Recovery Factor | -0.70 | **-0.57** |
+  | Balance DD Max | 109.96% | **100.89%** |
+  | Equity DD Max | 128.44% | 118.87% |
+  | Trades | 2,496 | 4,120 |
+
+  Multi-TF improved every metric - a real, honest win, not noise-sized.
+  Interesting mechanism, worth remembering: it did NOT work by blocking
+  more trades (trade count went *up* 65%, not down). Requiring three
+  timeframes to agree makes "confirmed trend" rarer, and when
+  `GetTrend()` returns flat/0, *neither* side is treated as against-trend
+  - so the filter actually restricts less often overall. It just trusts
+  the trend calls it does make more, avoiding the false-positive H1-only
+  reads that were blocking (or failing to block) based on noise.
+
+  **The honest answer to the actual question asked ("would the account
+  have gone to 0?"): no, not prevented - only softened.** -$15,211.46 net
+  loss against a $15,000 deposit means the account still would have gone
+  net negative by month end either way (roughly -$211 with multi-TF vs
+  -$1,922 with single-TF) - better, but still a wipeout, not a save.
+  Multi-TF trend confirmation is a genuine improvement worth keeping
+  available, not a fix for the underlying no-SL/unconditional-martingale
+  design surviving a real trending month.
+
+  Shipped as opt-in (`InpUseMultiTFTrend=false` by default) rather than
+  flipped on - one in-sample month again, same caveat as every other
+  finding this week.

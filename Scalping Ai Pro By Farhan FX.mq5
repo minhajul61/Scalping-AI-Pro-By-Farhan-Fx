@@ -45,7 +45,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v12"
+#define EA_BUILD_VERSION "v13"
 
 #include <Trade\Trade.mqh>
 
@@ -57,7 +57,7 @@ enum ENUM_BASKET_SIDE
 
 input group "=== Account & Basic Settings ==="
 input ulong    InpMagicNumber        = 20270115;  // Magic Number
-input long     InpExpectedLogin      = 416045126; // Account Login (0 = skip check)
+input long     InpExpectedLogin      = 0;         // Account Login (must be set - EA refuses to run at 0)
 input int      InpMaxSpreadPoints    = 300;       // Max Spread (points)
 
 input group "=== License ==="
@@ -175,7 +175,13 @@ int OnInit()
      }
    g_lastLicenseCheck = TimeCurrent();
 
-   if(InpExpectedLogin != 0 && AccountInfoInteger(ACCOUNT_LOGIN) != InpExpectedLogin)
+   if(InpExpectedLogin == 0)
+     {
+      Print("GoldDualBasketDCA: Account Login is not set (0). Set it to this account's real login number "
+            "before running - required on every new deployment, no bypass. Refusing to run.");
+      return(INIT_FAILED);
+     }
+   if(AccountInfoInteger(ACCOUNT_LOGIN) != InpExpectedLogin)
      {
       PrintFormat("GoldDualBasketDCA: connected account %d does not match InpExpectedLogin %d. Refusing to run.",
                   (int)AccountInfoInteger(ACCOUNT_LOGIN), (int)InpExpectedLogin);
@@ -974,7 +980,7 @@ void UpdateDashboard()
    DbLabel("Version", lx, y, EA_BUILD_VERSION, clrGray, 7);
    y += lh + 6;
 
-   bool loginOk = (InpExpectedLogin == 0 || AccountInfoInteger(ACCOUNT_LOGIN) == InpExpectedLogin);
+   bool loginOk = (InpExpectedLogin != 0 && AccountInfoInteger(ACCOUNT_LOGIN) == InpExpectedLogin);
    DbLabel("Login", lx, y, PadRight("Login", lblW) + IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN)),
            loginOk ? clrSilver : clrRed, 8);
    y += lh;

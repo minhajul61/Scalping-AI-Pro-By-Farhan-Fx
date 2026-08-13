@@ -557,3 +557,40 @@ Farhan Fx` Python project's `learnings.md`.)
   whatever account size actually gets funded, the margin-call behavior
   at that specific size should be understood as part of the real risk
   profile, not assumed away.
+
+- **2026-08-13 (same day, correction): "bad month" was wrong - all four
+  tests were wiped out in the first ~15 hours of July 1st, not over the
+  month.** User asked which day had the worst loss and what price move
+  caused it - a direct question that exposed a mischaracterization in
+  every result reported above today. Parsed the actual `Deals` table out
+  of each `.htm` report (not just the summary stats) and found every
+  single deal across all four tests (single-TF/multi-TF x $15k/$40k) is
+  dated `2026.07.01`, with the *final* deals in each report carrying the
+  comment `end of test` at 14:47-16:35 that same day - meaning the
+  account ran out of usable margin and got force-liquidated within the
+  first day, and the "month-long" backtest was effectively 15 hours of
+  real activity followed by nothing (no capital left to trade with).
+
+  **The actual price action, XAUUSD 2026.07.01:** opened $4,005.69,
+  drifted down to a low of $3,960.20 by ~08:00 (SELL basket averaging
+  down, correctly, during the dip), then reversed hard and rallied to a
+  high of $4,115.49-4,115.78 by ~14:00 - roughly a **3.6% intraday
+  reversal in about 6 hours**. The SELL basket kept martingaling into
+  that rally with no way to stop (no SL, unconditional against-trend
+  DCA), per-leg lot sizes reaching ~1.3 lots by the end, until margin was
+  exhausted and every position was force-closed at once.
+
+  All four configurations died on the exact same event - bigger deposit
+  ($40k) and multi-TF trend confirmation both bought a bit more time
+  (liquidation at 15:34/16:35 instead of 14:47/14:50) but none avoided
+  it. This reframes every result reported earlier today: DCA distance /
+  lot multiplier / max legs / trend-confirmation tuning was never really
+  being tested against "a bad month" - it was all tested against
+  variations on how fast the same single-day account-destroying event
+  played out. None of that tuning is a substitute for a stop-loss against
+  a single sharp reversal; the standing decision to keep SL off is
+  unchanged, but this is a much more specific and honest description of
+  what the risk actually looks like than "trending month" was.
+
+  The published July Parameter Sweep artifact was updated with this
+  correction rather than left standing as originally written.

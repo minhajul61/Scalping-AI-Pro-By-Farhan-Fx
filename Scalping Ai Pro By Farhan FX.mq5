@@ -45,7 +45,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v6"
+#define EA_BUILD_VERSION "v7"
 
 #include <Trade\Trade.mqh>
 
@@ -86,10 +86,13 @@ input ENUM_TIMEFRAMES  InpTrendTF2          = PERIOD_H4; // Second Trend Timefra
 input ENUM_TIMEFRAMES  InpTrendTF3          = PERIOD_D1; // Third Trend Timeframe
 
 input group "=== News Filter ==="
-input bool     InpUseNewsFilter       = true;   // Use News Filter
+input bool     InpUseNewsFilter       = true;   // Use News Filter (auto calendar - live/demo only)
 input string   InpNewsCurrency        = "USD";  // News Currency
 input int      InpNewsMinutesBefore   = 30;     // Minutes Before News
 input int      InpNewsMinutesAfter    = 30;     // Minutes After News
+input bool     InpUseManualNewsWindow = false;  // Also Block A Specific Date/Time
+input string   InpManualNewsStart     = "";     // Manual Block Start (yyyy.mm.dd hh:mi)
+input string   InpManualNewsEnd       = "";     // Manual Block End (yyyy.mm.dd hh:mi)
 
 input group "=== Dashboard ==="
 input bool     InpShowDashboard = true;   // Show Dashboard
@@ -458,8 +461,8 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
    else
       b = g_sellBasket;
 
-   if(InpUseNewsFilter && IsNewsBlackout())
-      return; // paused around medium/high-impact news, both bootstrap and DCA-adds
+   if(IsNewsBlackout())
+      return; // paused around medium/high-impact news (calendar and/or manual window), both bootstrap and DCA-adds
 
    if(b.legCount == 0)
      {
@@ -630,15 +633,21 @@ bool IsAgainstTrend(ENUM_BASKET_SIDE side)
   }
 
 // Uses MT5's built-in economic calendar (no external service needed - the
-// terminal syncs it automatically while connected). Blocks new trades and
-// DCA-adds from InpNewsMinutesBefore before a medium/high-impact
-// InpNewsCurrency event until InpNewsMinutesAfter after it. Does not touch
-// already-open positions or profit-target closes - only pauses new adds.
-// NOTE: not yet live-verified in the Strategy Tester specifically (works in
-// live/demo charts, where the calendar is always available) - if the tester
-// ever shows it never blocking, check "Use test calendar events" / calendar
-// availability for the test period first before assuming a code bug.
-bool IsNewsBlackout()
+// terminal syncs it automatically while connected, live/demo only). Blocks
+// new trades and DCA-adds from InpNewsMinutesBefore before a medium/high-
+// impact InpNewsCurrency event until InpNewsMinutesAfter after it. Does not
+// touch already-open positions or profit-target closes - only pauses new
+// adds.
+// CONFIRMED (2026-08-13, standalone diagnostic script): CalendarValueHistory
+// returns err=4014 (ERR_FUNCTION_NOT_ALLOWED) inside the Strategy Tester for
+// every date range tried, including dates well within the account's own
+// history - this is a genuine MT5 platform restriction on calendar
+// functions in the Tester, not a data-availability issue or a bug here.
+// This check is real and works live/demo; it cannot be exercised or
+// validated via backtesting at all. Use IsManualNewsBlackout() below to
+// test "what if trading paused around this specific news window" in the
+// Tester instead.
+bool IsCalendarNewsBlackout()
   {
    if(!InpUseNewsFilter)
       return false;
@@ -660,6 +669,31 @@ bool IsNewsBlackout()
          return true;
      }
    return false;
+  }
+
+// A fixed date/time window to also treat as a news blackout, independent of
+// the (Tester-unusable) calendar check above. Two real uses: (1) testing
+// the effect of avoiding a specific known news event in the Strategy
+// Tester, since the calendar can't be exercised there at all; (2) live/
+// demo, as a manual belt-and-braces block around a known major release the
+// automatic calendar check might miss or mistime.
+bool IsManualNewsBlackout()
+  {
+   if(!InpUseManualNewsWindow || InpManualNewsStart == "" || InpManualNewsEnd == "")
+      return false;
+
+   datetime blockStart = StringToTime(InpManualNewsStart);
+   datetime blockEnd   = StringToTime(InpManualNewsEnd);
+   if(blockStart == 0 || blockEnd == 0 || blockEnd <= blockStart)
+      return false;
+
+   datetime now = TimeCurrent();
+   return(now >= blockStart && now <= blockEnd);
+  }
+
+bool IsNewsBlackout()
+  {
+   return IsCalendarNewsBlackout() || IsManualNewsBlackout();
   }
 
 //+------------------------------------------------------------------+
@@ -860,8 +894,9 @@ void UpdateDashboard()
    string trendText = (trend == 1) ? "UP" : (trend == -1) ? "DOWN" : "flat/off";
    DbLabel("Trend", lx, y, PadRight("HTF Trend", lblW) + trendText, clrSilver, 8);
    y += lh;
-   bool newsBlackout = InpUseNewsFilter && IsNewsBlackout();
-   DbLabel("News", lx, y, PadRight("News", lblW) + (InpUseNewsFilter ? (newsBlackout ? "YES (blocking)" : "clear") : "off"),
+   bool newsBlackout = IsNewsBlackout();
+   bool newsFilterOn = (InpUseNewsFilter || InpUseManualNewsWindow);
+   DbLabel("News", lx, y, PadRight("News", lblW) + (newsFilterOn ? (newsBlackout ? "YES (blocking)" : "clear") : "off"),
            newsBlackout ? clrOrange : clrSilver, 8);
    y += lh;
    bool hedgingOk = ((ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE) == ACCOUNT_MARGIN_MODE_RETAIL_HEDGING);

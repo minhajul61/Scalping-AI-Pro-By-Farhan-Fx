@@ -517,3 +517,43 @@ Farhan Fx` Python project's `learnings.md`.)
   Shipped as opt-in (`InpUseMultiTFTrend=false` by default) rather than
   flipped on - one in-sample month again, same caveat as every other
   finding this week.
+
+- **2026-08-13 (same day, follow-up): $40,000 deposit test - bigger
+  capital made the loss WORSE, not better, and reversed which trend mode
+  won.** User asked to rerun the same July 2026 comparison at $40,000
+  instead of $15,000, same DCA $1.20/2.0x/legs 7 otherwise. Naive
+  expectation: since `InpInitialLot` and the DCA/multiplier logic are all
+  fixed values, not balance-percentage-based, the actual $ trades and P/L
+  should be nearly deposit-independent - only the drawdown percentages
+  should shrink relative to the bigger base.
+
+  That is not what happened:
+
+  | Deposit | Single-TF Net Profit | Multi-TF Net Profit | Single-TF Trades | Multi-TF Trades |
+  |---|---|---|---|---|
+  | $15,000 | -$16,922.53 | -$15,211.46 (better) | 2,496 | 4,120 |
+  | $40,000 | -$41,061.75 | -$42,759.29 (worse) | 2,507 | 4,400 |
+
+  Trade counts stayed nearly identical between deposit sizes (as
+  expected, since lot sizing doesn't depend on balance) - but the dollar
+  loss more than doubled, and multi-TF flipped from better-than-single-TF
+  to worse-than-single-TF. **Mechanism:** at $15,000, thinner margin
+  triggered stop-outs mid-month that force-closed some baskets early -
+  an *unintentional* circuit breaker that capped how deep those baskets
+  could dig. At $40,000, the extra margin cushion avoided those forced
+  closures, letting the same losing baskets keep adding legs further
+  into the same adverse move before the month ended - a materially
+  bigger realized loss from essentially the same trade decisions. Multi-
+  TF's higher trade frequency (which helped when margin-constrained)
+  became a liability once that constraint was removed, since more
+  exposure surface with no cap compounds worse, not better.
+
+  **The counterintuitive, important lesson: for this EA's no-SL/
+  unconditional-martingale design, more capital is not automatically
+  safer - it can remove an accidental safety net (margin stop-out)
+  without replacing it with anything.** This does not change the
+  standing conclusion (SL stays off per explicit, repeated user
+  decision) - it's a sizing/risk-awareness finding, not a code change:
+  whatever account size actually gets funded, the margin-call behavior
+  at that specific size should be understood as part of the real risk
+  profile, not assumed away.

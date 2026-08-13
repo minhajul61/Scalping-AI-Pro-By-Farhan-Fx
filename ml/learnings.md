@@ -594,3 +594,51 @@ Farhan Fx` Python project's `learnings.md`.)
 
   The published July Parameter Sweep artifact was updated with this
   correction rather than left standing as originally written.
+
+- **2026-08-13 (same day, follow-up): manual news-window override built,
+  and a second, worse blowup found on July 7th - confirms the risk is
+  structural, not a single bad day.** User asked to fix the news filter so
+  it actually blocks trading in the Tester and find the "best setting."
+  Since `CalendarValueHistory` is confirmed non-functional in the Tester
+  (see entry above), built a genuine, permanent feature instead of a
+  throwaway hack: `InpUseManualNewsWindow`/`InpManualNewsStart`/
+  `InpManualNewsEnd` (build v7) - a fixed date/time window OR'd with the
+  calendar check in `IsNewsBlackout()`. Real live use too (manual
+  belt-and-braces block around a known major release), not just a
+  backtesting workaround. Fixed two call sites that had incorrectly
+  gated on `InpUseNewsFilter` alone, which would have silently disabled
+  the manual window whenever the (Tester-broken) calendar filter was off.
+
+  Combined every good finding from today into one config - `InpMaxLegsPerBasket=5`,
+  `InpDcaDistancePrice=1.20`, `InpUseMultiTFTrend=true` - and tested with
+  vs without manually blocking the known 2026.07.01 07:30-15:00 danger
+  window (the ADP/Fed-Warsh/ISM cluster from the earlier entry):
+
+  | | No news block | **With news block** |
+  |---|---|---|
+  | Net Profit (July) | -$15,157.33 | -$16,640.30 |
+  | Survived until | 15 hours (July 1) | **6 days (through July 6)** |
+  | Trades | 3,918 | 16,574 |
+
+  **The real story is in the daily balance, not the final number.**
+  Blocking July 1st let the account actually trade well for six days -
+  $15,000 -> $17,119 -> $24,292 -> $27,585 -> $33,245 by end of July 6
+  (+121%). Then **July 7th wiped out all of it plus the original deposit
+  in a single day** (-$34,885.70, ending at -$1,640.30) - a SELL basket
+  that DCA'd all day while XAUUSD held $4,125-$4,180, liquidated at
+  19:16. Checked the actual deal log for this, same method as the July 1st
+  investigation.
+
+  **Conclusion, stated as plainly as possible: avoiding one known bad day
+  does not fix this EA. A different bad day just takes its place.** This
+  is not a tunable-away risk (distance/multiplier/legs/trend-confirmation/
+  news-avoidance all tested today, all reduce damage at the margins, none
+  change the outcome) - it's the direct, structural consequence of no
+  stop-loss combined with unconditional martingale. The EA will
+  eventually meet a large enough single-direction move and lose
+  everything open at the time, regardless of which specific day or
+  event causes it. This is the honest answer to "find me the best
+  setting": best-tuned-so-far is legs=5/DCA=$1.20/multi-TF-confirmed
+  trend, but no setting is a fix for the missing stop-loss - that
+  remains an explicit, informed, standing user decision, not something
+  further tuning is expected to resolve.

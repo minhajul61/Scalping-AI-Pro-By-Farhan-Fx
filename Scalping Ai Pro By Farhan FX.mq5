@@ -45,7 +45,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v7"
+#define EA_BUILD_VERSION "v8"
 
 #include <Trade\Trade.mqh>
 
@@ -63,7 +63,7 @@ input int      InpMaxSpreadPoints    = 300;       // Max Spread (points)
 input group "=== Basket & Profit Target ==="
 input double   InpInitialLot            = 0.02;   // Initial Lot Size
 input double   InpBasketProfitTargetUSD = 2.0;    // Take Profit ($) - grows each new cycle
-input int      InpMaxLegsPerBasket      = 7;      // Max DCA Legs Per Cycle
+input int      InpMaxLegsPerBasket      = 5;      // Max DCA Legs Per Cycle
 input int      InpAbsoluteMaxLegsPerBasket = 50;  // Absolute Max Legs (emergency hard limit)
 input double   InpCycleTargetGrowth     = 0.5;    // Target Growth Per Cycle (0.5 = +50%)
 
@@ -81,7 +81,7 @@ input ENUM_TIMEFRAMES  InpTrendTF           = PERIOD_H1; // Trend Timeframe
 input int              InpTrendMAPeriod     = 50;        // Trend MA Period
 input int              InpTrendAtrPeriod    = 14;        // Trend ATR Period
 input double           InpTrendStrengthATRMult = 0.5;    // Trend Strength (x ATR)
-input bool             InpUseMultiTFTrend   = false;     // Require Multiple Timeframes To Agree
+input bool             InpUseMultiTFTrend   = true;      // Require Multiple Timeframes To Agree
 input ENUM_TIMEFRAMES  InpTrendTF2          = PERIOD_H4; // Second Trend Timeframe
 input ENUM_TIMEFRAMES  InpTrendTF3          = PERIOD_D1; // Third Trend Timeframe
 

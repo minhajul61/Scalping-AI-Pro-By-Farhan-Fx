@@ -45,7 +45,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v13"
+#define EA_BUILD_VERSION "v9"
 
 #include <Trade\Trade.mqh>
 
@@ -57,13 +57,8 @@ enum ENUM_BASKET_SIDE
 
 input group "=== Account & Basic Settings ==="
 input ulong    InpMagicNumber        = 20270115;  // Magic Number
-input long     InpExpectedLogin      = 0;         // Account Login (must be set - EA refuses to run at 0)
+input long     InpExpectedLogin      = 416045126; // Account Login (0 = skip check)
 input int      InpMaxSpreadPoints    = 300;       // Max Spread (points)
-
-input group "=== License ==="
-input string   InpLicenseKey             = "";                               // License Key
-input bool     InpUseOnlineLicenseServer = false;                            // Also Check Online Server (off until one is reachable everywhere)
-input string   InpLicenseServerUrl       = "http://127.0.0.1:8081/api/verify"; // License Server URL
 
 input group "=== Basket & Profit Target ==="
 input double   InpInitialLot            = 0.02;   // Initial Lot Size
@@ -136,10 +131,6 @@ int g_trendAtrHandle3 = INVALID_HANDLE;
 int    g_dayStartDateCode = -1;
 double g_dayStartBalance  = 0.0;
 
-bool     g_licenseValid       = false;
-string   g_licenseMessage     = "not checked yet";
-datetime g_lastLicenseCheck   = 0;
-
 #define DB_PREFIX  "GDSE_DB_"
 
 // Switches the chart itself to a white background - the dashboard panel
@@ -168,20 +159,7 @@ int OnInit()
    trade.SetExpertMagicNumber(InpMagicNumber);
    trade.SetTypeFillingBySymbol(_Symbol);
 
-   if(!CheckLicense())
-     {
-      PrintFormat("GoldDualBasketDCA: license check failed - %s. Refusing to run.", g_licenseMessage);
-      return(INIT_FAILED);
-     }
-   g_lastLicenseCheck = TimeCurrent();
-
-   if(InpExpectedLogin == 0)
-     {
-      Print("GoldDualBasketDCA: Account Login is not set (0). Set it to this account's real login number "
-            "before running - required on every new deployment, no bypass. Refusing to run.");
-      return(INIT_FAILED);
-     }
-   if(AccountInfoInteger(ACCOUNT_LOGIN) != InpExpectedLogin)
+   if(InpExpectedLogin != 0 && AccountInfoInteger(ACCOUNT_LOGIN) != InpExpectedLogin)
      {
       PrintFormat("GoldDualBasketDCA: connected account %d does not match InpExpectedLogin %d. Refusing to run.",
                   (int)AccountInfoInteger(ACCOUNT_LOGIN), (int)InpExpectedLogin);
@@ -326,12 +304,6 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
 //+------------------------------------------------------------------+
 void OnTick()
   {
-   if(!MQLInfoInteger(MQL_TESTER) && TimeCurrent() - g_lastLicenseCheck > 60)
-     {
-      g_lastLicenseCheck = TimeCurrent();
-      CheckLicense(); // re-checked every ~60s so a revoked license stops new trades quickly, without re-running OnInit
-     }
-
    RefreshBaskets();
    UpdateDayTracking();
 
@@ -340,7 +312,7 @@ void OnTick()
 
    RefreshBaskets(); // re-scan after any exits this tick before deciding on entries/DCA
 
-   if(g_licenseValid && SpreadIsAcceptable())
+   if(SpreadIsAcceptable())
      {
       ManageBasketEntries(SIDE_BUY);
       ManageBasketEntries(SIDE_SELL);
@@ -765,113 +737,6 @@ bool DailyTargetHit()
    return((balance - g_dayStartBalance) >= InpDailyProfitTargetUSD);
   }
 
-// Hardcoded list of currently-issued keys - checked locally, no network
-// needed, so this works identically everywhere the .ex5 is deployed (VPS
-// or local) with zero dependency on any server being reachable. Generated
-// 2026-08-13 via the admin panel (E:\Farhan Scalping Website\server\) for
-// manual distribution before an online server exists everywhere the EA
-// runs. To add/remove a key: edit this array, recompile, redeploy.
-string g_authorizedLicenseKeys[] =
-  {
-   "SAIP-EBYZ-G5D5-Q6NZ-7SJG",
-   "SAIP-FNWO-AK0W-AX9T-PTQC",
-   "SAIP-UBP7-6SNT-V3CO-I2FR",
-   "SAIP-JFK8-HYB8-E00Z-AZPH",
-   "SAIP-UIV9-N7D7-2AY2-J79B",
-   "SAIP-5BKE-HR6W-AUUP-PH25",
-   "SAIP-GBBO-OFM7-D70Y-XPYL",
-   "SAIP-345R-7HU9-NNEP-KKYL",
-   "SAIP-NZL1-VMLC-476Z-KLOW",
-   "SAIP-TK1T-SJ0W-NVTG-9QV8",
-   "SAIP-8H34-JVTR-KJQV-QLZK",
-   "SAIP-VGI3-524U-I9AM-WEIT",
-   "SAIP-FNR2-SUOF-8K2T-U8FA",
-   "SAIP-GW3I-N0RS-QF0F-BFBD",
-   "SAIP-MT8B-OD0J-MEEU-Z4DJ",
-   "SAIP-PY5O-46IZ-WGTF-Z5TW",
-   "SAIP-SU4V-6UU7-BW82-RYHC",
-   "SAIP-1ELE-GXWQ-X681-A8CF",
-   "SAIP-6QS2-EHAO-RZ01-5TD2",
-   "SAIP-115E-ODQJ-MFP0-MT3X"
-  };
-
-bool IsKeyInAuthorizedList(string key)
-  {
-   for(int i = 0; i < ArraySize(g_authorizedLicenseKeys); i++)
-      if(key == g_authorizedLicenseKeys[i])
-         return true;
-   return false;
-  }
-
-//+------------------------------------------------------------------+
-//| License check. Two layers, the first always required:              |
-//| 1) InpLicenseKey must be one of the 20 keys hardcoded above -       |
-//|    checked locally, no network, works anywhere the .ex5 runs.      |
-//| 2) Optional extra layer (InpUseOnlineLicenseServer, off by         |
-//|    default): also calls the admin panel's /api/verify over         |
-//|    WebRequest, for remote revocation/tracking once a server is      |
-//|    reachable from wherever this EA runs. Right now the reference   |
-//|    server only runs on the developer's own PC (127.0.0.1), which a |
-//|    VPS-deployed EA could never reach - turn this on together with  |
-//|    pointing InpLicenseServerUrl at a real, reachable server once   |
-//|    one exists. The exact URL must also be whitelisted in that      |
-//|    terminal under Tools > Options > Expert Advisors > "Allow       |
-//|    WebRequest for listed URL", or every call fails with err=4060.  |
-//|    Skipped entirely inside the Strategy Tester (MQL_TESTER) even   |
-//|    when the toggle is on - WebRequest isn't usable there either    |
-//|    way, and license enforcement shouldn't block backtesting.       |
-//+------------------------------------------------------------------+
-bool CheckLicense()
-  {
-   if(!IsKeyInAuthorizedList(InpLicenseKey))
-     {
-      g_licenseValid   = false;
-      g_licenseMessage = "key not in the authorized list";
-      return false;
-     }
-
-   if(!InpUseOnlineLicenseServer)
-     {
-      g_licenseValid   = true;
-      g_licenseMessage = "OK (offline key list)";
-      return true;
-     }
-
-   if(MQLInfoInteger(MQL_TESTER))
-     {
-      g_licenseValid   = true;
-      g_licenseMessage = "OK (offline key list; online check skipped in Strategy Tester)";
-      return true;
-     }
-
-   string json = StringFormat(
-                    "{\"license_key\":\"%s\",\"account_id\":\"%d\",\"platform\":\"MT5\","
-                    "\"broker\":\"%s\",\"symbol\":\"%s\",\"ea_version\":\"%s\","
-                    "\"balance\":%.2f,\"equity\":%.2f}",
-                    InpLicenseKey, (int)AccountInfoInteger(ACCOUNT_LOGIN),
-                    AccountInfoString(ACCOUNT_COMPANY), _Symbol, EA_BUILD_VERSION,
-                    AccountInfoDouble(ACCOUNT_BALANCE), AccountInfoDouble(ACCOUNT_EQUITY));
-
-   char post[], result[];
-   StringToCharArray(json, post, 0, StringLen(json));
-   string resultHeaders;
-
-   ResetLastError();
-   int res = WebRequest("POST", InpLicenseServerUrl, "Content-Type: application/json\r\n",
-                         5000, post, result, resultHeaders);
-   if(res == -1)
-     {
-      g_licenseValid   = false;
-      g_licenseMessage = StringFormat("online server unreachable (err=%d) - check WebRequest whitelist", GetLastError());
-      return false;
-     }
-
-   string response = CharArrayToString(result);
-   g_licenseValid   = (StringFind(response, "\"valid\":true") >= 0);
-   g_licenseMessage = g_licenseValid ? "OK" : response;
-   return g_licenseValid;
-  }
-
 //+------------------------------------------------------------------+
 //| Dashboard                                                          |
 //+------------------------------------------------------------------+
@@ -954,7 +819,7 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, InpDashboardX - 10);
       ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, InpDashboardY - 10);
       ObjectSetInteger(0, bg, OBJPROP_XSIZE, 280);
-      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 490);
+      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 475);
       ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'12,12,16');
       ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, bg, OBJPROP_COLOR, C'70,70,80');
@@ -964,9 +829,9 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_ZORDER, 0);
      }
 
-   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 416, 260, 24, "X  CLOSE ALL", C'120,20,20');
-   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 444, 126, 22, "Close BUY", C'20,80,20');
-   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 444, 126, 22, "Close SELL", C'20,80,20');
+   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 401, 260, 24, "X  CLOSE ALL", C'120,20,20');
+   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 429, 126, 22, "Close BUY", C'20,80,20');
+   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 429, 126, 22, "Close SELL", C'20,80,20');
   }
 
 void UpdateDashboard()
@@ -980,12 +845,9 @@ void UpdateDashboard()
    DbLabel("Version", lx, y, EA_BUILD_VERSION, clrGray, 7);
    y += lh + 6;
 
-   bool loginOk = (InpExpectedLogin != 0 && AccountInfoInteger(ACCOUNT_LOGIN) == InpExpectedLogin);
+   bool loginOk = (InpExpectedLogin == 0 || AccountInfoInteger(ACCOUNT_LOGIN) == InpExpectedLogin);
    DbLabel("Login", lx, y, PadRight("Login", lblW) + IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN)),
            loginOk ? clrSilver : clrRed, 8);
-   y += lh;
-   DbLabel("License", lx, y, PadRight("License", lblW) + (g_licenseValid ? "OK" : "INVALID"),
-           g_licenseValid ? clrLime : clrRed, 8);
    y += lh;
 
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);

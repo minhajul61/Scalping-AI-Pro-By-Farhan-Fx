@@ -45,7 +45,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v8"
+#define EA_BUILD_VERSION "v9"
 
 #include <Trade\Trade.mqh>
 
@@ -93,6 +93,10 @@ input int      InpNewsMinutesAfter    = 30;     // Minutes After News
 input bool     InpUseManualNewsWindow = false;  // Also Block A Specific Date/Time
 input string   InpManualNewsStart     = "";     // Manual Block Start (yyyy.mm.dd hh:mi)
 input string   InpManualNewsEnd       = "";     // Manual Block End (yyyy.mm.dd hh:mi)
+
+input group "=== Daily Profit Target ==="
+input bool     InpUseDailyProfitTarget = false; // Stop New Trades After Reaching This Daily Profit
+input double   InpDailyProfitTargetUSD = 50.0;  // Daily Profit Target ($) - resumes automatically next day
 
 input group "=== Dashboard ==="
 input bool     InpShowDashboard = true;   // Show Dashboard
@@ -464,6 +468,9 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
    if(IsNewsBlackout())
       return; // paused around medium/high-impact news (calendar and/or manual window), both bootstrap and DCA-adds
 
+   if(DailyTargetHit())
+      return; // today's profit target already reached - resumes automatically at the next day rollover
+
    if(b.legCount == 0)
      {
       // Don't even start a basket fighting a strong higher-timeframe trend -
@@ -717,6 +724,19 @@ void UpdateDayTracking()
      }
   }
 
+// Realized (closed) profit only - today's balance vs balance at today's
+// rollover - not floating equity, so this doesn't flicker true/false as
+// open baskets' floating P/L wobbles. Once true, stays true for the rest
+// of the day (UpdateDayTracking() resets g_dayStartBalance at the next
+// day rollover, which is what makes this resume automatically).
+bool DailyTargetHit()
+  {
+   if(!InpUseDailyProfitTarget || g_dayStartBalance <= 0)
+      return false;
+   double balance = AccountInfoDouble(ACCOUNT_BALANCE);
+   return((balance - g_dayStartBalance) >= InpDailyProfitTargetUSD);
+  }
+
 //+------------------------------------------------------------------+
 //| Dashboard                                                          |
 //+------------------------------------------------------------------+
@@ -799,7 +819,7 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, InpDashboardX - 10);
       ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, InpDashboardY - 10);
       ObjectSetInteger(0, bg, OBJPROP_XSIZE, 280);
-      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 460);
+      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 475);
       ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'12,12,16');
       ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, bg, OBJPROP_COLOR, C'70,70,80');
@@ -809,9 +829,9 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_ZORDER, 0);
      }
 
-   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 386, 260, 24, "X  CLOSE ALL", C'120,20,20');
-   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 414, 126, 22, "Close BUY", C'20,80,20');
-   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 414, 126, 22, "Close SELL", C'20,80,20');
+   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 401, 260, 24, "X  CLOSE ALL", C'120,20,20');
+   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 429, 126, 22, "Close BUY", C'20,80,20');
+   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 429, 126, 22, "Close SELL", C'20,80,20');
   }
 
 void UpdateDashboard()
@@ -839,6 +859,13 @@ void UpdateDashboard()
    y += lh;
    DbLabel("DailyPL", lx, y, PadRight("Daily P/L", lblW) + "$" + DoubleToString(dailyPL, 2),
            (dailyPL >= 0 ? clrLime : clrRed), 8);
+   y += lh;
+   bool dailyTargetHit = DailyTargetHit();
+   string dailyTargetText = !InpUseDailyProfitTarget ? "off"
+                             : dailyTargetHit ? "HIT (paused today)"
+                             : "$" + DoubleToString(dailyPL, 2) + " / $" + DoubleToString(InpDailyProfitTargetUSD, 2);
+   DbLabel("DailyTarget", lx, y, PadRight("Daily Target", lblW) + dailyTargetText,
+           dailyTargetHit ? clrLime : clrSilver, 8);
    y += lh + 6;
 
    DbDivider("Div1", x, y, 260, C'55,55,65');

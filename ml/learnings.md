@@ -418,3 +418,58 @@ Farhan Fx` Python project's `learnings.md`.)
   tweak done live by the user. If $1.20 turns out to be overfit to this
   specific window, it should show up as a live-tracking discrepancy
   later, not as a surprise.
+
+- **2026-08-13 (automated 14-way parameter sweep over July 2026 - every
+  configuration lost money, and a real MT5 automation bug found along the
+  way):** User asked for a systematic DCA distance / lot multiplier / max
+  legs / news-filter comparison over "last month" (interpreted as July
+  2026), $15,000 deposit, real-tick modelling. Built a PowerShell
+  orchestrator that generates one `/config` ini per variant and launches
+  `terminal64.exe` headlessly (`ShutdownTerminal=1` so each run exits on
+  its own), then parses the resulting `.htm` report for the key metrics -
+  the same `/config` pattern already proven for the ONNX ML backtest
+  comparison (2026-08-06).
+
+  **Real bug caught before trusting the results:** the first full 14-run
+  batch produced *byte-for-byte identical* output for all 14 variants -
+  same profit, same trade count, down to the ticket. Root cause: the
+  script cloned the base inputs via `$baseInputs.Clone()`, but
+  `[ordered]@{}` (`OrderedDictionary`) does not support `.Clone()` in
+  Windows PowerShell 5.1 - it throws, and with `$ErrorActionPreference =
+  "Continue"` the script kept going with `$inputs` silently `$null`,
+  writing an empty `[TesterInputs]` section to every ini. MT5 apparently
+  fell back to whatever config it had cached from the last manually-run
+  test instead of erroring - so 14 "different" backtests silently reran
+  the same one. Fixed by manually copying key-by-key into a fresh
+  `[ordered]@{}` instead of relying on `.Clone()`. Caught by spot-checking
+  one generated ini's `[TesterInputs]` section before trusting a 50-minute
+  batch, not by the results looking wrong at a glance - worth remembering
+  as a general lesson: identical results across a sweep is itself a bug
+  signal, not just a boring finding.
+
+  **Real result after the fix:** all 14 configurations were net-negative
+  over July 2026 (XAUUSD M1, real ticks) - tuning changed the size of the
+  loss, not the sign, consistent with July being a trending month (this
+  design's worst case, since it has no SL and depends on mean reversion
+  back through the average entry). Least-bad: `InpMaxLegsPerBasket=5`
+  (down from 7), smallest loss and lowest drawdown of the sweep. Worst:
+  `InpMaxLegsPerBasket=15`, worst on every metric simultaneously.
+  `InpLotMultiplier=2.5` stood out as a false positive on Profit Factor
+  alone (0.77, best of the sweep) while having the single worst Equity
+  Drawdown (151%) and 3x the trade count - a reminder to always check
+  drawdown/trade-count alongside PF, not PF in isolation.
+
+  **News Filter ON vs OFF produced identical results** (same P/L, same
+  trade count) - confirms the standing caveat from when the filter was
+  built: MT5's Strategy Tester does not appear to feed real economic-
+  calendar data for arbitrary historical test periods, so `IsNewsBlackout()`
+  never actually returned true during this backtest regardless of the
+  setting. This does not mean the live/demo behavior (verified working via
+  the OnInit diagnostic, 2026-08-13 earlier) is wrong - only that the
+  Strategy Tester can't be used to validate this particular feature.
+
+  Full report published as an artifact (14-row comparison table +
+  findings) rather than just reported in chat, given the volume of
+  structured data. Not treated as a final setting change - explicitly
+  flagged to the user as one in-sample month, not walk-forward validated,
+  same discipline as the DCA-distance-to-$1.20 change above.

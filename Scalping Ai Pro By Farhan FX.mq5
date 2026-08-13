@@ -45,7 +45,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v10"
+#define EA_BUILD_VERSION "v11"
 
 #include <Trade\Trade.mqh>
 
@@ -61,6 +61,7 @@ input long     InpExpectedLogin      = 416045126; // Account Login (0 = skip che
 input int      InpMaxSpreadPoints    = 300;       // Max Spread (points)
 
 input group "=== License ==="
+input bool     InpUseLicenseCheck  = false;                              // Use License Check (off until a real server is online)
 input string   InpLicenseKey       = "";                                 // License Key
 input string   InpLicenseServerUrl = "http://127.0.0.1:8081/api/verify"; // License Server URL
 
@@ -760,15 +761,27 @@ bool DailyTargetHit()
 
 //+------------------------------------------------------------------+
 //| License check - calls the admin panel's /api/verify over          |
-//| WebRequest. The exact URL (InpLicenseServerUrl) must be whitelisted|
-//| in this terminal under Tools > Options > Expert Advisors > "Allow  |
-//| WebRequest for listed URL", or every call fails with err=4060.     |
-//| Skipped entirely inside the Strategy Tester (MQL_TESTER) - WebRequest|
-//| is not usable there either way, and license enforcement shouldn't  |
-//| block backtesting.                                                 |
+//| WebRequest. Off by default (InpUseLicenseCheck=false) until a real |
+//| online server exists - right now the reference server only runs   |
+//| on the developer's own PC (127.0.0.1), which a VPS-deployed EA     |
+//| could never reach anyway. Turn this on together with pointing      |
+//| InpLicenseServerUrl at the real public server once one exists.     |
+//| The exact URL must also be whitelisted in this terminal under      |
+//| Tools > Options > Expert Advisors > "Allow WebRequest for listed   |
+//| URL", or every call fails with err=4060.                           |
+//| Skipped entirely inside the Strategy Tester (MQL_TESTER) even when |
+//| the toggle is on - WebRequest is not usable there either way, and  |
+//| license enforcement shouldn't block backtesting.                   |
 //+------------------------------------------------------------------+
 bool CheckLicense()
   {
+   if(!InpUseLicenseCheck)
+     {
+      g_licenseValid   = true;
+      g_licenseMessage = "off (no license server configured yet)";
+      return true;
+     }
+
    if(MQLInfoInteger(MQL_TESTER))
      {
       g_licenseValid   = true;
@@ -916,8 +929,9 @@ void UpdateDashboard()
    DbLabel("Login", lx, y, PadRight("Login", lblW) + IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN)),
            loginOk ? clrSilver : clrRed, 8);
    y += lh;
-   DbLabel("License", lx, y, PadRight("License", lblW) + (g_licenseValid ? "OK" : "INVALID"),
-           g_licenseValid ? clrLime : clrRed, 8);
+   string licenseText = !InpUseLicenseCheck ? "off" : (g_licenseValid ? "OK" : "INVALID");
+   DbLabel("License", lx, y, PadRight("License", lblW) + licenseText,
+           !InpUseLicenseCheck ? clrSilver : (g_licenseValid ? clrLime : clrRed), 8);
    y += lh;
 
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);

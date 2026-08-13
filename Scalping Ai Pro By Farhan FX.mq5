@@ -45,7 +45,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v5"
+#define EA_BUILD_VERSION "v6"
 
 #include <Trade\Trade.mqh>
 
@@ -81,6 +81,9 @@ input ENUM_TIMEFRAMES  InpTrendTF           = PERIOD_H1; // Trend Timeframe
 input int              InpTrendMAPeriod     = 50;        // Trend MA Period
 input int              InpTrendAtrPeriod    = 14;        // Trend ATR Period
 input double           InpTrendStrengthATRMult = 0.5;    // Trend Strength (x ATR)
+input bool             InpUseMultiTFTrend   = false;     // Require Multiple Timeframes To Agree
+input ENUM_TIMEFRAMES  InpTrendTF2          = PERIOD_H4; // Second Trend Timeframe
+input ENUM_TIMEFRAMES  InpTrendTF3          = PERIOD_D1; // Third Trend Timeframe
 
 input group "=== News Filter ==="
 input bool     InpUseNewsFilter       = true;   // Use News Filter
@@ -113,6 +116,10 @@ SBasket g_buyBasket, g_sellBasket;
 int g_atrHandle      = INVALID_HANDLE;
 int g_trendMAHandle  = INVALID_HANDLE;
 int g_trendAtrHandle = INVALID_HANDLE;
+int g_trendMAHandle2  = INVALID_HANDLE; // only used if InpUseMultiTFTrend
+int g_trendAtrHandle2 = INVALID_HANDLE;
+int g_trendMAHandle3  = INVALID_HANDLE;
+int g_trendAtrHandle3 = INVALID_HANDLE;
 
 int    g_dayStartDateCode = -1;
 double g_dayStartBalance  = 0.0;
@@ -184,6 +191,20 @@ int OnInit()
          Print("GoldDualBasketDCA: trend ATR handle creation failed.");
          return(INIT_FAILED);
         }
+
+      if(InpUseMultiTFTrend)
+        {
+         g_trendMAHandle2  = iMA(_Symbol, InpTrendTF2, InpTrendMAPeriod, 0, MODE_SMA, PRICE_CLOSE);
+         g_trendAtrHandle2 = iATR(_Symbol, InpTrendTF2, InpTrendAtrPeriod);
+         g_trendMAHandle3  = iMA(_Symbol, InpTrendTF3, InpTrendMAPeriod, 0, MODE_SMA, PRICE_CLOSE);
+         g_trendAtrHandle3 = iATR(_Symbol, InpTrendTF3, InpTrendAtrPeriod);
+         if(g_trendMAHandle2 == INVALID_HANDLE || g_trendAtrHandle2 == INVALID_HANDLE ||
+            g_trendMAHandle3 == INVALID_HANDLE || g_trendAtrHandle3 == INVALID_HANDLE)
+           {
+            Print("GoldDualBasketDCA: multi-timeframe trend handle creation failed.");
+            return(INIT_FAILED);
+           }
+        }
      }
 
    UpdateDayTracking();
@@ -226,6 +247,14 @@ void OnDeinit(const int reason)
       IndicatorRelease(g_trendMAHandle);
    if(g_trendAtrHandle != INVALID_HANDLE)
       IndicatorRelease(g_trendAtrHandle);
+   if(g_trendMAHandle2 != INVALID_HANDLE)
+      IndicatorRelease(g_trendMAHandle2);
+   if(g_trendAtrHandle2 != INVALID_HANDLE)
+      IndicatorRelease(g_trendAtrHandle2);
+   if(g_trendMAHandle3 != INVALID_HANDLE)
+      IndicatorRelease(g_trendMAHandle3);
+   if(g_trendAtrHandle3 != INVALID_HANDLE)
+      IndicatorRelease(g_trendAtrHandle3);
    EventKillTimer();
    ObjectsDeleteAll(0, DB_PREFIX);
    ChartRedraw();
@@ -540,30 +569,54 @@ bool IsAtrSpiking()
    return(current > baseline * InpMaxAtrRatio);
   }
 
-// Trend on InpTrendTF via MA + ATR-scaled strength gate: last closed candle
-// must sit at least InpTrendStrengthATRMult ATRs away from the MA to count
-// as trending (1=up, -1=down); anything closer is treated as noise/no-trend
-// (0). A raw close-vs-MA check flips sign on ordinary chop, which would
-// block far more entries than intended - the ATR margin only catches
+// Trend on one timeframe via MA + ATR-scaled strength gate: last closed
+// candle must sit at least InpTrendStrengthATRMult ATRs away from the MA to
+// count as trending (1=up, -1=down); anything closer is treated as noise/
+// no-trend (0). A raw close-vs-MA check flips sign on ordinary chop, which
+// would block far more entries than intended - the ATR margin only catches
 // genuinely sustained, strong moves, which is what actually ran baskets to
 // their hard-SL in earlier testing.
-int GetTrend()
+int GetTrendOnTF(int maHandle, int atrHandle, ENUM_TIMEFRAMES tf)
   {
-   if(!InpUseTrendFilter || g_trendMAHandle == INVALID_HANDLE || g_trendAtrHandle == INVALID_HANDLE)
+   if(maHandle == INVALID_HANDLE || atrHandle == INVALID_HANDLE)
       return 0;
 
    double maBuf[1], atrBuf[1];
-   if(CopyBuffer(g_trendMAHandle, 0, 1, 1, maBuf) <= 0)
+   if(CopyBuffer(maHandle, 0, 1, 1, maBuf) <= 0)
       return 0;
-   if(CopyBuffer(g_trendAtrHandle, 0, 1, 1, atrBuf) <= 0 || atrBuf[0] <= 0)
+   if(CopyBuffer(atrHandle, 0, 1, 1, atrBuf) <= 0 || atrBuf[0] <= 0)
       return 0;
 
-   double closePrice = iClose(_Symbol, InpTrendTF, 1);
+   double closePrice = iClose(_Symbol, tf, 1);
    double margin = atrBuf[0] * InpTrendStrengthATRMult;
 
    if(closePrice > maBuf[0] + margin)
       return 1;
    if(closePrice < maBuf[0] - margin)
+      return -1;
+   return 0;
+  }
+
+// InpUseMultiTFTrend requires InpTrendTF + InpTrendTF2 + InpTrendTF3 to all
+// agree before calling it a real trend - a single-timeframe read can call
+// "trending" on a move that's just noise one level up/down; requiring
+// confluence across three timeframes is a stricter, more reliable signal,
+// at the cost of blocking (calling flat/0) more often.
+int GetTrend()
+  {
+   if(!InpUseTrendFilter)
+      return 0;
+
+   int t1 = GetTrendOnTF(g_trendMAHandle, g_trendAtrHandle, InpTrendTF);
+   if(!InpUseMultiTFTrend)
+      return t1;
+
+   int t2 = GetTrendOnTF(g_trendMAHandle2, g_trendAtrHandle2, InpTrendTF2);
+   int t3 = GetTrendOnTF(g_trendMAHandle3, g_trendAtrHandle3, InpTrendTF3);
+
+   if(t1 == 1 && t2 == 1 && t3 == 1)
+      return 1;
+   if(t1 == -1 && t2 == -1 && t3 == -1)
       return -1;
    return 0;
   }

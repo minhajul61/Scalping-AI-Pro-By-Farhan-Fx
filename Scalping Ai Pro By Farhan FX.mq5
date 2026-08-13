@@ -45,7 +45,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v9"
+#define EA_BUILD_VERSION "v10"
 
 #include <Trade\Trade.mqh>
 
@@ -59,6 +59,10 @@ input group "=== Account & Basic Settings ==="
 input ulong    InpMagicNumber        = 20270115;  // Magic Number
 input long     InpExpectedLogin      = 416045126; // Account Login (0 = skip check)
 input int      InpMaxSpreadPoints    = 300;       // Max Spread (points)
+
+input group "=== License ==="
+input string   InpLicenseKey       = "";                                 // License Key
+input string   InpLicenseServerUrl = "http://127.0.0.1:8081/api/verify"; // License Server URL
 
 input group "=== Basket & Profit Target ==="
 input double   InpInitialLot            = 0.02;   // Initial Lot Size
@@ -131,6 +135,10 @@ int g_trendAtrHandle3 = INVALID_HANDLE;
 int    g_dayStartDateCode = -1;
 double g_dayStartBalance  = 0.0;
 
+bool     g_licenseValid       = false;
+string   g_licenseMessage     = "not checked yet";
+datetime g_lastLicenseCheck   = 0;
+
 #define DB_PREFIX  "GDSE_DB_"
 
 // Switches the chart itself to a white background - the dashboard panel
@@ -158,6 +166,13 @@ int OnInit()
   {
    trade.SetExpertMagicNumber(InpMagicNumber);
    trade.SetTypeFillingBySymbol(_Symbol);
+
+   if(!CheckLicense())
+     {
+      PrintFormat("GoldDualBasketDCA: license check failed - %s. Refusing to run.", g_licenseMessage);
+      return(INIT_FAILED);
+     }
+   g_lastLicenseCheck = TimeCurrent();
 
    if(InpExpectedLogin != 0 && AccountInfoInteger(ACCOUNT_LOGIN) != InpExpectedLogin)
      {
@@ -304,6 +319,12 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
 //+------------------------------------------------------------------+
 void OnTick()
   {
+   if(!MQLInfoInteger(MQL_TESTER) && TimeCurrent() - g_lastLicenseCheck > 60)
+     {
+      g_lastLicenseCheck = TimeCurrent();
+      CheckLicense(); // re-checked every ~60s so a revoked license stops new trades quickly, without re-running OnInit
+     }
+
    RefreshBaskets();
    UpdateDayTracking();
 
@@ -312,7 +333,7 @@ void OnTick()
 
    RefreshBaskets(); // re-scan after any exits this tick before deciding on entries/DCA
 
-   if(SpreadIsAcceptable())
+   if(g_licenseValid && SpreadIsAcceptable())
      {
       ManageBasketEntries(SIDE_BUY);
       ManageBasketEntries(SIDE_SELL);
@@ -738,6 +759,52 @@ bool DailyTargetHit()
   }
 
 //+------------------------------------------------------------------+
+//| License check - calls the admin panel's /api/verify over          |
+//| WebRequest. The exact URL (InpLicenseServerUrl) must be whitelisted|
+//| in this terminal under Tools > Options > Expert Advisors > "Allow  |
+//| WebRequest for listed URL", or every call fails with err=4060.     |
+//| Skipped entirely inside the Strategy Tester (MQL_TESTER) - WebRequest|
+//| is not usable there either way, and license enforcement shouldn't  |
+//| block backtesting.                                                 |
+//+------------------------------------------------------------------+
+bool CheckLicense()
+  {
+   if(MQLInfoInteger(MQL_TESTER))
+     {
+      g_licenseValid   = true;
+      g_licenseMessage = "skipped (Strategy Tester)";
+      return true;
+     }
+
+   string json = StringFormat(
+                    "{\"license_key\":\"%s\",\"account_id\":\"%d\",\"platform\":\"MT5\","
+                    "\"broker\":\"%s\",\"symbol\":\"%s\",\"ea_version\":\"%s\","
+                    "\"balance\":%.2f,\"equity\":%.2f}",
+                    InpLicenseKey, (int)AccountInfoInteger(ACCOUNT_LOGIN),
+                    AccountInfoString(ACCOUNT_COMPANY), _Symbol, EA_BUILD_VERSION,
+                    AccountInfoDouble(ACCOUNT_BALANCE), AccountInfoDouble(ACCOUNT_EQUITY));
+
+   char post[], result[];
+   StringToCharArray(json, post, 0, StringLen(json));
+   string resultHeaders;
+
+   ResetLastError();
+   int res = WebRequest("POST", InpLicenseServerUrl, "Content-Type: application/json\r\n",
+                         5000, post, result, resultHeaders);
+   if(res == -1)
+     {
+      g_licenseValid   = false;
+      g_licenseMessage = StringFormat("server unreachable (err=%d) - check WebRequest whitelist", GetLastError());
+      return false;
+     }
+
+   string response = CharArrayToString(result);
+   g_licenseValid   = (StringFind(response, "\"valid\":true") >= 0);
+   g_licenseMessage = g_licenseValid ? "OK" : response;
+   return g_licenseValid;
+  }
+
+//+------------------------------------------------------------------+
 //| Dashboard                                                          |
 //+------------------------------------------------------------------+
 void DbLabel(string name, int x, int y, string text, color clr, int fontSize = 8)
@@ -819,7 +886,7 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, InpDashboardX - 10);
       ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, InpDashboardY - 10);
       ObjectSetInteger(0, bg, OBJPROP_XSIZE, 280);
-      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 475);
+      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 490);
       ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'12,12,16');
       ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, bg, OBJPROP_COLOR, C'70,70,80');
@@ -829,9 +896,9 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_ZORDER, 0);
      }
 
-   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 401, 260, 24, "X  CLOSE ALL", C'120,20,20');
-   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 429, 126, 22, "Close BUY", C'20,80,20');
-   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 429, 126, 22, "Close SELL", C'20,80,20');
+   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 416, 260, 24, "X  CLOSE ALL", C'120,20,20');
+   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 444, 126, 22, "Close BUY", C'20,80,20');
+   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 444, 126, 22, "Close SELL", C'20,80,20');
   }
 
 void UpdateDashboard()
@@ -848,6 +915,9 @@ void UpdateDashboard()
    bool loginOk = (InpExpectedLogin == 0 || AccountInfoInteger(ACCOUNT_LOGIN) == InpExpectedLogin);
    DbLabel("Login", lx, y, PadRight("Login", lblW) + IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN)),
            loginOk ? clrSilver : clrRed, 8);
+   y += lh;
+   DbLabel("License", lx, y, PadRight("License", lblW) + (g_licenseValid ? "OK" : "INVALID"),
+           g_licenseValid ? clrLime : clrRed, 8);
    y += lh;
 
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);

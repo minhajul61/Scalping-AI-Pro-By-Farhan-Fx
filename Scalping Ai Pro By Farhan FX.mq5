@@ -61,7 +61,7 @@ input long     InpExpectedLogin      = 416045126; // Account Login (0 = skip che
 input int      InpMaxSpreadPoints    = 300;       // Max Spread (points)
 
 input group "=== License ==="
-input bool     InpUseLicenseCheck  = false;                              // Use License Check (off until a real server is online)
+input bool     InpUseLicenseCheck  = true;                               // Use License Check
 input string   InpLicenseKey       = "";                                 // License Key
 input string   InpLicenseServerUrl = "http://127.0.0.1:8081/api/verify"; // License Server URL
 

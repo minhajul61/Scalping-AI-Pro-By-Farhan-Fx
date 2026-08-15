@@ -45,7 +45,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v11"
+#define EA_BUILD_VERSION "v12"
 
 #include <Trade\Trade.mqh>
 
@@ -55,28 +55,36 @@ enum ENUM_BASKET_SIDE
    SIDE_SELL = 1
   };
 
-// Different brokers (and even different account types on the SAME broker,
-// e.g. Exness standard vs Exness Cent) quote gold with different point/tick
-// scaling - the same real $ spread shows up as a very different raw "points"
-// number depending on the symbol's digit precision. Max Spread is measured
-// in raw points, so one fixed threshold doesn't travel well across brokers.
-// This preset picks a known-good threshold automatically; "Custom" uses
-// InpMaxSpreadPoints below directly, for anything not in this list (or if
-// the preset's value turns out wrong for a specific account - the market
-// changes, brokers change specs).
+// Two independent axes affect gold's point/tick scaling, and therefore what
+// Max Spread threshold is actually correct:
+// 1. Broker (Exness/CXM/Vantage/...) - each has its own base symbol spec.
+// 2. Account type (standard-USD vs cent-USC) - a cent account quotes the
+//    same real $ spread as a much bigger raw "points" number, regardless
+//    of broker. Confirmed today on Exness: standard=300 was right, but the
+//    cent account (XAUUSDc) needed 5000 for the exact same kind of real
+//    spread - blocked every trade silently otherwise.
+// Kept as two separate inputs (not one combined broker+type list) so the
+// account-type scaling logic applies uniformly to every broker, not just
+// the one it happened to be discovered on.
 enum ENUM_BROKER_PRESET
   {
-   BROKER_CUSTOM         = 0, // Custom (use Max Spread below)
-   BROKER_EXNESS_STANDARD = 1, // Exness (XAUUSD, standard account)
-   BROKER_EXNESS_CENT     = 2, // Exness (XAUUSDc, cent account)
-   BROKER_CXM              = 3, // CXM Direct (XAUUSDp)
-   BROKER_VANTAGE           = 4  // Vantage Markets
+   BROKER_CUSTOM  = 0, // Custom (use Max Spread below)
+   BROKER_EXNESS  = 1, // Exness
+   BROKER_CXM     = 2, // CXM Direct
+   BROKER_VANTAGE = 3  // Vantage Markets
+  };
+
+enum ENUM_ACCOUNT_TYPE
+  {
+   ACCOUNT_TYPE_USD = 0, // Standard (USD)
+   ACCOUNT_TYPE_USC = 1  // Cent (USC)
   };
 
 input group "=== Account & Basic Settings ==="
 input ulong    InpMagicNumber        = 20270115;  // Magic Number
 input long     InpExpectedLogin      = 0;         // Account Login (0 = skip check - client sets their own)
-input ENUM_BROKER_PRESET InpBrokerPreset = BROKER_CUSTOM; // Broker Preset (auto-sets Max Spread)
+input ENUM_BROKER_PRESET InpBrokerPreset = BROKER_CUSTOM;   // Broker Preset (auto-sets Max Spread)
+input ENUM_ACCOUNT_TYPE  InpAccountType  = ACCOUNT_TYPE_USD; // Account Type (scales Max Spread for cent accounts)
 input int      InpMaxSpreadPoints    = 300;       // Max Spread (points) - used when Broker Preset = Custom
 
 input group "=== Basket & Profit Target ==="
@@ -725,30 +733,38 @@ bool IsNewsBlackout()
 //+------------------------------------------------------------------+
 //| Spread / daily circuit breaker                                    |
 //+------------------------------------------------------------------+
-// Verification status of each preset, honestly tracked (2026-08-14):
-// - BROKER_EXNESS_STANDARD (300): live-tested all day on a real Exness
-//   demo, XAUUSD 3-decimal - real spread observed ~168 points, comfortably
-//   under this.
-// - BROKER_EXNESS_CENT (5000): live-tested on a real Exness account,
-//   XAUUSDc - confirmed working after raising from 300 (which silently
-//   blocked every trade).
-// - BROKER_CXM (300): NOT independently verified this session - based on
-//   a different project's historical measurement (CXM Direct XAUUSDp,
+// Verification status, honestly tracked (2026-08-14):
+// - Exness standard-account base (300): live-tested all day on a real
+//   Exness demo, XAUUSD 3-decimal - real spread observed ~168 points,
+//   comfortably under this.
+// - Exness cent-account scaling (x16.67, i.e. 300 -> 5000): live-tested on
+//   a real Exness account, XAUUSDc - confirmed working after raising from
+//   300 (which silently blocked every trade).
+// - CXM base (300): NOT independently verified this session - based on a
+//   different project's historical measurement (CXM Direct XAUUSDp,
 //   2-decimal, ~7 points for a $0.07 spread), suggesting 300 should be
 //   generous, not confirmed fresh today.
-// - BROKER_VANTAGE (300): NOT verified at all - no real Vantage broker
-//   account spread has been measured; this is a placeholder guess pending
-//   a real demo account test.
+// - Vantage base (300): NOT verified at all - no real Vantage broker
+//   spread has been measured; a placeholder guess.
+// - Applying the SAME x16.67 cent-scaling factor to CXM/Vantage cent
+//   accounts is an untested extrapolation from the one Exness data point -
+//   only the Exness+USD and Exness+USC combination is actually confirmed.
+//   Needs real cent-account testing on CXM/Vantage before trusting this
+//   for those brokers.
 int EffectiveMaxSpreadPoints()
   {
+   int base;
    switch(InpBrokerPreset)
      {
-      case BROKER_EXNESS_STANDARD: return 300;
-      case BROKER_EXNESS_CENT:     return 5000;
-      case BROKER_CXM:             return 300;  // not independently verified this session
-      case BROKER_VANTAGE:         return 300;  // not verified at all - placeholder
-      default:                     return InpMaxSpreadPoints; // BROKER_CUSTOM
+      case BROKER_EXNESS:  base = 300; break;
+      case BROKER_CXM:     base = 300; break; // not independently verified this session
+      case BROKER_VANTAGE: base = 300; break; // not verified at all - placeholder
+      default:             return InpMaxSpreadPoints; // BROKER_CUSTOM - account type doesn't apply
      }
+
+   if(InpAccountType == ACCOUNT_TYPE_USC)
+      return base * 17; // ~5000/300 - only confirmed for Exness, extrapolated for others
+   return base;
   }
 
 bool SpreadIsAcceptable()

@@ -642,3 +642,46 @@ Farhan Fx` Python project's `learnings.md`.)
   trend, but no setting is a fix for the missing stop-loss - that
   remains an explicit, informed, standing user decision, not something
   further tuning is expected to resolve.
+
+- **2026-08-14 (broker-preset feature, and a real correction from live CXM
+  data): cent-account spread scaling is broker-specific, not universal.**
+  User asked for a `Broker Preset` dropdown (Exness/CXM/Vantage/Custom)
+  plus a separate `Account Type` (USD/USC) selector, so Max Spread sets
+  itself correctly per broker instead of manual guessing each time (as
+  happened earlier the same day with Exness's cent account). Built both
+  as independent enum inputs, combined in `EffectiveMaxSpreadPoints()`.
+
+  First version applied one shared multiplier (~x17, derived from
+  Exness's real 300->5000 finding) to every broker's cent account. This
+  was an unverified extrapolation, flagged honestly as such in the code
+  and to the user - and it was wrong. Real data settled it: got CXM
+  Direct demo credentials (login 252424, XAUUSDc, Hedge mode, currency
+  USC) from the user, logged in locally (automated `/config` login+Tester
+  launches failed twice with "not synchronized with trade server" -
+  this broker's connect handshake is apparently slower than the Tester's
+  patience; the user logging in manually through the GUI worked fine and
+  stayed connected), attached the actual EA to the live XAUUSDc chart,
+  and read the dashboard's own "Spread" line directly: **24 points** -
+  comfortably under the base 300, no scaling needed at all for CXM's
+  cent account.
+
+  Fixed `EffectiveMaxSpreadPoints()` to hardcode each broker's cent
+  behavior independently (Exness: 300->5000 for cent; CXM: 300 for
+  both account types) instead of deriving cent behavior from one shared
+  ratio. Vantage remains an unverified placeholder pending real
+  credentials.
+
+  **The lesson, worth remembering beyond this one function:** when a
+  fix is found for one instance of a problem, resist generalizing it
+  into a universal rule before checking a second real instance - the
+  natural-seeming "cent accounts need N times more points" pattern
+  from a single Exness data point did not hold for CXM at all. One
+  confirmed data point is one data point, not a law.
+
+  **Also noted:** automating login via `/config` for a fresh CXM
+  session twice failed with "tester not started because terminal is
+  not synchronized with the trade server [connect status 1, 100]",
+  even with a 3-minute wait. Manual GUI login succeeded immediately and
+  stayed connected. If this broker needs scripted testing again,
+  budget for either a much longer sync wait or plan on manual login
+  for this specific server.

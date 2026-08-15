@@ -45,7 +45,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v10"
+#define EA_BUILD_VERSION "v11"
 
 #include <Trade\Trade.mqh>
 
@@ -55,10 +55,29 @@ enum ENUM_BASKET_SIDE
    SIDE_SELL = 1
   };
 
+// Different brokers (and even different account types on the SAME broker,
+// e.g. Exness standard vs Exness Cent) quote gold with different point/tick
+// scaling - the same real $ spread shows up as a very different raw "points"
+// number depending on the symbol's digit precision. Max Spread is measured
+// in raw points, so one fixed threshold doesn't travel well across brokers.
+// This preset picks a known-good threshold automatically; "Custom" uses
+// InpMaxSpreadPoints below directly, for anything not in this list (or if
+// the preset's value turns out wrong for a specific account - the market
+// changes, brokers change specs).
+enum ENUM_BROKER_PRESET
+  {
+   BROKER_CUSTOM         = 0, // Custom (use Max Spread below)
+   BROKER_EXNESS_STANDARD = 1, // Exness (XAUUSD, standard account)
+   BROKER_EXNESS_CENT     = 2, // Exness (XAUUSDc, cent account)
+   BROKER_CXM              = 3, // CXM Direct (XAUUSDp)
+   BROKER_VANTAGE           = 4  // Vantage Markets
+  };
+
 input group "=== Account & Basic Settings ==="
 input ulong    InpMagicNumber        = 20270115;  // Magic Number
 input long     InpExpectedLogin      = 0;         // Account Login (0 = skip check - client sets their own)
-input int      InpMaxSpreadPoints    = 300;       // Max Spread (points)
+input ENUM_BROKER_PRESET InpBrokerPreset = BROKER_CUSTOM; // Broker Preset (auto-sets Max Spread)
+input int      InpMaxSpreadPoints    = 300;       // Max Spread (points) - used when Broker Preset = Custom
 
 input group "=== Basket & Profit Target ==="
 input double   InpInitialLot            = 0.01;   // Initial Lot Size
@@ -706,10 +725,36 @@ bool IsNewsBlackout()
 //+------------------------------------------------------------------+
 //| Spread / daily circuit breaker                                    |
 //+------------------------------------------------------------------+
+// Verification status of each preset, honestly tracked (2026-08-14):
+// - BROKER_EXNESS_STANDARD (300): live-tested all day on a real Exness
+//   demo, XAUUSD 3-decimal - real spread observed ~168 points, comfortably
+//   under this.
+// - BROKER_EXNESS_CENT (5000): live-tested on a real Exness account,
+//   XAUUSDc - confirmed working after raising from 300 (which silently
+//   blocked every trade).
+// - BROKER_CXM (300): NOT independently verified this session - based on
+//   a different project's historical measurement (CXM Direct XAUUSDp,
+//   2-decimal, ~7 points for a $0.07 spread), suggesting 300 should be
+//   generous, not confirmed fresh today.
+// - BROKER_VANTAGE (300): NOT verified at all - no real Vantage broker
+//   account spread has been measured; this is a placeholder guess pending
+//   a real demo account test.
+int EffectiveMaxSpreadPoints()
+  {
+   switch(InpBrokerPreset)
+     {
+      case BROKER_EXNESS_STANDARD: return 300;
+      case BROKER_EXNESS_CENT:     return 5000;
+      case BROKER_CXM:             return 300;  // not independently verified this session
+      case BROKER_VANTAGE:         return 300;  // not verified at all - placeholder
+      default:                     return InpMaxSpreadPoints; // BROKER_CUSTOM
+     }
+  }
+
 bool SpreadIsAcceptable()
   {
    long spread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
-   return(spread <= InpMaxSpreadPoints);
+   return(spread <= EffectiveMaxSpreadPoints());
   }
 
 void UpdateDayTracking()
@@ -819,7 +864,7 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, InpDashboardX - 10);
       ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, InpDashboardY - 10);
       ObjectSetInteger(0, bg, OBJPROP_XSIZE, 280);
-      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 475);
+      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 490);
       ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'12,12,16');
       ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, bg, OBJPROP_COLOR, C'70,70,80');
@@ -829,9 +874,9 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_ZORDER, 0);
      }
 
-   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 401, 260, 24, "X  CLOSE ALL", C'120,20,20');
-   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 429, 126, 22, "Close BUY", C'20,80,20');
-   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 429, 126, 22, "Close SELL", C'20,80,20');
+   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 416, 260, 24, "X  CLOSE ALL", C'120,20,20');
+   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 444, 126, 22, "Close BUY", C'20,80,20');
+   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 444, 126, 22, "Close SELL", C'20,80,20');
   }
 
 void UpdateDashboard()
@@ -912,6 +957,12 @@ void UpdateDashboard()
    y += 9;
 
    DbLabel("FilterHdr", lx, y, "FILTERS", C'0,170,220', 8);
+   y += lh;
+   long liveSpread = SymbolInfoInteger(_Symbol, SYMBOL_SPREAD);
+   int  maxSpread   = EffectiveMaxSpreadPoints();
+   bool spreadBlocking = (liveSpread > maxSpread);
+   DbLabel("Spread", lx, y, PadRight("Spread", lblW) + IntegerToString((int)liveSpread) + " / " + IntegerToString(maxSpread) + (spreadBlocking ? " (blocking)" : ""),
+           spreadBlocking ? clrRed : clrSilver, 8);
    y += lh;
    bool atrSpiking = InpUseAtrSpikeFilter && IsAtrSpiking();
    DbLabel("AtrSpike", lx, y, PadRight("ATR Spike", lblW) + (InpUseAtrSpikeFilter ? (atrSpiking ? "YES (blocking)" : "no") : "off"),

@@ -45,7 +45,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v13"
+#define EA_BUILD_VERSION "v14"
 
 #include <Trade\Trade.mqh>
 
@@ -749,9 +749,14 @@ bool IsNewsBlackout()
 //   tested on a real CXM Direct demo account (252424, XAUUSDc) - real
 //   spread observed = 24 points, comfortably under the base 300. CXM's
 //   cent symbol does not need the Exness-style multiplier at all.
-// - Vantage (300 for both): NOT verified at all yet - no real Vantage
-//   broker spread has been measured; a placeholder guess pending a real
-//   demo account test.
+// - Vantage cent (300, i.e. NO scale-up needed either): live-tested on a
+//   real Vantage account (34580461, XAUUSD.sc, cent/USC) - real spread
+//   observed = 33 points, comfortably under 300. Same pattern as CXM -
+//   Exness is the outlier that actually needs a much bigger threshold,
+//   not the norm.
+// - Vantage standard (300): NOT independently verified - the account
+//   tested was cent-type; assumed safe by the same margin logic as
+//   Exness/CXM standard accounts, not confirmed with real data.
 int EffectiveMaxSpreadPoints()
   {
    bool cent = (InpAccountType == ACCOUNT_TYPE_USC);
@@ -759,7 +764,7 @@ int EffectiveMaxSpreadPoints()
      {
       case BROKER_EXNESS:  return cent ? 5000 : 300; // both verified today
       case BROKER_CXM:     return 300;               // verified today - same threshold works for both account types
-      case BROKER_VANTAGE: return cent ? 5000 : 300; // NOT verified - placeholder guess only
+      case BROKER_VANTAGE: return 300;               // cent verified today (33 pts); standard not independently tested but same threshold expected
       default:              return InpMaxSpreadPoints; // BROKER_CUSTOM
      }
   }

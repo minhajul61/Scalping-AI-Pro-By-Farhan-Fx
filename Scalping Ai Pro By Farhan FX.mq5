@@ -45,7 +45,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v12"
+#define EA_BUILD_VERSION "v13"
 
 #include <Trade\Trade.mqh>
 
@@ -733,38 +733,35 @@ bool IsNewsBlackout()
 //+------------------------------------------------------------------+
 //| Spread / daily circuit breaker                                    |
 //+------------------------------------------------------------------+
-// Verification status, honestly tracked (2026-08-14):
-// - Exness standard-account base (300): live-tested all day on a real
-//   Exness demo, XAUUSD 3-decimal - real spread observed ~168 points,
-//   comfortably under this.
-// - Exness cent-account scaling (x16.67, i.e. 300 -> 5000): live-tested on
-//   a real Exness account, XAUUSDc - confirmed working after raising from
-//   300 (which silently blocked every trade).
-// - CXM base (300): NOT independently verified this session - based on a
-//   different project's historical measurement (CXM Direct XAUUSDp,
-//   2-decimal, ~7 points for a $0.07 spread), suggesting 300 should be
-//   generous, not confirmed fresh today.
-// - Vantage base (300): NOT verified at all - no real Vantage broker
-//   spread has been measured; a placeholder guess.
-// - Applying the SAME x16.67 cent-scaling factor to CXM/Vantage cent
-//   accounts is an untested extrapolation from the one Exness data point -
-//   only the Exness+USD and Exness+USC combination is actually confirmed.
-//   Needs real cent-account testing on CXM/Vantage before trusting this
-//   for those brokers.
+// Verification status, honestly tracked (2026-08-14) - IMPORTANT: cent-
+// account scaling is broker-specific, NOT a universal multiplier. Each
+// broker's own symbol/point convention decides this independently; an
+// earlier version of this function applied one shared x17 factor to every
+// broker's cent account, which turned out wrong the moment it was actually
+// tested (see CXM below) - kept as a cautionary note.
+// - Exness standard (300): live-tested all day on a real Exness demo,
+//   XAUUSD 3-decimal - real spread observed ~168 points, comfortably
+//   under this.
+// - Exness cent (5000): live-tested on a real Exness account, XAUUSDc -
+//   confirmed working after raising from 300 (which silently blocked
+//   every trade). A big scale-up for this broker's cent symbol.
+// - CXM standard (300) and CXM cent (300, i.e. NO scale-up needed): live-
+//   tested on a real CXM Direct demo account (252424, XAUUSDc) - real
+//   spread observed = 24 points, comfortably under the base 300. CXM's
+//   cent symbol does not need the Exness-style multiplier at all.
+// - Vantage (300 for both): NOT verified at all yet - no real Vantage
+//   broker spread has been measured; a placeholder guess pending a real
+//   demo account test.
 int EffectiveMaxSpreadPoints()
   {
-   int base;
+   bool cent = (InpAccountType == ACCOUNT_TYPE_USC);
    switch(InpBrokerPreset)
      {
-      case BROKER_EXNESS:  base = 300; break;
-      case BROKER_CXM:     base = 300; break; // not independently verified this session
-      case BROKER_VANTAGE: base = 300; break; // not verified at all - placeholder
-      default:             return InpMaxSpreadPoints; // BROKER_CUSTOM - account type doesn't apply
+      case BROKER_EXNESS:  return cent ? 5000 : 300; // both verified today
+      case BROKER_CXM:     return 300;               // verified today - same threshold works for both account types
+      case BROKER_VANTAGE: return cent ? 5000 : 300; // NOT verified - placeholder guess only
+      default:              return InpMaxSpreadPoints; // BROKER_CUSTOM
      }
-
-   if(InpAccountType == ACCOUNT_TYPE_USC)
-      return base * 17; // ~5000/300 - only confirmed for Exness, extrapolated for others
-   return base;
   }
 
 bool SpreadIsAcceptable()

@@ -63,7 +63,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v16"
+#define EA_BUILD_VERSION "v17"
 
 #include <Trade\Trade.mqh>
 
@@ -114,6 +114,7 @@ input double   InpBasketProfitTargetUSD = 2.0;    // Take Profit ($) - grows eac
 input int      InpMaxLegsPerBasket      = 7;      // Max DCA Legs Per Cycle
 input int      InpAbsoluteMaxLegsPerBasket = 50;  // Absolute Max Legs (emergency hard limit)
 input double   InpCycleTargetGrowth     = 0.5;    // Target Growth Per Cycle (0.5 = +50%)
+input bool     InpUseServerSideTP       = true;   // Attach Real TP To Each Leg (fires on the broker's server, less slippage than the EA closing legs one-by-one)
 
 input group "=== DCA / Martingale ==="
 input double   InpDcaDistancePrice  = 1.2;        // DCA Distance ($)
@@ -183,6 +184,11 @@ int g_trendAtrHandle3 = INVALID_HANDLE;
 
 int    g_dayStartDateCode = -1;
 double g_dayStartBalance  = 0.0;
+
+// Watermark for LogRecentClosedDeals() - only deals strictly after this
+// time get logged/re-checked, so a leg that already got logged once
+// doesn't get logged again on the next OnTimer() pass.
+datetime g_lastDealLogTime = 0;
 
 #define DB_PREFIX  "GDSE_DB_"
 #define MK_PREFIX  "GDSE_MK_"
@@ -358,6 +364,16 @@ void OnDeinit(const int reason)
 //+------------------------------------------------------------------+
 void OnTimer()
   {
+   // Self-healing retry: re-checks/re-applies the shared TP on both baskets
+   // once a second, in case a PositionModify() failed the first time (e.g.
+   // a transient broker error) - cheap when nothing needs changing, since
+   // ApplyBasketTP() skips any leg whose TP is already at the right price.
+   RefreshBaskets();
+   ApplyBasketTP(SIDE_BUY);
+   ApplyBasketTP(SIDE_SELL);
+   CleanupOrphanedLegMarkers(); // handles legs a server-side TP closed without going through CloseBasket()
+   LogRecentClosedDeals();      // real profit/swap/commission per leg close, for verifying the slippage/commission theory with real data
+
    if(InpShowDashboard)
       UpdateDashboard();
   }
@@ -501,6 +517,84 @@ double GetProfitTarget(const SBasket &b)
    return InpBasketProfitTargetUSD * (1.0 + completedCycles * InpCycleTargetGrowth);
   }
 
+// The price level at which this basket's combined floating P/L (summed
+// across every leg, using each leg's real entry price and volume - exactly
+// what ScanBasket() already computes into weightedAvgEntry/totalLots)
+// reaches GetProfitTarget(b). Same math the EA already uses on every tick
+// to decide "target hit", just solved for price instead of re-evaluated
+// tick by tick. Ignores swap (unknown ahead of time, accrues gradually and
+// is usually tiny next to the target) - that's fine, this price only needs
+// to be close; ManageBasketExits()'s tick-based floatingPL check (which
+// does include swap) remains the final authority and stays in place
+// unchanged as a backup.
+double BasketTargetPrice(ENUM_BASKET_SIDE side, const SBasket &b)
+  {
+   if(b.totalLots <= 0)
+      return 0;
+   double contractSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_CONTRACT_SIZE);
+   if(contractSize <= 0)
+      return 0;
+   double priceDistance = GetProfitTarget(b) / (b.totalLots * contractSize);
+   return (side == SIDE_BUY) ? (b.weightedAvgEntry + priceDistance) : (b.weightedAvgEntry - priceDistance);
+  }
+
+// Sets BasketTargetPrice() as a real broker-side TP on every open leg of
+// this basket, so the close fires on the server the instant price reaches
+// it - instead of the EA detecting "target hit" a tick late and then
+// closing legs one-by-one itself (extra wall-clock time per leg, during
+// which a fast/momentum move can push the price further away before later
+// legs get their turn - this is the real source of the extra slippage
+// noticed during momentum, more than commission alone). Every leg in a
+// basket shares the same TP price, so in the normal case they all fire
+// together on the server instead of sequentially.
+//
+// Re-applied whenever a leg opens (the only time weightedAvgEntry/
+// totalLots/the cycle count can change) and again periodically from
+// OnTimer() as a self-healing retry, in case a modify failed the first
+// time (logged, never fatal - a failed TP just falls back to the existing
+// tick-based close for that basket, it must never block trading since this
+// EA has no SL to fall back on either).
+void ApplyBasketTP(ENUM_BASKET_SIDE side)
+  {
+   if(!InpUseServerSideTP)
+      return;
+
+   SBasket b;
+   if(side == SIDE_BUY)
+      b = g_buyBasket;
+   else
+      b = g_sellBasket;
+
+   if(b.legCount == 0)
+      return;
+
+   double tp = BasketTargetPrice(side, b);
+   if(tp <= 0)
+      return;
+
+   long wantType = (side == SIDE_BUY) ? POSITION_TYPE_BUY : POSITION_TYPE_SELL;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0 || !PositionSelectByTicket(ticket))
+         continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol)
+         continue;
+      if(PositionGetInteger(POSITION_MAGIC) != (long)InpMagicNumber)
+         continue;
+      if(PositionGetInteger(POSITION_TYPE) != wantType)
+         continue;
+
+      double currentTP = PositionGetDouble(POSITION_TP);
+      if(MathAbs(currentTP - tp) < _Point) // already within a point of the right level - skip the modify call
+         continue;
+
+      if(!trade.PositionModify(ticket, 0, tp)) // 0 = no SL, per the standing no-SL-ever policy
+         PrintFormat("GoldDualBasketDCA: failed to set TP on ticket %d (target price %.2f): retcode=%d %s - tick-based close remains as backup",
+                     (int)ticket, tp, trade.ResultRetcode(), trade.ResultRetcodeDescription());
+     }
+  }
+
 void ManageBasketExits(ENUM_BASKET_SIDE side)
   {
    SBasket b;
@@ -588,6 +682,8 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
       if(InpUseTrendFilter && IsAgainstTrend(side))
          return;
       OpenLeg(side, 0, 0);
+      RefreshBaskets(); // pick up the leg just opened before computing its TP
+      ApplyBasketTP(side);
       return;
      }
 
@@ -615,6 +711,8 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
       // pause) if price keeps moving, per explicit request.
       int legIndexForSizing = b.legCount % InpMaxLegsPerBasket;
       OpenLeg(side, legIndexForSizing, b.lastLegLots);
+      RefreshBaskets(); // pick up the new leg + updated avg entry before recomputing the shared TP
+      ApplyBasketTP(side);
       return;
      }
   }
@@ -765,6 +863,82 @@ void RestoreLegMarkersOnInit()
 
       DrawLegMarker(side, ticket, legNumber, PositionGetDouble(POSITION_PRICE_OPEN), PositionGetDouble(POSITION_VOLUME));
      }
+  }
+
+// A leg's marker is normally deleted inside CloseBasket()'s own loop - but
+// a server-side TP (see ApplyBasketTP()) closes a position without the EA
+// ever calling CloseBasket() for it, so that path can leave an orphaned
+// marker sitting on the chart forever. Called periodically (OnTimer(), not
+// every tick - cheap either way, but no need for tick frequency) to sweep
+// every leg-marker object and delete any whose position no longer exists.
+void CleanupOrphanedLegMarkers()
+  {
+   string prefixB = MK_PREFIX + "LEG_B_";
+   string prefixS = MK_PREFIX + "LEG_S_";
+   for(int i = ObjectsTotal(0, 0, OBJ_TEXT) - 1; i >= 0; i--)
+     {
+      string name = ObjectName(0, i, 0, OBJ_TEXT);
+      string ticketStr;
+      if(StringFind(name, prefixB) == 0)
+         ticketStr = StringSubstr(name, StringLen(prefixB));
+      else if(StringFind(name, prefixS) == 0)
+         ticketStr = StringSubstr(name, StringLen(prefixS));
+      else
+         continue;
+
+      ulong ticket = (ulong)StringToInteger(ticketStr);
+      if(ticket == 0 || !PositionSelectByTicket(ticket))
+         ObjectDelete(0, name);
+     }
+  }
+
+// Logs the real, broker-confirmed profit/swap/commission for every leg
+// close since the last check (whichever path closed it - CloseBasket()'s
+// own market orders or a server-side TP), so the actual gap between what
+// the EA expected and what was really realized is visible in the Experts
+// log instead of guessed at. This is exactly the data needed to confirm
+// whether InpUseServerSideTP actually reduces the momentum/slippage gap
+// reported 2026-08-16, and separately how much commission alone costs per
+// leg - both were previously invisible (MQL5 has no live-commission field
+// on an open position; it only exists after the deal closes, which is
+// exactly what this reads). Called from OnTimer(), not every tick.
+void LogRecentClosedDeals()
+  {
+   datetime from = (g_lastDealLogTime > 0) ? g_lastDealLogTime : (TimeCurrent() - 300);
+   datetime to   = TimeCurrent() + 60;
+   if(!HistorySelect(from, to))
+      return;
+
+   int total = HistoryDealsTotal();
+   for(int i = 0; i < total; i++)
+     {
+      ulong dealTicket = HistoryDealGetTicket(i);
+      if(dealTicket == 0)
+         continue;
+      if(HistoryDealGetString(dealTicket, DEAL_SYMBOL) != _Symbol)
+         continue;
+      if(HistoryDealGetInteger(dealTicket, DEAL_MAGIC) != (long)InpMagicNumber)
+         continue;
+      if((ENUM_DEAL_ENTRY)HistoryDealGetInteger(dealTicket, DEAL_ENTRY) != DEAL_ENTRY_OUT)
+         continue;
+
+      datetime dealTime = (datetime)HistoryDealGetInteger(dealTicket, DEAL_TIME);
+      if(dealTime <= g_lastDealLogTime)
+         continue; // already logged on a previous pass
+
+      double profit     = HistoryDealGetDouble(dealTicket, DEAL_PROFIT);
+      double swap        = HistoryDealGetDouble(dealTicket, DEAL_SWAP);
+      double commission = HistoryDealGetDouble(dealTicket, DEAL_COMMISSION);
+      long   dealType   = HistoryDealGetInteger(dealTicket, DEAL_TYPE);
+      // The closing deal's type is the opposite of the position it closed:
+      // a SELL deal closes a BUY leg, a BUY deal closes a SELL leg.
+      string closedSide = (dealType == DEAL_TYPE_SELL) ? "BUY leg" : "SELL leg";
+
+      PrintFormat("GoldDualBasketDCA: %s closed (deal #%d) - profit=%.2f swap=%.2f commission=%.2f net=%.2f",
+                  closedSide, (int)dealTicket, profit, swap, commission, profit + swap + commission);
+     }
+
+   g_lastDealLogTime = TimeCurrent();
   }
 
 // Centers the watermark on the currently-visible chart window. Chart-window
@@ -1146,7 +1320,7 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, InpDashboardX - 10);
       ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, InpDashboardY - 10);
       ObjectSetInteger(0, bg, OBJPROP_XSIZE, 280);
-      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 535);
+      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 565);
       ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'12,12,16');
       ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, bg, OBJPROP_COLOR, C'120,95,40'); // warm gold-tinted border - brand accent, matches gold/XAUUSD theme
@@ -1190,9 +1364,9 @@ void CreateDashboard()
       ObjectSetInteger(0, icon, OBJPROP_ZORDER, 2);
      }
 
-   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 461, 260, 24, "X  CLOSE ALL", C'120,20,20');
-   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 489, 126, 22, "Close BUY", C'20,80,20');
-   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 489, 126, 22, "Close SELL", C'20,80,20');
+   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 491, 260, 24, "X  CLOSE ALL", C'120,20,20');
+   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 519, 126, 22, "Close BUY", C'20,80,20');
+   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 519, 126, 22, "Close SELL", C'20,80,20');
   }
 
 void UpdateDashboard()
@@ -1246,6 +1420,9 @@ void UpdateDashboard()
    y += lh;
    DbLabel("BuyAvg", lx, y, PadRight("Avg Entry", lblW) + DoubleToString(g_buyBasket.weightedAvgEntry, 2), clrWhite, 8);
    y += lh;
+   string buyTpText = !InpUseServerSideTP ? "off" : (g_buyBasket.legCount > 0 ? DoubleToString(BasketTargetPrice(SIDE_BUY, g_buyBasket), 2) : "-");
+   DbLabel("BuyTP", lx, y, PadRight("TP Price", lblW) + buyTpText, C'212,175,55', 8);
+   y += lh;
    DbLabel("BuyPL", lx, y, PadRight("Floating", lblW) + "$" + DoubleToString(g_buyBasket.floatingPL, 2),
            (g_buyBasket.floatingPL >= 0 ? clrLime : clrRed), 8);
    y += lh;
@@ -1265,6 +1442,9 @@ void UpdateDashboard()
            (InpMaxLegsPerBasket > 0 ? g_sellBasket.legCount / InpMaxLegsPerBasket + 1 : 1)), C'0,170,220', 8);
    y += lh;
    DbLabel("SellAvg", lx, y, PadRight("Avg Entry", lblW) + DoubleToString(g_sellBasket.weightedAvgEntry, 2), clrWhite, 8);
+   y += lh;
+   string sellTpText = !InpUseServerSideTP ? "off" : (g_sellBasket.legCount > 0 ? DoubleToString(BasketTargetPrice(SIDE_SELL, g_sellBasket), 2) : "-");
+   DbLabel("SellTP", lx, y, PadRight("TP Price", lblW) + sellTpText, C'212,175,55', 8);
    y += lh;
    DbLabel("SellPL", lx, y, PadRight("Floating", lblW) + "$" + DoubleToString(g_sellBasket.floatingPL, 2),
            (g_sellBasket.floatingPL >= 0 ? clrLime : clrRed), 8);

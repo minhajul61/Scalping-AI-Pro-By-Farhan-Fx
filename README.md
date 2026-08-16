@@ -41,7 +41,32 @@ in this README describe the removed history for context; they are no longer
 part of the running EA. Full removal rationale in `ml/learnings.md`
 (2026-08-12 entries).
 
-## 2026-08-16 (later same day): chart visuals / branding, build v16
+## 2026-08-16 (later same day): server-side TP, build v17 (read this first)
+
+Real bug report after running live for a while: baskets logged "TARGET
+HIT" while the real account balance still trended down, worse during
+momentum. Root cause: `CloseBasket()` closed a basket's legs one-by-one
+via separate market orders - during a fast move, later legs in that loop
+could fill at a meaningfully worse price than what was used to declare
+"target hit" moments earlier (real, momentum-correlated slippage), on
+top of commission never being visible to the EA at all (MQL5 has no
+live-commission field on an open position).
+
+Fix: **`InpUseServerSideTP` (default true)** - every leg in a basket now
+gets a real broker-side TP set to the exact price where the basket's
+combined floating P/L reaches its target, so the broker's own server
+closes every leg simultaneously the instant price reaches it, instead of
+the EA detecting it a tick late and closing legs one-by-one. New "TP
+Price" line per basket on the dashboard. The existing tick-based close
+stays in place as a backup (in case a TP fails to set on some leg).
+
+Verified via a real Strategy Tester run (Model=4, every tick, real
+ticks): a 7-leg basket's legs all closed at the identical timestamp and
+price with a `tp` comment - confirmed working as designed. Full details,
+including an unrelated test-environment scare along the way (fully
+documented, resolved, not a code bug) in `ml/learnings.md`.
+
+## 2026-08-16 (earlier same day): chart visuals / branding, build v16
 
 Added on top of v15, purely cosmetic (no trading-logic function reads any
 of this, so it cannot change entries/exits/lot sizing):

@@ -882,3 +882,79 @@ Farhan Fx` Python project's `learnings.md`.)
   Compiled clean (0 errors, 0 warnings), still v16. Not yet re-verified
   on the user's actual terminal - waiting on them to reattach and
   confirm before treating this as actually fixed.
+
+- **2026-08-16 (same day, fifth follow-up - real bug report, "profit
+  shows but real P/L drops" reported after being live for a while):**
+  user reported baskets logging "TARGET HIT" while the account's real
+  balance still trended down, and specifically that it got worse during
+  momentum. Investigated rather than guessed:
+  - MQL5 has no live-commission field on an open position (`POSITION_COMMISSION`
+    doesn't exist) - commission only becomes visible after a deal
+    closes, via history. The EA's `floatingPL` (used to decide "target
+    hit") was always `POSITION_PROFIT + POSITION_SWAP` only, so a
+    basket could read as "+$2 profit" while commission across several
+    legs quietly exceeded that.
+  - The "worse during momentum" detail pointed at something momentum-
+    dependent, which commission alone isn't (it's roughly a flat
+    per-lot cost regardless of how fast price is moving) - the more
+    likely dominant cause was `CloseBasket()`'s own design: it closes a
+    basket's legs one-by-one via separate market orders in a loop, each
+    a real network round-trip. During a fast move, by the time leg 5-7
+    got its turn, price had already moved further away than what was
+    used to declare "target hit" moments earlier - real, momentum-
+    correlated slippage.
+
+  Fix: **`InpUseServerSideTP` (default true)** - `ApplyBasketTP()`
+  computes the exact price at which a basket's combined floating P/L
+  (using the same weighted-avg-entry/total-lots math `ScanBasket()`
+  already produces) reaches `GetProfitTarget(b)`, then sets that price
+  as a real broker-side TP on every leg in the basket via
+  `trade.PositionModify()`. Every leg in a basket shares one TP price,
+  so they fire together on the broker's own server the instant price
+  reaches it - no EA-side one-by-one loop, no tick-detection lag.
+  Re-applied whenever a leg opens (the only time the shared price can
+  change) and again every second from `OnTimer()` as a self-healing
+  retry (modify can fail, e.g. broker min-stop-distance - logged, never
+  fatal, since `ManageBasketExits()`'s existing tick-based check remains
+  in place unchanged as a backup). New "TP Price" dashboard line per
+  basket, per explicit request ("dekha jai TP kothai ache").
+
+  Also added, since they follow directly from a TP now being able to
+  close a basket without the EA's own `CloseBasket()` ever running for
+  that close: `CleanupOrphanedLegMarkers()` (deletes a leg's chart
+  marker once its position is gone, regardless of what closed it) and
+  `LogRecentClosedDeals()` (prints real profit/swap/commission per leg
+  close from `HistoryDeal*`, since this is the only way to actually see
+  commission at all - gives real numbers to check the original
+  commission theory against, going forward).
+
+  **Verification detour, worth recording honestly:** first attempted an
+  automated Tester run via `/config` against the already-open Vantage
+  terminal - it did NOT start a fresh Tester session (MT5 is single-
+  instance; `/config` against an already-running terminal doesn't
+  reliably enter Tester mode), and the account shown in that terminal
+  at the time briefly caused real alarm (looked like escalating real
+  trades on an unfamiliar login) before being resolved as unrelated to
+  this change. Lesson for future automated Tester launches: **fully
+  close any existing terminal64.exe for that data folder first**,
+  confirmed via `Get-Process -Name terminal64`, before launching with
+  `/config` - do not assume `/config` against an already-running
+  instance does what it does against a closed one, and do not launch
+  Tester runs against a terminal that might be someone's active live
+  monitoring session without confirming first.
+
+  A second, correctly-isolated Tester run (fresh instance, Model=4
+  every-tick real ticks per explicit request, XAUUSDc, 2026.08.01-10,
+  license key included this time - an empty `InpLicenseKey` in
+  `[TesterInputs]` caused a legitimate first attempt to show 0 trades,
+  caught and fixed before treating that as a real result) confirmed the
+  TP mechanism works as designed: e.g. a 7-leg basket's 0.02/0.04/0.08/
+  0.16/0.32/0.64/1.28-lot legs all closed at the identical timestamp
+  and identical price (4060.398) with comment `tp 4060.381` - a real,
+  broker-executed, simultaneous TP fill across every leg, exactly the
+  behavior meant to replace the sequential-close slippage. 704 trades,
+  1408 deals, profit factor 2.17, net +$246.67 over the 9-day window,
+  no errors.
+
+  Compiled clean (0 errors, 0 warnings) as v17. Not yet deployed to the
+  real-account terminal (263521212) or the VPS.

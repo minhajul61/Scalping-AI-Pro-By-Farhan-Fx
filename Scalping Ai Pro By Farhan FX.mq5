@@ -63,7 +63,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v17"
+#define EA_BUILD_VERSION "v18"
 
 #include <Trade\Trade.mqh>
 
@@ -119,6 +119,7 @@ input bool     InpUseServerSideTP       = true;   // Attach Real TP To Each Leg 
 input group "=== DCA / Martingale ==="
 input double   InpDcaDistancePrice  = 1.2;        // DCA Distance ($)
 input double   InpLotMultiplier     = 2.0;        // Lot Multiplier
+input int      InpMinSecondsBetweenLegs = 5;      // Min Seconds Between Legs (safety net vs a cascade - 0 disables)
 
 input group "=== Filters ==="
 input bool             InpUseAtrSpikeFilter = true;      // Use ATR Spike Filter
@@ -170,6 +171,11 @@ struct SBasket
    double   lastLegEntry;
    double   lastLegLots;
    datetime lastLegTime;
+   long     lastLegTimeMsc;  // POSITION_TIME_MSC - millisecond precision, used to break ties when
+                              // two legs open within the same second (POSITION_TIME alone can't tell
+                              // them apart, which let the wrong leg's price get used as the DCA
+                              // distance reference and let legs cascade far faster than intended -
+                              // real incident, 2026-08-18, see ml/learnings.md)
   };
 
 SBasket g_buyBasket, g_sellBasket;
@@ -450,6 +456,7 @@ void ResetBasket(SBasket &b)
    b.lastLegEntry     = 0;
    b.lastLegLots      = 0;
    b.lastLegTime      = 0;
+   b.lastLegTimeMsc   = 0;
   }
 
 void ScanBasket(ENUM_BASKET_SIDE side, SBasket &b)
@@ -476,18 +483,27 @@ void ScanBasket(ENUM_BASKET_SIDE side, SBasket &b)
       double   entry   = PositionGetDouble(POSITION_PRICE_OPEN);
       double   profit  = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
       datetime t       = (datetime)PositionGetInteger(POSITION_TIME);
+      long     tMsc    = (long)PositionGetInteger(POSITION_TIME_MSC);
 
       b.legCount++;
       b.totalLots  += lots;
       b.floatingPL += profit;
       sumPriceLots += entry * lots;
 
-      if(t >= b.lastLegTime)
+      // Millisecond precision, not just POSITION_TIME (1-second resolution) -
+      // two legs opening within the same second (this EA can do that; a
+      // real incident on 2026-08-18 saw 7 legs open in ~9 seconds) used to
+      // be indistinguishable by POSITION_TIME alone, which could pick the
+      // WRONG leg as "most recent" and let the DCA-distance check compare
+      // against a stale price - letting legs cascade far faster than
+      // InpDcaDistancePrice was ever meant to allow.
+      if(tMsc >= b.lastLegTimeMsc)
         {
-         b.lastLegTime   = t;
-         b.lastLegEntry  = entry;
-         b.lastLegLots   = lots;
-         b.lastLegTicket = ticket;
+         b.lastLegTime    = t;
+         b.lastLegTimeMsc = tMsc;
+         b.lastLegEntry   = entry;
+         b.lastLegLots    = lots;
+         b.lastLegTicket  = ticket;
         }
      }
 
@@ -527,14 +543,26 @@ double GetProfitTarget(const SBasket &b)
 // to be close; ManageBasketExits()'s tick-based floatingPL check (which
 // does include swap) remains the final authority and stays in place
 // unchanged as a backup.
+//
+// Uses SYMBOL_TRADE_TICK_VALUE / SYMBOL_TRADE_TICK_SIZE to convert the $
+// target into a price distance, NOT SYMBOL_TRADE_CONTRACT_SIZE directly -
+// found the hard way (2026-08-16, live on CXM demo) that contract size
+// alone can disagree with how the broker's server actually computes
+// POSITION_PROFIT (cent-account quirks etc.), which put the first version
+// of this TP $100 away from entry instead of ~$1-2. tick_value/tick_size
+// is the same per-price-unit-per-lot profit rate the broker itself uses,
+// so it matches POSITION_PROFIT/floatingPL by construction regardless of
+// contract-size peculiarities on any given symbol/broker.
 double BasketTargetPrice(ENUM_BASKET_SIDE side, const SBasket &b)
   {
    if(b.totalLots <= 0)
       return 0;
-   double contractSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_CONTRACT_SIZE);
-   if(contractSize <= 0)
+   double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
+   double tickSize   = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   if(tickValue <= 0 || tickSize <= 0)
       return 0;
-   double priceDistance = GetProfitTarget(b) / (b.totalLots * contractSize);
+   double profitPerPriceUnitPerLot = tickValue / tickSize;
+   double priceDistance = GetProfitTarget(b) / (b.totalLots * profitPerPriceUnitPerLot);
    return (side == SIDE_BUY) ? (b.weightedAvgEntry + priceDistance) : (b.weightedAvgEntry - priceDistance);
   }
 
@@ -698,6 +726,15 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
 
    if(adverse && b.legCount < InpAbsoluteMaxLegsPerBasket)
      {
+      // Safety net, independent of whatever caused the adverse check to
+      // pass: never add a leg faster than this after the previous one,
+      // full stop. Catches both a genuinely fast/volatile market AND any
+      // future timing edge case in the adverse check itself (one such case
+      // - same-second leg ties - already found and fixed 2026-08-18; this
+      // cooldown means a *similar* bug can't cascade into many legs in a
+      // few seconds again even if it existed).
+      if(InpMinSecondsBetweenLegs > 0 && (TimeCurrent() - b.lastLegTime) < InpMinSecondsBetweenLegs)
+         return;
       if(InpUseAtrSpikeFilter && IsAtrSpiking())
          return; // "news proxy" - don't average into a volatility spike
       if(InpUseTrendFilter && IsAgainstTrend(side))

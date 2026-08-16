@@ -958,3 +958,83 @@ Farhan Fx` Python project's `learnings.md`.)
 
   Compiled clean (0 errors, 0 warnings) as v17. Not yet deployed to the
   real-account terminal (263521212) or the VPS.
+
+- **2026-08-18 (v17 live on demo, two real bugs found within hours - a
+  runaway DCA cascade and a wildly-mispriced TP - both fixed same day
+  as v18):** user put v17 live on two demo accounts (CXM 252424,
+  Exness-MT5Trial14 416045126) and caught both issues directly on the
+  dashboard/trade blotter, not from a backtest:
+
+  **Bug 1 - TP set $100 away from entry instead of ~$1-2.** CXM
+  dashboard showed `TP Price 4499.45` against `Avg Entry 4399.45` -
+  exactly +100.00. `BasketTargetPrice()`'s original formula divided the
+  $ target by `totalLots * SYMBOL_TRADE_CONTRACT_SIZE`. That's the
+  textbook formula, but it silently assumes contract size is the only
+  thing determining how price differences turn into $ profit - on this
+  cent-account symbol it wasn't, and `POSITION_PROFIT` (the broker's
+  own real number, which the existing "Floating" dashboard line reads
+  correctly) disagreed with what contract-size math predicted. Fixed
+  by switching to `SYMBOL_TRADE_TICK_VALUE / SYMBOL_TRADE_TICK_SIZE`
+  instead - the same per-price-unit-per-lot profit rate the broker
+  itself uses internally, so it can't disagree with `POSITION_PROFIT`
+  by construction, regardless of any contract-size quirk on any given
+  symbol/broker. (Same broader lesson as the 2026-08-14 broker-spread
+  entry: don't assume one metadata field fully describes a broker's
+  actual math - use the field that's defined to match, not the field
+  that usually happens to.)
+
+  **Bug 2 - a basket cascaded through a full 7-leg cycle in ~9 seconds**
+  on CXM (entries spanning only ~35 cents total, vs. `InpDcaDistancePrice=1.2`
+  intended per leg) - caught directly from the live trade blotter, and
+  confirmed NOT a misconfiguration (DCA Distance was genuinely 1.2 in
+  the chart's actual inputs, screenshotted and checked). Root cause:
+  `ScanBasket()`'s "which leg is most recent" tie-break used
+  `POSITION_TIME`, which only has **1-second** resolution. When legs
+  open faster than one per second (which this EA can now do more
+  easily than before, since `ApplyBasketTP()` and its own
+  `RefreshBaskets()` calls added more per-tick work around each leg
+  open), two legs sharing the same second made the tie-break pick
+  whichever one the position-iteration order happened to visit last -
+  not necessarily the true most recent one - so the DCA-distance check
+  could end up comparing against a stale/wrong reference price,
+  letting it pass far more easily than intended. Fixed two ways,
+  deliberately redundant:
+  - Switched the tie-break to `POSITION_TIME_MSC` (millisecond
+    precision) - removes the ambiguity at the source.
+  - Added `InpMinSecondsBetweenLegs` (default 5) as an independent
+    safety net inside the DCA-add branch: no new leg within N seconds
+    of the previous one, full stop, regardless of what the distance
+    check computed. This means a *similar* future timing bug (in this
+    check or a new one) can't cascade into many legs in a few seconds
+    again even if it exists - the same "defense in depth, don't rely
+    on one gate being perfect" pattern as the license/news/daily-target
+    checks already use.
+
+  **Verification, both fixes, real Tester run (Model=4, every tick,
+  real ticks, XAUUSDc, 2026.08.01-10):** confirmed no consecutive
+  same-side leg-open pair anywhere in the 9-day run has a gap under 5
+  seconds except one (a fresh bootstrap immediately after a different
+  basket's cycle closed - expected, bootstrap has no cooldown gate)
+  out of 623 pairs checked. DCA gaps between consecutive legs now land
+  around ~$0.95-1.0 (some shortfall vs the nominal $1.2 remains, most
+  likely spread-driven: the trigger check compares bid/ask against the
+  *previous* leg's own entry price, which was itself filled at the
+  opposite side of the spread - not itself a bug, just an inherent
+  property of using transactable bid/ask rather than mid-price, worth
+  knowing about but not urgent to change). TP prices now land close to
+  entry (not $100 away). 652 trades, profit factor 3.35, net +$119.55,
+  no errors.
+
+  **The meta-lesson:** both bugs were found because the user put v17
+  live on real demo charts and actually watched it, not because a
+  backtest caught them - the backtest environment (fixed spread
+  assumptions, no real same-second tick bursts in Model=1) wouldn't
+  have surfaced either one. Going forward, treat "run it live on a
+  demo and watch the dashboard for a while" as a required verification
+  step for any change to entry/exit pricing logic, not optional on top
+  of a Tester pass.
+
+  Compiled clean (0 errors, 0 warnings) as v18. Not yet deployed to the
+  real-account terminal (263521212) or the VPS - the two demo charts
+  (CXM 252424, Exness 416045126) that found these bugs are still on
+  v17 and should be updated to v18 next.

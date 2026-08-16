@@ -41,7 +41,37 @@ in this README describe the removed history for context; they are no longer
 part of the running EA. Full removal rationale in `ml/learnings.md`
 (2026-08-12 entries).
 
-## 2026-08-16 (later same day): server-side TP, build v17 (read this first)
+## 2026-08-18: two real bugs found live on demo, fixed same day, build v18 (read this first)
+
+v17 went live on two demo charts (CXM 252424, Exness 416045126) and the
+user caught both of these directly from the dashboard/trade blotter within
+hours - neither showed up in a backtest:
+
+1. **TP set $100 away from entry instead of ~$1-2.** `BasketTargetPrice()`
+   used `SYMBOL_TRADE_CONTRACT_SIZE` to convert the $ target into a price
+   distance - on this cent-account symbol that metadata field disagreed
+   with how the broker's own `POSITION_PROFIT` actually computes profit.
+   Fixed by switching to `SYMBOL_TRADE_TICK_VALUE / SYMBOL_TRADE_TICK_SIZE`,
+   which matches `POSITION_PROFIT` by construction, not by assumption.
+2. **A basket cascaded through a full 7-leg cycle in ~9 seconds** (CXM),
+   entries spanning only ~35 cents total vs. the intended $1.2/leg -
+   confirmed not a misconfiguration. Root cause: `ScanBasket()`'s
+   "most recent leg" tie-break used `POSITION_TIME` (1-second resolution);
+   legs opening faster than 1/second could tie and pick the wrong
+   reference price. Fixed with `POSITION_TIME_MSC` (millisecond
+   precision) plus a new independent safety net, `InpMinSecondsBetweenLegs`
+   (default 5) - no new leg within N seconds of the previous one, full
+   stop, regardless of what the distance check computes.
+
+Verified via a real Tester run (Model=4, every tick, real ticks): no
+consecutive same-side leg-open pair under 5 seconds apart in a 9-day run
+(1 expected exception - a fresh bootstrap, which has no cooldown gate).
+Full writeup in `ml/learnings.md`'s 2026-08-18 entry, including the
+meta-lesson: both bugs were only found by running live on demo and
+watching it, not from a backtest - now a required step for any pricing-
+logic change, not optional on top of a Tester pass.
+
+## 2026-08-16 (later same day): server-side TP, build v17
 
 Real bug report after running live for a while: baskets logged "TARGET
 HIT" while the real account balance still trended down, worse during

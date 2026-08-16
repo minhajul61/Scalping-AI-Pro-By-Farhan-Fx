@@ -45,7 +45,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v15"
+#define EA_BUILD_VERSION "v16"
 
 #include <Trade\Trade.mqh>
 
@@ -134,6 +134,10 @@ input int      InpDashboardX    = 10;     // Dashboard X Position
 input int      InpDashboardY    = 20;     // Dashboard Y Position
 input bool     InpSetWhiteChartTheme = true; // White Chart Theme
 
+input group "=== Chart Visuals ==="
+input bool     InpShowLegMarkers   = true; // Show DCA Leg Markers On Chart
+input bool     InpShowCloseMarkers = true; // Show Basket-Closed Markers On Chart
+
 CTrade trade;
 
 struct SBasket
@@ -162,6 +166,12 @@ int    g_dayStartDateCode = -1;
 double g_dayStartBalance  = 0.0;
 
 #define DB_PREFIX  "GDSE_DB_"
+#define MK_PREFIX  "GDSE_MK_"
+
+// Names of the most recent basket-closed markers drawn on the chart, oldest
+// first - capped (see DrawCloseMarker) so a long-running EA never leaves
+// hundreds of these accumulating on the chart.
+string g_closeMarkerNames[];
 
 // Switches the chart itself to a white background - the dashboard panel
 // below draws its own dark box on top (fixed OBJPROP_BGCOLOR), so it stays
@@ -272,6 +282,8 @@ int OnInit()
       EventSetTimer(1);
      }
 
+   RestoreLegMarkersOnInit(); // reattach/restart: redraw markers for legs already open
+
    return(INIT_SUCCEEDED);
   }
 
@@ -312,20 +324,23 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
 
    if(sparam == DB_PREFIX + "CloseAllBtn")
      {
-      CloseBasket(SIDE_BUY, "manual close all");
-      CloseBasket(SIDE_SELL, "manual close all");
+      RefreshBaskets();
+      CloseBasket(SIDE_BUY, "manual close all", g_buyBasket.floatingPL);
+      CloseBasket(SIDE_SELL, "manual close all", g_sellBasket.floatingPL);
       ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
       ChartRedraw();
      }
    else if(sparam == DB_PREFIX + "CloseBuyBtn")
      {
-      CloseBasket(SIDE_BUY, "manual close buy basket");
+      RefreshBaskets();
+      CloseBasket(SIDE_BUY, "manual close buy basket", g_buyBasket.floatingPL);
       ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
       ChartRedraw();
      }
    else if(sparam == DB_PREFIX + "CloseSellBtn")
      {
-      CloseBasket(SIDE_SELL, "manual close sell basket");
+      RefreshBaskets();
+      CloseBasket(SIDE_SELL, "manual close sell basket", g_sellBasket.floatingPL);
       ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
       ChartRedraw();
      }
@@ -448,15 +463,16 @@ void ManageBasketExits(ENUM_BASKET_SIDE side)
    double target = GetProfitTarget(b);
    if(b.floatingPL >= target)
      {
-      CloseBasket(side, StringFormat("BASKET TARGET HIT (floatingPL=%.2f >= target=%.2f)", b.floatingPL, target));
+      CloseBasket(side, StringFormat("BASKET TARGET HIT (floatingPL=%.2f >= target=%.2f)", b.floatingPL, target), b.floatingPL);
       return;
      }
   }
 
-void CloseBasket(ENUM_BASKET_SIDE side, string reason)
+void CloseBasket(ENUM_BASKET_SIDE side, string reason, double displayProfit = 0.0)
   {
    long wantType = (side == SIDE_BUY) ? POSITION_TYPE_BUY : POSITION_TYPE_SELL;
    int closedCount = 0;
+   double lastClosePrice = 0;
 
    for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
@@ -472,16 +488,24 @@ void CloseBasket(ENUM_BASKET_SIDE side, string reason)
       if(PositionGetInteger(POSITION_TYPE) != wantType)
          continue;
 
+      lastClosePrice = PositionGetDouble(POSITION_PRICE_CURRENT);
+
       if(trade.PositionClose(ticket))
+        {
          closedCount++;
+         DeleteLegMarker(side, ticket);
+        }
       else
          PrintFormat("GoldDualBasketDCA: failed to close ticket %d (%s): retcode=%d %s",
                      (int)ticket, reason, trade.ResultRetcode(), trade.ResultRetcodeDescription());
      }
 
    if(closedCount > 0)
+     {
       PrintFormat("GoldDualBasketDCA: %s basket closed (%d leg(s)) - %s",
                   (side == SIDE_BUY ? "BUY" : "SELL"), closedCount, reason);
+      DrawCloseMarker(side, lastClosePrice, displayProfit);
+     }
   }
 
 //+------------------------------------------------------------------+
@@ -587,6 +611,108 @@ void OpenLeg(ENUM_BASKET_SIDE side, int legIndexForSizing, double previousLegLot
    if(!ok)
       PrintFormat("GoldDualBasketDCA: %s leg open failed (lot=%.2f): retcode=%d %s",
                   (side == SIDE_BUY ? "BUY" : "SELL"), lots, trade.ResultRetcode(), trade.ResultRetcodeDescription());
+   else
+      DrawLegMarker(side, trade.ResultOrder(), legIndexForSizing + 1, price, lots);
+  }
+
+//+------------------------------------------------------------------+
+//| Chart visuals - cosmetic only, never read by any trading logic.   |
+//| Leg markers are 1:1 with a position ticket and deleted the moment |
+//| that position closes, so they never accumulate; close markers are |
+//| capped at the most recent 20 for the same reason.                 |
+//+------------------------------------------------------------------+
+string LegMarkerName(ENUM_BASKET_SIDE side, ulong posTicket)
+  {
+   return MK_PREFIX + "LEG_" + (side == SIDE_BUY ? "B_" : "S_") + IntegerToString((int)posTicket);
+  }
+
+void DrawLegMarker(ENUM_BASKET_SIDE side, ulong posTicket, int legNumber, double price, double lots)
+  {
+   if(!InpShowLegMarkers || posTicket == 0)
+      return;
+
+   string name = LegMarkerName(side, posTicket);
+   color  clr  = (side == SIDE_BUY) ? C'0,170,220' : C'230,140,0';
+   string text = StringFormat("%s%d %.2f", (side == SIDE_BUY ? "B" : "S"), legNumber, lots);
+
+   ObjectCreate(0, name, OBJ_TEXT, 0, TimeCurrent(), price);
+   ObjectSetString(0, name, OBJPROP_TEXT, text);
+   ObjectSetString(0, name, OBJPROP_FONT, "Consolas");
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 7);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+   ObjectSetInteger(0, name, OBJPROP_ANCHOR, side == SIDE_BUY ? ANCHOR_UPPER : ANCHOR_LOWER);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
+   ObjectSetInteger(0, name, OBJPROP_ZORDER, 40);
+  }
+
+void DeleteLegMarker(ENUM_BASKET_SIDE side, ulong posTicket)
+  {
+   ObjectDelete(0, LegMarkerName(side, posTicket));
+  }
+
+void DrawCloseMarker(ENUM_BASKET_SIDE side, double price, double profit)
+  {
+   if(!InpShowCloseMarkers)
+      return;
+
+   string name = MK_PREFIX + "CLOSE_" + IntegerToString((int)TimeCurrent()) + "_" + (side == SIDE_BUY ? "B" : "S");
+   color  clr  = (profit >= 0) ? clrLime : clrRed;
+   string text = StringFormat("%s +$%.2f", (side == SIDE_BUY ? "BUY closed" : "SELL closed"), profit);
+
+   ObjectCreate(0, name, OBJ_TEXT, 0, TimeCurrent(), price);
+   ObjectSetString(0, name, OBJPROP_TEXT, text);
+   ObjectSetString(0, name, OBJPROP_FONT, "Consolas");
+   ObjectSetInteger(0, name, OBJPROP_FONTSIZE, 8);
+   ObjectSetInteger(0, name, OBJPROP_COLOR, clr);
+   ObjectSetInteger(0, name, OBJPROP_ANCHOR, side == SIDE_BUY ? ANCHOR_UPPER : ANCHOR_LOWER);
+   ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+   ObjectSetInteger(0, name, OBJPROP_BACK, false);
+   ObjectSetInteger(0, name, OBJPROP_ZORDER, 40);
+
+   int sz = ArraySize(g_closeMarkerNames);
+   ArrayResize(g_closeMarkerNames, sz + 1);
+   g_closeMarkerNames[sz] = name;
+   if(ArraySize(g_closeMarkerNames) > 20)
+     {
+      ObjectDelete(0, g_closeMarkerNames[0]);
+      ArrayRemove(g_closeMarkerNames, 0, 1);
+     }
+  }
+
+// Rebuilds leg markers for positions that were already open when the EA
+// (re)attached - chart objects aren't remembered across EA restarts, so
+// without this an existing basket's legs would show no markers until they
+// next close. Parses the leg number back out of OpenLeg()'s own comment
+// format ("FarhanFx-buy-legN" / "FarhanFx-sell-legN"); falls back to "?" if
+// a position's comment doesn't match (e.g. opened manually, not by this EA).
+void RestoreLegMarkersOnInit()
+  {
+   if(!InpShowLegMarkers)
+      return;
+
+   for(int i = 0; i < PositionsTotal(); i++)
+     {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0 || !PositionSelectByTicket(ticket))
+         continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol)
+         continue;
+      if(PositionGetInteger(POSITION_MAGIC) != (long)InpMagicNumber)
+         continue;
+
+      long type = PositionGetInteger(POSITION_TYPE);
+      ENUM_BASKET_SIDE side = (type == POSITION_TYPE_BUY) ? SIDE_BUY : SIDE_SELL;
+      string comment = PositionGetString(POSITION_COMMENT);
+      int legTag = StringFind(comment, "-leg");
+      int legNumber = 1;
+      if(legTag >= 0)
+         legNumber = (int)StringToInteger(StringSubstr(comment, legTag + 4));
+
+      DrawLegMarker(side, ticket, legNumber, PositionGetDouble(POSITION_PRICE_OPEN), PositionGetDouble(POSITION_VOLUME));
+     }
   }
 
 //+------------------------------------------------------------------+
@@ -939,11 +1065,31 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_YSIZE, 505);
       ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'12,12,16');
       ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
-      ObjectSetInteger(0, bg, OBJPROP_COLOR, C'70,70,80');
+      ObjectSetInteger(0, bg, OBJPROP_COLOR, C'120,95,40'); // warm gold-tinted border - brand accent, matches gold/XAUUSD theme
       ObjectSetInteger(0, bg, OBJPROP_BACK, false);
       ObjectSetInteger(0, bg, OBJPROP_SELECTABLE, false);
       ObjectSetInteger(0, bg, OBJPROP_HIDDEN, true);
       ObjectSetInteger(0, bg, OBJPROP_ZORDER, 0);
+     }
+
+   // Thin gold accent strip along the top edge - purely cosmetic branding,
+   // same purpose as the border tint above.
+   string accent = DB_PREFIX + "Accent";
+   if(ObjectFind(0, accent) < 0)
+     {
+      ObjectCreate(0, accent, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, accent, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, accent, OBJPROP_XDISTANCE, InpDashboardX - 10);
+      ObjectSetInteger(0, accent, OBJPROP_YDISTANCE, InpDashboardY - 10);
+      ObjectSetInteger(0, accent, OBJPROP_XSIZE, 280);
+      ObjectSetInteger(0, accent, OBJPROP_YSIZE, 3);
+      ObjectSetInteger(0, accent, OBJPROP_BGCOLOR, C'212,175,55'); // gold
+      ObjectSetInteger(0, accent, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+      ObjectSetInteger(0, accent, OBJPROP_COLOR, C'212,175,55');
+      ObjectSetInteger(0, accent, OBJPROP_BACK, false);
+      ObjectSetInteger(0, accent, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, accent, OBJPROP_HIDDEN, true);
+      ObjectSetInteger(0, accent, OBJPROP_ZORDER, 1);
      }
 
    CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 431, 260, 24, "X  CLOSE ALL", C'120,20,20');
@@ -957,7 +1103,8 @@ void UpdateDashboard()
 
    int x = InpDashboardX, lx = InpDashboardX + 2, y = InpDashboardY, lh = 15, lblW = 12;
 
-   DbLabel("Title", x, y, "SCALPING AI PRO BY FARHAN FX", clrWhite, 9);
+   DbLabel("Title", x, y, "SCALPING AI PRO", clrWhite, 9);
+   DbLabel("TitleBrand", x + 118, y, "FARHAN FX", C'212,175,55', 9); // gold - brand accent
    y += lh;
    DbLabel("Version", lx, y, EA_BUILD_VERSION, clrGray, 7);
    y += lh + 6;

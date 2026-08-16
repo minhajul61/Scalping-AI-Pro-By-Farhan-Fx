@@ -741,3 +741,41 @@ Farhan Fx` Python project's `learnings.md`.)
   holding off on redeploying to the real account until the user has
   seen this explanation, given how the last license system landed
   there.
+
+- **2026-08-16 (same day, follow-up): chart visuals / branding (v16),
+  purely cosmetic, chosen from a shortlist of "make it more special"
+  ideas):** offered four ideas (Telegram alerts, an equity-protection
+  circuit breaker, license tiers/expiry, chart visuals/branding); the
+  user picked chart visuals/branding only - the other three are logged
+  here as ideas not yet built, in case they come up again.
+
+  Added, all toggleable and all cosmetic-only (never read by any
+  trading-logic function, so this cannot change entry/exit/lot-sizing
+  behavior even in principle):
+  - **DCA leg markers** - a small text label ("B1 0.01", "S3 0.04", ...)
+    drawn on the chart at the exact time/price each leg opens, colored
+    by side. Deleted the instant that specific position closes (1:1 by
+    position ticket), so a long-running EA never accumulates them -
+    only currently-open legs ever have a marker.
+  - **Basket-closed markers** - a "BUY closed +$2.10" / red if negative
+    label at the close price when a basket hits target (or is closed
+    manually via the dashboard buttons). Capped at the most recent 20,
+    oldest deleted automatically - same "must never accumulate/slow the
+    chart down" discipline as everything else added post-license-bug.
+  - **Restore-on-restart** - `RestoreLegMarkersOnInit()` rebuilds
+    markers for whatever legs are already open when the EA (re)attaches
+    (parses the leg number back out of `OpenLeg()`'s own trade comment,
+    e.g. `FarhanFx-buy-leg3`), so a restart doesn't leave already-open
+    legs marker-less until they next close.
+  - **Dashboard branding** - thin gold accent strip along the panel's
+    top edge, gold-tinted border (was neutral gray), and the title
+    split into "SCALPING AI PRO" (white) + "FARHAN FX" (gold) instead
+    of one plain white string.
+
+  `InpShowLegMarkers` / `InpShowCloseMarkers` (both default true) turn
+  either off independently if a client finds the chart too busy -
+  important on this EA specifically since DCA legs can fire quite
+  densely at the current $1.2 distance.
+
+  Compiled clean (0 errors, 0 warnings) as v16. Same as v15: not yet
+  deployed to the real-account terminal (263521212) or the VPS.

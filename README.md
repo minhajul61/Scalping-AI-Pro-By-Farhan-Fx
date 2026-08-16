@@ -41,6 +41,24 @@ in this README describe the removed history for context; they are no longer
 part of the running EA. Full removal rationale in `ml/learnings.md`
 (2026-08-12 entries).
 
+## 2026-08-16 (later same day): chart visuals / branding, build v16
+
+Added on top of v15, purely cosmetic (no trading-logic function reads any
+of this, so it cannot change entries/exits/lot sizing):
+- DCA leg markers on the chart (`InpShowLegMarkers`, default true) - a
+  small label at each leg's open time/price, deleted the instant that
+  leg closes, so it never accumulates.
+- Basket-closed markers (`InpShowCloseMarkers`, default true) - a
+  "BUY closed +$2.10" label when a basket hits target, capped at the
+  most recent 20.
+- Dashboard branding - gold accent strip + gold-tinted border + a
+  two-color title ("SCALPING AI PRO" white, "FARHAN FX" gold).
+
+Compiled clean (0 errors, 0 warnings). Full details in `ml/learnings.md`'s
+second 2026-08-16 entry, including three other ideas offered but not
+picked this round (Telegram alerts, equity-protection circuit breaker,
+license tiers/expiry).
+
 ## 2026-08-16: license system rebuilt, build v15 (read this first, supersedes v14 note below)
 
 The offline embedded-key-list idea from 08-13 (see the 08-14 note below)

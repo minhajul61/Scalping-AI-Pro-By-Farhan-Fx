@@ -45,7 +45,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v14"
+#define EA_BUILD_VERSION "v15"
 
 #include <Trade\Trade.mqh>
 
@@ -86,6 +86,9 @@ input long     InpExpectedLogin      = 0;         // Account Login (0 = skip che
 input ENUM_BROKER_PRESET InpBrokerPreset = BROKER_CUSTOM;   // Broker Preset (auto-sets Max Spread)
 input ENUM_ACCOUNT_TYPE  InpAccountType  = ACCOUNT_TYPE_USD; // Account Type (scales Max Spread for cent accounts)
 input int      InpMaxSpreadPoints    = 300;       // Max Spread (points) - used when Broker Preset = Custom
+
+input group "=== License ==="
+input string   InpLicenseKey = ""; // License Key (given individually to each client)
 
 input group "=== Basket & Profit Target ==="
 input double   InpInitialLot            = 0.01;   // Initial Lot Size
@@ -498,6 +501,9 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
    if(DailyTargetHit())
       return; // today's profit target already reached - resumes automatically at the next day rollover
 
+   if(!LicenseOk())
+      return; // invalid/missing key - existing baskets still manage/close normally, only new entries pause; dashboard shows why
+
    if(b.legCount == 0)
      {
       // Don't even start a basket fighting a strong higher-timeframe trend -
@@ -800,6 +806,54 @@ bool DailyTargetHit()
    return((balance - g_dayStartBalance) >= InpDailyProfitTargetUSD);
   }
 
+// Hardcoded list of currently-issued keys - checked locally, no network
+// call at all, so this can never lag/hang the EA and never delays the
+// dashboard. To add/remove a key: edit this array, recompile, redeploy
+// to that specific client - give each client their own key individually
+// when they join, never share one key across multiple people.
+//
+// IMPORTANT (2026-08-14): an earlier version of this EA's license check
+// ran before the dashboard was created and returned INIT_FAILED on a
+// missing/wrong key - the chart then showed a fully blank panel with no
+// explanation, which looked like the EA had frozen. Fixed here: OnInit()
+// no longer refuses to run over the license at all - the dashboard
+// always renders and clearly shows "License: OK" or "License: INVALID",
+// and only NEW trades (bootstrap/DCA) pause when invalid; nothing here
+// can add latency since it is a plain local array loop, no WebRequest.
+string g_authorizedLicenseKeys[] =
+  {
+   "SAIP-EBYZ-G5D5-Q6NZ-7SJG",
+   "SAIP-FNWO-AK0W-AX9T-PTQC",
+   "SAIP-UBP7-6SNT-V3CO-I2FR",
+   "SAIP-JFK8-HYB8-E00Z-AZPH",
+   "SAIP-UIV9-N7D7-2AY2-J79B",
+   "SAIP-5BKE-HR6W-AUUP-PH25",
+   "SAIP-GBBO-OFM7-D70Y-XPYL",
+   "SAIP-345R-7HU9-NNEP-KKYL",
+   "SAIP-NZL1-VMLC-476Z-KLOW",
+   "SAIP-TK1T-SJ0W-NVTG-9QV8",
+   "SAIP-8H34-JVTR-KJQV-QLZK",
+   "SAIP-VGI3-524U-I9AM-WEIT",
+   "SAIP-FNR2-SUOF-8K2T-U8FA",
+   "SAIP-GW3I-N0RS-QF0F-BFBD",
+   "SAIP-MT8B-OD0J-MEEU-Z4DJ",
+   "SAIP-PY5O-46IZ-WGTF-Z5TW",
+   "SAIP-SU4V-6UU7-BW82-RYHC",
+   "SAIP-1ELE-GXWQ-X681-A8CF",
+   "SAIP-6QS2-EHAO-RZ01-5TD2",
+   "SAIP-115E-ODQJ-MFP0-MT3X"
+  };
+
+bool LicenseOk()
+  {
+   if(InpLicenseKey == "")
+      return false;
+   for(int i = 0; i < ArraySize(g_authorizedLicenseKeys); i++)
+      if(InpLicenseKey == g_authorizedLicenseKeys[i])
+         return true;
+   return false;
+  }
+
 //+------------------------------------------------------------------+
 //| Dashboard                                                          |
 //+------------------------------------------------------------------+
@@ -882,7 +936,7 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, InpDashboardX - 10);
       ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, InpDashboardY - 10);
       ObjectSetInteger(0, bg, OBJPROP_XSIZE, 280);
-      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 490);
+      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 505);
       ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'12,12,16');
       ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, bg, OBJPROP_COLOR, C'70,70,80');
@@ -892,9 +946,9 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_ZORDER, 0);
      }
 
-   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 416, 260, 24, "X  CLOSE ALL", C'120,20,20');
-   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 444, 126, 22, "Close BUY", C'20,80,20');
-   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 444, 126, 22, "Close SELL", C'20,80,20');
+   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 431, 260, 24, "X  CLOSE ALL", C'120,20,20');
+   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 459, 126, 22, "Close BUY", C'20,80,20');
+   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 459, 126, 22, "Close SELL", C'20,80,20');
   }
 
 void UpdateDashboard()
@@ -997,6 +1051,10 @@ void UpdateDashboard()
    y += lh;
    bool hedgingOk = ((ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE) == ACCOUNT_MARGIN_MODE_RETAIL_HEDGING);
    DbLabel("Hedging", lx, y, PadRight("Hedging", lblW) + (hedgingOk ? "OK" : "FAIL"), hedgingOk ? clrLime : clrRed, 8);
+   y += lh;
+   bool licenseOk = LicenseOk();
+   DbLabel("License", lx, y, PadRight("License", lblW) + (licenseOk ? "OK" : "INVALID (no new trades)"),
+           licenseOk ? clrLime : clrRed, 8);
    y += lh + 10;
 
    ChartRedraw();

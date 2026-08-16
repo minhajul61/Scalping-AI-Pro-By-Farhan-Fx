@@ -41,7 +41,34 @@ in this README describe the removed history for context; they are no longer
 part of the running EA. Full removal rationale in `ml/learnings.md`
 (2026-08-12 entries).
 
-## 2026-08-14: current final state, build v14 (read this first, supersedes the note above)
+## 2026-08-16: license system rebuilt, build v15 (read this first, supersedes v14 note below)
+
+The offline embedded-key-list idea from 08-13 (see the 08-14 note below)
+was right, but the *first* implementation gated it inside `OnInit()`
+with `return(INIT_FAILED)` on a missing/wrong key. On the real account
+(263521212) that produced exactly the "dashboard stays black" symptom
+the user reported - `OnInit()` failing means `CreateDashboard()` never
+runs, so there's no panel at all, which looks like a freeze/lag rather
+than a license refusal. That version was fully reverted to v9 at the
+time (`git checkout 4b11201`).
+
+v15 rebuilds the same offline embedded-key idea, but as a **non-blocking
+runtime gate** instead of an `OnInit()` refusal:
+- `g_authorizedLicenseKeys[]` - hardcoded in the .mq5/.ex5, no network
+  call at all (same 20 keys from 08-13's admin panel batch). Give each
+  client their own key individually when they join under your ID;
+  editing this array + recompiling is how a key is added or revoked.
+- `LicenseOk()` is checked inside `ManageBasketEntries()`, in the exact
+  same spot/pattern as the existing `IsNewsBlackout()`/`DailyTargetHit()`
+  checks - an invalid key just skips new bootstrap/DCA entries for that
+  tick. `OnInit()` and the dashboard always run regardless.
+- Dashboard shows a `License: OK` / `License: INVALID (no new trades)`
+  line at all times, so the state is never silent or ambiguous.
+
+Full root-cause writeup is in `ml/learnings.md`'s 2026-08-16 entry.
+Not yet redeployed to the real-account terminal (263521212) or the VPS.
+
+## 2026-08-14: current final state, build v14 (superseded by the v15 note above for licensing; still accurate for everything else)
 
 The 2026-08-12 simplification above is still accurate for the *shape* of
 the logic (no self-tuner/regime-detector/ML, no hidden auto-adjusting
@@ -81,12 +108,12 @@ What v14 actually has that the EA didn't in the 08-12 baseline:
   see `ml/learnings.md`).
 - **A license-key system was built, tested, then explicitly reverted** at
   the user's request (no online server existed yet that a VPS could
-  reach) - the `.ex5` has no license gate right now. The code for both a
-  network-based check (`E:\Farhan Scalping Website\server\`, a separate
-  FastAPI admin panel/license server project) and an offline embedded-
-  key-list check were built and verified working, then removed from this
-  EA's active build. If licensing comes back, read `ml/learnings.md`'s
-  2026-08-13 entries first rather than rebuilding from scratch.
+  reach, and the first offline-key version caused the dashboard-black
+  bug diagnosed and fixed in the v15 note above) - as of v14 the `.ex5`
+  has no license gate. As of **v15**, the offline embedded-key-list
+  check is back, rebuilt as a non-blocking runtime gate this time - see
+  the v15 note at the top of this file and `ml/learnings.md`'s
+  2026-08-16 entry.
 - An **MT4 port** (`Scalping Ai Pro By Farhan FX.mq4`) exists in this repo
   as source only - written, matches this EA's logic, but **never
   compiled or tested** (no MT4 terminal available in this environment).

@@ -685,3 +685,59 @@ Farhan Fx` Python project's `learnings.md`.)
   stayed connected. If this broker needs scripted testing again,
   budget for either a much longer sync wait or plan on manual login
   for this specific server.
+
+- **2026-08-16 (license system rebuilt after a real bug diagnosis - the
+  earlier version's "black dashboard" was OnInit refusing before the
+  dashboard existed, not a performance/lag issue):** on the real account
+  (263521212), the user reported the dashboard staying blank/black and
+  "lag" with the previous (network-checked, then offline-embedded-list)
+  license system, and gave an explicit rollback instruction: go back to
+  v9, remove everything above it. That rollback was executed verbatim
+  (`git checkout 4b11201`) with no forward debugging attempted at the
+  time - correct call given how blunt/urgent the feedback was.
+
+  Days later, asked to build a license system that "runs smoothly, no
+  lag at all" and only hands out keys to people who join under the
+  user's own ID (manual, individually-issued keys - not self-serve).
+  Before writing any code, actually diagnosed the old bug instead of
+  guessing: the old design checked the license key inside `OnInit()`
+  and returned `INIT_FAILED` on a missing/wrong key. In MQL5, an
+  `OnInit()` that returns `INIT_FAILED` never runs the rest of the
+  EA's setup - including `CreateDashboard()` - so the chart panel
+  literally never gets created. That is exactly what "dashboard stays
+  black" looks like from the outside, and it explains the report
+  independent of any real performance problem (there wasn't one - a
+  local array/string comparison and a WebRequest to localhost are both
+  fast; the failure mode was structural, not a speed issue).
+
+  Rebuilt it to never touch `OnInit()`'s return path at all:
+  - `g_authorizedLicenseKeys[]` - the same 20 previously-issued keys,
+    hardcoded directly in the .mq5/.ex5 (offline, zero network calls,
+    so there is nothing that can hang or add latency - this was also
+    already the right call from the VPS-can't-reach-localhost problem
+    found earlier, now doubly justified by the dashboard bug).
+  - `LicenseOk()` - a plain loop, `true`/`false`, no side effects.
+  - Gated only inside `ManageBasketEntries()`, in the same non-blocking
+    place as the existing `IsNewsBlackout()`/`DailyTargetHit()` checks:
+    an invalid key skips new bootstrap/DCA entries for that tick, but
+    existing open baskets keep managing/closing normally, and `OnInit()`
+    and `CreateDashboard()` always run regardless of license validity.
+  - New "License: OK / INVALID (no new trades)" dashboard line (green/
+    red) so the state is always visible, never silent.
+
+  **The lesson:** a license check (or any gate) that can return
+  `INIT_FAILED`/refuse startup is fundamentally different from one that
+  gates behavior at runtime - the first can prevent the UI itself from
+  ever existing, which looks indistinguishable from "frozen" or
+  "laggy" to a non-technical user watching the chart. Any future gate
+  (license, account checks, filters) on this EA should default to the
+  `IsNewsBlackout()`/`DailyTargetHit()` pattern - non-blocking, checked
+  per-tick inside the entry logic, never inside `OnInit()`'s refusal
+  path - unless there's a genuine reason the EA cannot run at all (like
+  the hedging-mode check, which really can't be worked around).
+
+  Compiled clean (0 errors, 0 warnings) as v15. Not yet deployed to the
+  live real-account terminal (263521212) or the VPS - deliberately
+  holding off on redeploying to the real account until the user has
+  seen this explanation, given how the last license system landed
+  there.

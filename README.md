@@ -51,13 +51,19 @@ of this, so it cannot change entries/exits/lot sizing):
 - Basket-closed markers (`InpShowCloseMarkers`, default true) - a
   "BUY closed +$2.10" label when a basket hits target, capped at the
   most recent 20.
-- Dashboard branding - gold accent strip + gold-tinted border + a
-  two-color title ("SCALPING AI PRO" white, "FARHAN FX" gold).
+- Dashboard branding - gold accent strip + gold-tinted border, the real
+  Farhan FX logo mark embedded as a small icon (`resources/FarhanFX_Icon.bmp`,
+  compiled into the .ex5 via `#resource` - no separate file needed on a
+  client machine), and the title on its own two lines ("SCALPING AI PRO"
+  white, "FARHAN FX" gold - an initial same-line layout overlapped on
+  real hardware, fixed by stacking instead of guessing pixel widths).
+- `InpSetWhiteChartTheme` default flipped to `false` (dark) to match the
+  logo's black background.
 
 Compiled clean (0 errors, 0 warnings). Full details in `ml/learnings.md`'s
-second 2026-08-16 entry, including three other ideas offered but not
-picked this round (Telegram alerts, equity-protection circuit breaker,
-license tiers/expiry).
+2026-08-16 entries, including three other ideas offered but not picked
+this round (Telegram alerts, equity-protection circuit breaker, license
+tiers/expiry).
 
 ## 2026-08-16: license system rebuilt, build v15 (read this first, supersedes v14 note below)
 

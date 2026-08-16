@@ -36,6 +36,13 @@
 #property strict
 #property description "Dual-basket (buy+sell) grid/DCA EA for XAUUSD M1. Requires a hedging-mode account."
 
+// Brand icon (Farhan FX mark), compiled directly into the .ex5 so a client
+// deployment is always just the one file - no separate image to lose or
+// forget to copy. Must exist at <data_folder>\MQL5\Images\FarhanFX_Icon.bmp
+// on whichever machine compiles this (a copy lives in this repo's
+// resources\ folder - copy it there before recompiling on a new machine).
+#resource "\\Images\\FarhanFX_Icon.bmp"
+
 // Bump this on every change that gets deployed anywhere (local or VPS) so the
 // dashboard can show at a glance whether a given chart is running the latest
 // version - this exact confusion (VPS silently running stale code) came up
@@ -132,7 +139,7 @@ input group "=== Dashboard ==="
 input bool     InpShowDashboard = true;   // Show Dashboard
 input int      InpDashboardX    = 10;     // Dashboard X Position
 input int      InpDashboardY    = 20;     // Dashboard Y Position
-input bool     InpSetWhiteChartTheme = true; // White Chart Theme
+input bool     InpSetWhiteChartTheme = false; // White Chart Theme (off = dark, matches the Farhan FX brand's black logo background)
 
 input group "=== Chart Visuals ==="
 input bool     InpShowLegMarkers   = true; // Show DCA Leg Markers On Chart
@@ -1062,7 +1069,7 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, InpDashboardX - 10);
       ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, InpDashboardY - 10);
       ObjectSetInteger(0, bg, OBJPROP_XSIZE, 280);
-      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 505);
+      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 535);
       ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'12,12,16');
       ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, bg, OBJPROP_COLOR, C'120,95,40'); // warm gold-tinted border - brand accent, matches gold/XAUUSD theme
@@ -1092,9 +1099,23 @@ void CreateDashboard()
       ObjectSetInteger(0, accent, OBJPROP_ZORDER, 1);
      }
 
-   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 431, 260, 24, "X  CLOSE ALL", C'120,20,20');
-   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 459, 126, 22, "Close BUY", C'20,80,20');
-   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 459, 126, 22, "Close SELL", C'20,80,20');
+   string icon = DB_PREFIX + "Icon";
+   if(ObjectFind(0, icon) < 0)
+     {
+      ObjectCreate(0, icon, OBJ_BITMAP_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, icon, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetInteger(0, icon, OBJPROP_XDISTANCE, InpDashboardX - 6);
+      ObjectSetInteger(0, icon, OBJPROP_YDISTANCE, InpDashboardY - 6);
+      ObjectSetString(0, icon, OBJPROP_BMPFILE, "::Images\\FarhanFX_Icon.bmp");
+      ObjectSetInteger(0, icon, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, icon, OBJPROP_HIDDEN, true);
+      ObjectSetInteger(0, icon, OBJPROP_BACK, false);
+      ObjectSetInteger(0, icon, OBJPROP_ZORDER, 2);
+     }
+
+   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 461, 260, 24, "X  CLOSE ALL", C'120,20,20');
+   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 489, 126, 22, "Close BUY", C'20,80,20');
+   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 489, 126, 22, "Close SELL", C'20,80,20');
   }
 
 void UpdateDashboard()
@@ -1103,9 +1124,16 @@ void UpdateDashboard()
 
    int x = InpDashboardX, lx = InpDashboardX + 2, y = InpDashboardY, lh = 15, lblW = 12;
 
-   DbLabel("Title", x, y, "SCALPING AI PRO", clrWhite, 9);
-   DbLabel("TitleBrand", x + 118, y, "FARHAN FX", C'212,175,55', 9); // gold - brand accent
+   // Icon (created once in CreateDashboard()) sits at (x-6, y-6), 64x47px -
+   // text starts to its right, then drops back to the full-width left
+   // margin once the icon's height has cleared.
+   DbLabel("Title", x + 70, y, "SCALPING AI PRO", clrWhite, 9);
    y += lh;
+   // Own line, not packed onto the title line - a fixed pixel offset for a
+   // second same-line label overlapped the first on real hardware (font
+   // rendering/DPI varies), so this stacks instead of guessing a width.
+   DbLabel("TitleBrand", x + 70, y, "FARHAN FX", C'212,175,55', 8); // gold - brand accent
+   y += lh + 15; // extra clearance so later lines start below the icon, not beside it
    DbLabel("Version", lx, y, EA_BUILD_VERSION, clrGray, 7);
    y += lh + 6;
 

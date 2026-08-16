@@ -779,3 +779,40 @@ Farhan Fx` Python project's `learnings.md`.)
 
   Compiled clean (0 errors, 0 warnings) as v16. Same as v15: not yet
   deployed to the real-account terminal (263521212) or the VPS.
+
+- **2026-08-16 (same day, second follow-up): first title layout had a
+  real overlap bug; real logo image embedded; chart theme flipped to
+  match it):** the two-color title from the entry above ("SCALPING AI
+  PRO" + "FARHAN FX" on the same line, second label offset by a fixed
+  118px) overlapped on the user's actual screen ("PROHAN FX", unreadable)
+  - Consolas glyph width at size 9 rendered wider on real hardware than
+  assumed. Fixed by stacking the two labels onto separate lines instead
+  of guessing a horizontal pixel offset - a fixed-width assumption for
+  a variable-rendering font was the bug, so the fix removes the
+  assumption rather than re-tuning the same fragile number.
+
+  User then supplied a real logo file (`WhatsApp Image 2026-08-15 at
+  9.23.14 PM.jpeg` - the "FARHAN FX" 3D mark: silver F, red X, green/red
+  candlesticks, silver arrow, black background, "PLAN | EXECUTE |
+  PROFIT" tagline). Cropped just the icon mark (no wordmark/tagline -
+  those stay as crisp rendered text instead of blurry small bitmap
+  text), resized to 64x47px, saved as a 24-bit BMP, and embedded via
+  `#resource "\\Images\\FarhanFX_Icon.bmp"` + `OBJ_BITMAP_LABEL` reading
+  `"::Images\\FarhanFX_Icon.bmp"` - compiled directly into the .ex5, so
+  a client deployment never needs a separate image file that could go
+  missing (same "avoid anything that can silently fail and look broken"
+  discipline as the license-system fix above). A copy of the source BMP
+  lives in this repo at `resources/FarhanFX_Icon.bmp` - required to
+  exist under that machine's `MQL5\Images\` at compile time on any
+  fresh machine, or the compile will fail on the `#resource` line.
+
+  Also flipped `InpSetWhiteChartTheme` default from `true` to `false`
+  (dark) - the logo's background is solid black, so a white chart
+  canvas around a black-background icon would look like a mismatched
+  box; dark chart + dark dashboard panel + black-background icon all
+  read as one cohesive look instead.
+
+  Compiled clean (0 errors, 0 warnings), still v16 (same functional
+  version, layout/asset fix only - no version bump for a visual
+  correction to something not yet deployed anywhere). Not yet deployed
+  to the real-account terminal (263521212) or the VPS.

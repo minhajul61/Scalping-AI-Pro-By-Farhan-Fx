@@ -59,6 +59,10 @@ of this, so it cannot change entries/exits/lot sizing):
   real hardware, fixed by stacking instead of guessing pixel widths).
 - `InpSetWhiteChartTheme` default flipped to `false` (dark) to match the
   logo's black background.
+- A faded Farhan FX watermark (`resources/FarhanFX_Watermark.bmp`,
+  420x310) centered on the main chart itself, behind the candles
+  (`InpShowChartWatermark`, default true) - separate from the small
+  dashboard-corner icon above.
 
 Compiled clean (0 errors, 0 warnings). Full details in `ml/learnings.md`'s
 2026-08-16 entries, including three other ideas offered but not picked

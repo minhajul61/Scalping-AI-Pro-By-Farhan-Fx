@@ -816,3 +816,34 @@ Farhan Fx` Python project's `learnings.md`.)
   version, layout/asset fix only - no version bump for a visual
   correction to something not yet deployed anywhere). Not yet deployed
   to the real-account terminal (263521212) or the VPS.
+
+- **2026-08-16 (same day, third follow-up): main-chart watermark added**
+  - the icon in the dashboard corner wasn't what the user meant by
+  "watermark"; they specifically wanted the logo visible on the main
+  chart itself, behind the candles.
+
+  Considered real alpha transparency first (32-bit ARGB BMP) but MT5's
+  support for it is inconsistent/undocumented well enough to trust
+  blind - a wrong guess here would render as a solid opaque box hiding
+  the candles, a much worse failure than "no watermark at all". Used a
+  reliable alternative instead: pre-scaled the logo's own RGB values
+  down to ~22% against a **pure black** background in software (so the
+  saved BMP is fully opaque, no transparency mechanism depended on at
+  all) - on a black chart this reads as a faint watermark because the
+  math is identical to real alpha blending against black; it only
+  breaks (shows as a faint dark rectangle instead of blending
+  perfectly) if the chart background isn't pure black, which is an
+  accepted, minor trade-off for guaranteed-correct rendering everywhere.
+
+  `PositionWatermark()` centers a 420x310 `OBJ_BITMAP_LABEL`
+  (`FarhanFX_Watermark.bmp`, embedded via `#resource` same as the
+  dashboard icon) on the visible chart window, `OBJPROP_BACK=true` so
+  candles draw on top of it. Re-centers on `CHARTEVENT_CHART_CHANGE`
+  (window resize) via `OnChartEvent()`, not on every tick - a
+  screen-space label object doesn't need repositioning for price
+  scroll/zoom, only an actual window-size change. `InpShowChartWatermark`
+  (default true) turns it off entirely (deletes the object) if a client
+  doesn't want it.
+
+  Compiled clean (0 errors, 0 warnings), still v16. Not yet deployed to
+  the real-account terminal (263521212) or the VPS.

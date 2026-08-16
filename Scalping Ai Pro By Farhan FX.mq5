@@ -43,6 +43,17 @@
 // resources\ folder - copy it there before recompiling on a new machine).
 #resource "\\Images\\FarhanFX_Icon.bmp"
 
+// Same mark, larger, and pre-faded (RGB scaled to ~22% against pure black -
+// not real alpha transparency, since MT5's 32-bit-BMP alpha support is
+// inconsistent; this is a plain opaque BMP that just reads as a faint
+// watermark against the chart's black background) - shown centered on the
+// main chart, behind the candles. If the chart background is ever not
+// pure black, this will show as a very faint dark rectangle instead of
+// being fully invisible - acceptable trade-off for guaranteed rendering.
+#resource "\\Images\\FarhanFX_Watermark.bmp"
+#define WATERMARK_W 420
+#define WATERMARK_H 310
+
 // Bump this on every change that gets deployed anywhere (local or VPS) so the
 // dashboard can show at a glance whether a given chart is running the latest
 // version - this exact confusion (VPS silently running stale code) came up
@@ -142,8 +153,9 @@ input int      InpDashboardY    = 20;     // Dashboard Y Position
 input bool     InpSetWhiteChartTheme = false; // White Chart Theme (off = dark, matches the Farhan FX brand's black logo background)
 
 input group "=== Chart Visuals ==="
-input bool     InpShowLegMarkers   = true; // Show DCA Leg Markers On Chart
-input bool     InpShowCloseMarkers = true; // Show Basket-Closed Markers On Chart
+input bool     InpShowLegMarkers    = true; // Show DCA Leg Markers On Chart
+input bool     InpShowCloseMarkers  = true; // Show Basket-Closed Markers On Chart
+input bool     InpShowChartWatermark = true; // Show Farhan FX Watermark On Main Chart
 
 CTrade trade;
 
@@ -290,6 +302,7 @@ int OnInit()
      }
 
    RestoreLegMarkersOnInit(); // reattach/restart: redraw markers for legs already open
+   PositionWatermark();
 
    return(INIT_SUCCEEDED);
   }
@@ -326,6 +339,12 @@ void OnTimer()
 //+------------------------------------------------------------------+
 void OnChartEvent(const int id, const long &lparam, const double &dparam, const string &sparam)
   {
+   if(id == CHARTEVENT_CHART_CHANGE)
+     {
+      PositionWatermark(); // window resized - keep the watermark centered
+      return;
+     }
+
    if(id != CHARTEVENT_OBJECT_CLICK)
       return;
 
@@ -720,6 +739,38 @@ void RestoreLegMarkersOnInit()
 
       DrawLegMarker(side, ticket, legNumber, PositionGetDouble(POSITION_PRICE_OPEN), PositionGetDouble(POSITION_VOLUME));
      }
+  }
+
+// Centers the watermark on the currently-visible chart window. Chart-window
+// (label-anchored) objects don't move on their own when the window is
+// resized, so this is re-called from OnChartEvent() on CHARTEVENT_CHART_CHANGE
+// as well as once from OnInit() - it does not need to run every tick.
+void PositionWatermark()
+  {
+   string name = MK_PREFIX + "Watermark";
+   if(!InpShowChartWatermark)
+     {
+      ObjectDelete(0, name);
+      return;
+     }
+
+   int chartW = (int)ChartGetInteger(0, CHART_WIDTH_IN_PIXELS);
+   int chartH = (int)ChartGetInteger(0, CHART_HEIGHT_IN_PIXELS);
+   int wx = MathMax(0, (chartW - WATERMARK_W) / 2);
+   int wy = MathMax(0, (chartH - WATERMARK_H) / 2);
+
+   if(ObjectFind(0, name) < 0)
+     {
+      ObjectCreate(0, name, OBJ_BITMAP_LABEL, 0, 0, 0);
+      ObjectSetInteger(0, name, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+      ObjectSetString(0, name, OBJPROP_BMPFILE, "::Images\\FarhanFX_Watermark.bmp");
+      ObjectSetInteger(0, name, OBJPROP_SELECTABLE, false);
+      ObjectSetInteger(0, name, OBJPROP_HIDDEN, true);
+      ObjectSetInteger(0, name, OBJPROP_BACK, true); // behind candles, in front of the plain chart background
+      ObjectSetInteger(0, name, OBJPROP_ZORDER, -100);
+     }
+   ObjectSetInteger(0, name, OBJPROP_XDISTANCE, wx);
+   ObjectSetInteger(0, name, OBJPROP_YDISTANCE, wy);
   }
 
 //+------------------------------------------------------------------+

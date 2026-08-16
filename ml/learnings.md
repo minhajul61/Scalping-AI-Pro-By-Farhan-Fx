@@ -1038,3 +1038,38 @@ Farhan Fx` Python project's `learnings.md`.)
   real-account terminal (263521212) or the VPS - the two demo charts
   (CXM 252424, Exness 416045126) that found these bugs are still on
   v17 and should be updated to v18 next.
+
+- **2026-08-18 (same day, follow-up - v18's cascade fix was NOT
+  sufficient, caught minutes after deploying to the CXM demo chart;
+  investigation still open, being honest about that rather than
+  claiming it's fixed again without proof):** user updated the CXM
+  chart to v18 and watched a SELL basket cascade through a full 7-leg
+  cycle again - this time gaps were consistently 5-7 seconds apart
+  (the `InpMinSecondsBetweenLegs` cooldown IS working - no gap was
+  ever under 5s), but the PRICE moved only ~10-15 cents between legs,
+  nowhere near `InpDcaDistancePrice=1.2` - and the chart's actual Inputs
+  dialog was screenshotted and confirmed DCA Distance really was 1.2,
+  ruling out misconfiguration again.
+
+  This means the millisecond-tie-break fix from earlier today was NOT
+  the (or not the only) cause - it fixed a real, legitimate edge case,
+  but something else is independently letting the price-distance check
+  pass far too easily, and only in live/demo execution, not in the
+  Tester: a diagnostic build (temporary `PrintFormat` logging the exact
+  bid/ask/lastLegEntry/legCount behind every `adverse=true` evaluation)
+  was run through the same 9-day Tester window that verified v18 - the
+  logged numbers there were all internally consistent (e.g.
+  `ask=4074.242` vs `lastLegEntry+1.2=4074.240` - correctly ~1.2 apart,
+  genuinely triggered by real price movement). The Tester cannot
+  reproduce this bug at all, which means it's something specific to
+  live/demo execution - real-time tick delivery, live account state
+  timing, or something else not yet identified.
+
+  Status: **not resolved.** The same diagnostic-logging build has been
+  handed back for the user to run live on the CXM chart again; next
+  step is reading the actual `DCA-DIAG` lines from the Experts/Journal
+  tab during a real live cascade, since that's the one environment
+  where this reproduces. No further claims of "this fixes it" until
+  real live log data is in hand - this project already got burned once
+  today by treating a Tester pass as sufficient proof for something
+  that turned out to be a live-only bug.

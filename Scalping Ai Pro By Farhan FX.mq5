@@ -724,6 +724,16 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
    else
       adverse = (ask >= b.lastLegEntry + InpDcaDistancePrice);
 
+   // Temporary diagnostic (2026-08-18) - a live demo cascade wasn't explained
+   // by the millisecond-tie-break fix alone (gaps were >= the cooldown, but
+   // still far under InpDcaDistancePrice), so log the exact numbers behind
+   // every DCA trigger until the real cause is confirmed from real data
+   // instead of guessed at again.
+   if(adverse)
+      PrintFormat("GoldDualBasketDCA: DCA-DIAG %s adverse=true bid=%.3f ask=%.3f lastLegEntry=%.3f dcaDistanceInput=%.3f legCount=%d lastLegTime=%s",
+                  (side == SIDE_BUY ? "BUY" : "SELL"), bid, ask, b.lastLegEntry, InpDcaDistancePrice, b.legCount,
+                  TimeToString(b.lastLegTime, TIME_SECONDS));
+
    if(adverse && b.legCount < InpAbsoluteMaxLegsPerBasket)
      {
       // Safety net, independent of whatever caused the adverse check to

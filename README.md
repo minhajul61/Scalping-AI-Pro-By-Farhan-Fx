@@ -41,6 +41,62 @@ in this README describe the removed history for context; they are no longer
 part of the running EA. Full removal rationale in `ml/learnings.md`
 (2026-08-12 entries).
 
+## 2026-08-14: current final state, build v14 (read this first, supersedes the note above)
+
+The 2026-08-12 simplification above is still accurate for the *shape* of
+the logic (no self-tuner/regime-detector/ML, no hidden auto-adjusting
+behavior), but a full day of further work on 2026-08-13/14 added real
+features on top and changed several defaults. Version numbering also
+changed from date-based build strings to simple `v1`, `v2`, ... shown on
+the dashboard - **check the dashboard's version line against the latest
+entry in `ml/learnings.md` before trusting a running chart is current.**
+
+What v14 actually has that the EA didn't in the 08-12 baseline:
+- **News Filter** (`=== News Filter ===`) - MT5's built-in economic
+  calendar, live/demo only (confirmed non-functional inside the Strategy
+  Tester - a platform limitation, not a bug). Plus a manual date/time
+  blackout window, independent of the calendar, usable in the Tester.
+- **Daily Profit Target** (`=== Daily Profit Target ===`) - stops new
+  trades for the rest of the day once today's *realized* profit hits a
+  threshold; resumes automatically at the next day rollover. Off by
+  default.
+- **Multi-timeframe trend confirmation** (`InpUseMultiTFTrend`) - optional
+  stricter trend filter requiring H1+H4+D1 to agree, instead of just H1.
+  Off by default in the current client-distribution defaults.
+- **Broker Preset + Account Type** (`InpBrokerPreset` / `InpAccountType`) -
+  auto-sets `Max Spread (points)` correctly per broker, because the same
+  real $ spread shows up as a very different raw points number depending
+  on the broker's symbol digit/point convention (discovered the hard way:
+  Exness's cent account needed 5000, not the 300 that's fine on its
+  standard account). Verified with real accounts: Exness (300/5000
+  standard/cent), CXM Direct (300 both), Vantage (300 both, cent
+  confirmed - standard assumed by the same pattern, not independently
+  tested). `Custom` uses `Max Spread (points)` directly for anything not
+  in the list.
+- Current client-distribution defaults: `InpMaxLegsPerBasket=7`,
+  `InpInitialLot=0.01`, `InpExpectedLogin=0` (skip check - each
+  deployment sets its own account number), `InpUseMultiTFTrend=false`,
+  `InpDcaDistancePrice=1.2` (tightened from the original $3.00/$2.00
+  after a real backtest sweep found it reduced losses across the board -
+  see `ml/learnings.md`).
+- **A license-key system was built, tested, then explicitly reverted** at
+  the user's request (no online server existed yet that a VPS could
+  reach) - the `.ex5` has no license gate right now. The code for both a
+  network-based check (`E:\Farhan Scalping Website\server\`, a separate
+  FastAPI admin panel/license server project) and an offline embedded-
+  key-list check were built and verified working, then removed from this
+  EA's active build. If licensing comes back, read `ml/learnings.md`'s
+  2026-08-13 entries first rather than rebuilding from scratch.
+- An **MT4 port** (`Scalping Ai Pro By Farhan FX.mq4`) exists in this repo
+  as source only - written, matches this EA's logic, but **never
+  compiled or tested** (no MT4 terminal available in this environment).
+  Treat it as unverified until someone with a real MT4 terminal compiles
+  and smoke-tests it.
+
+Full day-by-day history of every change, every real bug found, and every
+backtest result behind these defaults is in `ml/learnings.md` - that file
+is the authoritative record, this README is a summary.
+
 ## Core logic
 
 - Bootstrap: if a basket is empty, open one `InpInitialLot` leg.

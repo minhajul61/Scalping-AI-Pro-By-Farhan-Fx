@@ -212,6 +212,30 @@ void ApplyWhiteChartTheme()
    ChartRedraw();
   }
 
+// Forces a pure-black chart background (not just "whatever this broker's
+// default template happens to be", which turned out NOT to be pure black -
+// it was a lighter charcoal/navy, which made the watermark bitmap below
+// show up as an obviously visible dark box instead of blending in). The
+// watermark's own pixels are pre-scaled against pure black in software
+// (see FarhanFX_Watermark.bmp / PositionWatermark()), so this only blends
+// correctly if the actual chart background really is (0,0,0).
+void ApplyBlackChartTheme()
+  {
+   ChartSetInteger(0, CHART_COLOR_BACKGROUND, clrBlack);
+   ChartSetInteger(0, CHART_COLOR_FOREGROUND, clrWhite);
+   ChartSetInteger(0, CHART_COLOR_GRID, C'40,40,45');
+   ChartSetInteger(0, CHART_COLOR_CANDLE_BULL, clrForestGreen);
+   ChartSetInteger(0, CHART_COLOR_CANDLE_BEAR, clrCrimson);
+   ChartSetInteger(0, CHART_COLOR_CHART_UP, clrForestGreen);
+   ChartSetInteger(0, CHART_COLOR_CHART_DOWN, clrCrimson);
+   ChartSetInteger(0, CHART_COLOR_CHART_LINE, clrWhite);
+   ChartSetInteger(0, CHART_COLOR_VOLUME, C'120,120,200');
+   ChartSetInteger(0, CHART_COLOR_BID, clrDodgerBlue);
+   ChartSetInteger(0, CHART_COLOR_ASK, clrRed);
+   ChartSetInteger(0, CHART_COLOR_STOP_LEVEL, clrRed);
+   ChartRedraw();
+  }
+
 //+------------------------------------------------------------------+
 int OnInit()
   {
@@ -234,6 +258,8 @@ int OnInit()
 
    if(InpSetWhiteChartTheme)
       ApplyWhiteChartTheme();
+   else
+      ApplyBlackChartTheme(); // forces pure black - see comment on the function, this is what makes the watermark blend in correctly
 
    g_atrHandle = iATR(_Symbol, PERIOD_M1, InpAtrPeriod);
    if(g_atrHandle == INVALID_HANDLE)

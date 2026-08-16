@@ -847,3 +847,38 @@ Farhan Fx` Python project's `learnings.md`.)
 
   Compiled clean (0 errors, 0 warnings), still v16. Not yet deployed to
   the real-account terminal (263521212) or the VPS.
+
+- **2026-08-16 (same day, fourth follow-up - real bug, user reasonably
+  frustrated): watermark rendered as an obvious solid black box, not a
+  faint blend):** the "pre-scale against pure black" trick from the
+  entry above assumed the chart's default background was already pure
+  black. On the user's actual Vantage chart it was a lighter charcoal/
+  navy with a visible dotted grid - so the watermark's own background
+  (genuinely `(0,0,0)`) stood out as a hard-edged dark rectangle sitting
+  on top of a not-quite-as-dark chart, looking exactly like a rendering
+  bug (screenshot showed a clearly bounded black box with grid lines
+  visible through it). Not a subtle miss - a real, visible-immediately
+  mistake, and the user's blunt reaction was fair.
+
+  The assumption itself was the bug, not the blending math (the earlier
+  synthetic preview against an actually-pure-black canvas did blend
+  correctly - the math was never wrong, the input color was). Fixed at
+  the source instead of re-guessing a different opacity/size: added
+  `ApplyBlackChartTheme()`, called whenever `InpSetWhiteChartTheme` is
+  off, that force-sets `CHART_COLOR_BACKGROUND` to `clrBlack` explicitly
+  (mirroring the existing `ApplyWhiteChartTheme()` pattern) instead of
+  trusting whatever the broker/terminal's own default template happens
+  to be. This is no longer a guess - the EA now directly controls the
+  one value the watermark's pre-baked math depends on, so the blend is
+  guaranteed correct rather than hoped-for.
+
+  **The lesson:** when faking transparency by pre-blending against an
+  assumed background color, either control that background color
+  yourself or don't do the trick at all - inferring it from "well the
+  screenshots looked dark" was exactly the kind of unverified
+  extrapolation this project has been burned by before (see the
+  broker-spread-multiplier lesson, 2026-08-14) and burned by again here.
+
+  Compiled clean (0 errors, 0 warnings), still v16. Not yet re-verified
+  on the user's actual terminal - waiting on them to reattach and
+  confirm before treating this as actually fixed.

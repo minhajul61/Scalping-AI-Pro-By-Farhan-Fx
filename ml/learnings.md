@@ -1278,3 +1278,52 @@ Farhan Fx` Python project's `learnings.md`.)
   exactly why committing and pushing promptly after real, verified work
   matters** - the working tree itself turned out not to be trustworthy
   as the sole copy of anything, even mid-session on the same machine.
+
+- **2026-08-21 (same day: "TP বাড়াতে হবে, প্রতি DCA-তে" - v20, real
+  backtest result was worse, kept anyway for live evaluation per
+  explicit user decision):** user wanted the basket profit target to
+  grow smoothly with every single DCA leg, not just jump once per full
+  7-leg cycle (the existing step-function behavior). Changed
+  `GetProfitTarget()`:
+  - Old (v19): `target = base * (1 + completedCycles * growth)`, where
+    `completedCycles = legCount / InpMaxLegsPerBasket` (integer
+    division) - flat for legs 1-6, jumps 50% at leg 7, flat again for
+    legs 8-13, jumps again at leg 14, etc.
+  - New (v20): `target = base * (1 + (legCount-1) * (growth /
+    InpMaxLegsPerBasket))` - ramps a little with every leg (bootstrap
+    leg stays at the flat base), same overall growth RATE as before
+    (both formulas agree exactly at leg counts that are multiples of
+    `InpMaxLegsPerBasket`), just spread evenly instead of dumped in one
+    jump, and - unlike the old version - never resets, so legs 8, 15,
+    30... keep compounding higher instead of flattening again after
+    each jump.
+
+  **Real backtest (Model=4, every tick/real ticks, XAUUSDc/CXM,
+  2026.07.01-08.10, the same catastrophic-event window as v19's own
+  test) came back clearly worse, not better:**
+
+  | | v19 (step) | v20 (smooth) |
+  |---|---|---|
+  | Net profit | $603.59 | $222.12 |
+  | Profit Factor | 3.04 | 1.25 |
+  | Max equity DD | 2.46% | 5.35% |
+
+  **Why, worked out rather than left unexplained:** the smooth version
+  raises the target for every *mid-cycle* leg too (e.g. leg 4 went from
+  a flat $2.00 to $2.43), where the old version stayed at the easier
+  flat $2.00 until the cycle fully completed. A higher target mid-cycle
+  means the basket takes longer (and often more legs) to actually reach
+  it, keeping more capital deployed during the adverse move for longer
+  - which is exactly what shows up as worse drawdown and lower realized
+  profit in the real numbers above.
+
+  **Given the real numbers, recommended reverting to v19's step
+  function - the user's explicit decision instead was to keep v20 as
+  compiled and evaluate it live/demo directly rather than decide from
+  the backtest alone**, matching this project's general preference for
+  live confirmation over backtest-only conclusions when the two might
+  disagree. Compiled clean (0 errors, 0 warnings). Recorded here so the
+  backtest finding isn't lost regardless of what the live run shows -
+  if live also comes back worse, reverting to the step function is a
+  one-function change away (see `GetProfitTarget()`'s git history at
+  the v19 tag/commit for the exact prior formula).

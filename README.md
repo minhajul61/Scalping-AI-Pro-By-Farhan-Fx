@@ -3,6 +3,26 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-08-21 (later still): smooth per-leg target growth, v20 - backtest
+## says worse, kept for live evaluation per explicit user decision
+
+Changed `GetProfitTarget()` so the basket profit target ramps a little
+with *every* DCA leg instead of jumping once per full 7-leg cycle (the
+v19 behavior). Same overall growth rate, spread evenly instead of dumped
+in one jump - but a real backtest over the same window used to verify
+v19 came back clearly worse, not better: net profit $603.59 -> $222.12,
+profit factor 3.04 -> 1.25, max equity drawdown 2.46% -> 5.35%. Reason
+worked out, not just observed: raising the target for mid-cycle legs too
+means a basket takes longer/more legs to actually close, keeping more
+capital deployed during the adverse move for longer.
+
+Recommended reverting to v19's step function given these numbers - the
+user's explicit choice instead was to keep v20 as compiled and evaluate
+it live/demo before deciding, rather than go by the backtest alone. Full
+numbers and the worked-out explanation in `ml/learnings.md`'s relevant
+2026-08-21 entry. Compiled clean (0 errors, 0 warnings), not yet
+deployed anywhere as of this commit.
+
 ## 2026-08-21 (later same day): dual-basket EA gets a daily loss limit, v19
 
 Research into what separates surviving martingale/grid EAs from ones that

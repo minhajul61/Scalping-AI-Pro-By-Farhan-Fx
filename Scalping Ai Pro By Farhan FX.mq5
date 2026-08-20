@@ -63,7 +63,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v19"
+#define EA_BUILD_VERSION "v20"
 
 #include <Trade\Trade.mqh>
 
@@ -542,16 +542,30 @@ void RefreshBaskets()
 //| Exits: profit target only - no stop-loss, ever, per explicit      |
 //| request.                                                           |
 //+------------------------------------------------------------------+
-// The target is not a flat number - it scales with how many full DCA cycles
-// this basket has already gone through (0 cycles = base target; each
-// completed cycle raises it by InpCycleTargetGrowth). A basket that has
-// survived several cycles has more capital and more adverse distance
-// behind it, so it demands proportionally more profit before it's worth
-// closing - this is the "if it martingales, try for more profit" behavior.
+// The target is not a flat number - it ramps up a little with EVERY DCA
+// leg (2026-08-21, replaced the old once-per-full-cycle step function per
+// explicit request: "target barbe protita DCA-te, cycle sesh hole na"). A
+// basket that has taken on more legs has more capital and more adverse
+// distance behind it, so it demands proportionally more profit before
+// it's worth closing - same "martingale harder, want more profit"
+// intent as before, just smooth instead of a sawtooth that only jumped
+// once every InpMaxLegsPerBasket legs and then reset flat.
+//
+// Same overall growth RATE as before (InpCycleTargetGrowth per
+// InpMaxLegsPerBasket legs), just spread evenly instead of dumped all at
+// once at the cycle boundary - and unlike the old version, it never
+// resets: legs 8, 9, 15, 30... keep compounding the target higher,
+// reflecting that a basket that's genuinely survived that many legs has
+// taken on real risk the flat/sawtooth version understated.
+// The very first (bootstrap) leg always stays at the flat base - growth
+// only starts from the first DCA add onward.
 double GetProfitTarget(const SBasket &b)
   {
-   int completedCycles = (InpMaxLegsPerBasket > 0) ? (b.legCount / InpMaxLegsPerBasket) : 0;
-   return InpBasketProfitTargetUSD * (1.0 + completedCycles * InpCycleTargetGrowth);
+   if(InpMaxLegsPerBasket <= 0 || b.legCount <= 1)
+      return InpBasketProfitTargetUSD;
+   double growthPerLeg = InpCycleTargetGrowth / InpMaxLegsPerBasket;
+   int legsPastFirst = b.legCount - 1;
+   return InpBasketProfitTargetUSD * (1.0 + legsPastFirst * growthPerLeg);
   }
 
 // The price level at which this basket's combined floating P/L (summed

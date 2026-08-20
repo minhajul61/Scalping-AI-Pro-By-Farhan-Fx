@@ -1073,3 +1073,76 @@ Farhan Fx` Python project's `learnings.md`.)
   real live log data is in hand - this project already got burned once
   today by treating a Tester pass as sufficient proof for something
   that turned out to be a live-only bug.
+
+- **2026-08-21 (new sibling EA built: `FarhanFX MTF Trend Strategy.mq5`,
+  a real-SL trend-following EA, after market research into what actually
+  makes traders profitable):** while the DCA-cascade bug above remained
+  unresolved, the user asked for market research on how consistently
+  profitable traders actually operate, then picked "build a genuinely
+  new trend-following approach with a real SL" as a new EA in this same
+  project folder (not a rewrite of the dual-basket EA, not a reuse of
+  the separate `E:\Trend Flowing Ai Brain\` project).
+
+  Research (condensed, full citations in the session's response to the
+  user):
+  - Consistently profitable traders share sub-1% risk per trade, a
+    2:1-3:1 reward:risk ratio, and hard predefined stop-losses - not a
+    particular strategy. ([TradeZella](https://www.tradezella.com/blog/risk-management-trading),
+    [ACY](https://acy.com/en/market-news/education/market-education-top-10-habits-profitable-traders-2025-j-o-20250729-090902/))
+  - Martingale/grid systems (the dual-basket EA's design) fail
+    structurally: unlimited downside, "months of small wins, one trend
+    erases it all." ([EBC Financial](https://www.ebc.com/forex/martingale-trading-strategy),
+    [MQL5 blog](https://www.mql5.com/en/blogs/post/771466))
+  - For gold specifically: trend-following with EMA alignment,
+    price-action confirmation, and a real ATR-based stop is the
+    standard profitable approach. ([LiteFinance](https://www.litefinance.org/blog/for-investors/gold-trading/gold-trading-strategies/),
+    [JP Trading Capital](https://www.jptradingcapital.com/blog/en/xauusd-trading-strategy))
+
+  Rather than design a new strategy from scratch, found and ported an
+  **already-designed** TradingView strategy sitting untracked in the
+  main dashboard repo: `E:\Farhan Fx Algo\FarhanFX_MTF_Trend_Strategy.pine`
+  (+ companion indicator) - a 6-EMA Fibonacci ribbon system with
+  candlestick/S-R/RSI confluence filters, a real ATR-based SL, and a
+  6-level ATR-stepped scaled TP. Ported the signal/exit logic as
+  closely to line-for-line as MQL5 allows; reused the dual-basket EA's
+  dashboard/license/broker-preset/branding *patterns* (not copy-paste,
+  rewritten for this EA's own state) so it looks and operates
+  consistently with what the user already knows.
+
+  One deliberate, explicit exception to the research: **position sizing
+  is notional** (`InpPositionPercentOfEquity`, 10% of equity), not
+  risk-based - matches the Pine script's own `percent_of_equity` mode by
+  the user's explicit choice, so results stay comparable to the Pine
+  version's own TradingView backtest rather than switching conventions
+  mid-port. Documented clearly in code comments so a future reader isn't
+  confused about why it doesn't scale with SL distance.
+
+  A separate sibling project, `E:\Trend Flowing Ai Brain\`, independently
+  arrived at a similar real-SL/ATR/risk-based design (backtest PF
+  1.5-1.7 over 90-180 days, never run live) - useful as a structural
+  MQL5-idiom reference during the build, not reused directly, per the
+  user's explicit choice to build fresh in this folder.
+
+  **Verified via a real Strategy Tester run** (Model=4, every tick, real
+  ticks - the same non-negotiable standard this project adopted after
+  getting burned twice this week trusting Model=1/reasoning-only
+  checks): XAUUSDc/CXM preset, 2026.06.01-08.18, $10,000 deposit.
+  Confirmed directly from the deals table, not inferred:
+  - Real SL fires correctly - multiple closes tagged `sl <price>` in the
+    report (e.g. `sl 4488.565`, `sl 4102.606`).
+  - The scaled TP ladder fires correctly - e.g. one 0.24-lot SELL
+    position partial-closed 0.04 lots (~TP1, ~1/6 of size) at a profit,
+    then had its remaining 0.20 lots stopped out later by its own SL;
+    another position had four separate partial closes at four distinct
+    price levels as the trend continued favorably.
+  - Entries carry the `FarhanFXTrend-buy`/`-sell` comment tag, confirming
+    they came from the ribbon-flip signal path, not something else.
+  - **121 trades, profit factor 1.66, net +$55.62, max drawdown $14.87
+    (0.15%)** - a dramatically smaller drawdown than the dual-basket EA
+    has ever shown in any backtest this project has run, exactly what's
+    expected from an EA with an actual stop-loss.
+
+  Compiled clean (0 errors, 0 warnings) as v1. **Explicitly a backtest-
+  only result** - no live/demo track record yet, same honest caveat
+  already applied to `E:\Trend Flowing Ai Brain\`'s own numbers. Not yet
+  deployed to any live/demo chart.

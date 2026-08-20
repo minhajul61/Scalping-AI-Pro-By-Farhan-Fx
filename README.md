@@ -1,5 +1,65 @@
 # XAUUSD Dual Basket DCA EA
 
+This folder now holds **two independent EAs** - read this section first to
+know which one you're looking at.
+
+## 2026-08-21: new sibling EA - `FarhanFX MTF Trend Strategy.mq5` (v1)
+
+A deliberate architectural break from the dual-basket EA below: single
+position per direction, **real broker-side stop-loss on every entry**, no
+martingale, no DCA legs. Built after market research into how consistently
+profitable traders actually operate (sub-1% risk discipline, 2:1-3:1 R:R,
+hard predefined stops - the opposite of the dual-basket EA's no-SL design)
+found that design pattern is exactly what causes accounts to blow up - and
+the same week, that EA produced two real live bugs that would have been
+far less dangerous with a real SL as a backstop.
+
+Ported from an existing, already-designed TradingView strategy -
+`E:\Farhan Fx Algo\FarhanFX_MTF_Trend_Strategy.pine` (+ companion
+`FarhanFX_MTF_Trend_Indicator.pine`) - rather than designed from scratch:
+a 6-EMA Fibonacci ribbon trend system (periods shift by a timeframe preset,
+default 30m: 8/13/21/34/55/89) with candlestick + support/resistance + RSI
+confluence filters gating entries, entry only on a fresh alignment *flip*
+(not "aligned" as a continuous state), a real SL at `1.5x ATR(14)`, and a
+6-level ATR-stepped scaled take-profit (partial closes at each level,
+calibrated so each slice equals 1/6 of the original entry size). Exits
+immediately if the ribbon loses full alignment while a position is open,
+regardless of TP progress ("trend exit").
+
+**Position sizing is notional (`InpPositionPercentOfEquity`, default 10%
+of equity), not risk-based** - a deliberate exception to the research
+findings above, matching the Pine script's own `percent_of_equity` mode by
+explicit user request, so results stay comparable to whatever the Pine
+version has already shown on TradingView. Real $ risked per trade still
+varies with SL distance, exactly as it does in the Pine backtest.
+
+Dashboard/license/broker-preset/branding infrastructure (the `DbLabel`/
+`DbDivider`/`CreateButton` helpers, the embedded license-key list + non-
+blocking gate pattern, `ENUM_BROKER_PRESET`/`EffectiveMaxSpreadPoints()`,
+the gold-branded dashboard + chart watermark) is reused in pattern from
+`Scalping Ai Pro By Farhan FX.mq5` below, so it looks and operates
+consistently with what the user already knows - same license keys, same
+verified broker constants, same "license check must never block
+`OnInit()`" lesson applied from day one instead of re-learned the hard way.
+
+**Verified via a real Strategy Tester run** (Model=4, every tick/real
+ticks, XAUUSDc/CXM, 2026.06.01-08.18, $10,000 deposit): real SL fired
+correctly (`sl 4488.565` etc. in the deals table), the scaled TP ladder
+fired correctly (multiple partial closes at distinct price levels on the
+same position, e.g. one SELL position partial-closed 0.04 lots at TP1 then
+had its remaining 0.20 lots stopped out later), 121 trades, profit factor
+1.66, net +$55.62, max drawdown **$14.87 (0.15%)** - dramatically smaller
+than anything the dual-basket EA has ever shown, as expected from an EA
+with an actual stop-loss. Explicitly a backtest-only result, not a live
+track record - see `ml/learnings.md`'s 2026-08-21 entry for the full
+writeup, sources for the research, and honest caveats.
+
+Not yet deployed to any live/demo chart.
+
+---
+
+## `Scalping Ai Pro By Farhan FX.mq5` - dual-basket DCA/martingale EA
+
 File (final, permanent name per explicit request): **`Scalping Ai Pro By
 Farhan FX.mq5`** / `.ex5`. Note this is the same name as the separate,
 unrelated Python ML project at `E:\Scalping AI Pro By Farhan Fx` — the user

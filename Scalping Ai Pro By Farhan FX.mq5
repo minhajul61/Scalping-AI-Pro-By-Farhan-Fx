@@ -63,7 +63,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v18"
+#define EA_BUILD_VERSION "v19"
 
 #include <Trade\Trade.mqh>
 
@@ -148,6 +148,23 @@ input group "=== Daily Profit Target ==="
 input bool     InpUseDailyProfitTarget = false; // Stop New Trades After Reaching This Daily Profit
 input double   InpDailyProfitTargetUSD = 50.0;  // Daily Profit Target ($) - resumes automatically next day
 
+input group "=== Daily Loss Limit ==="
+// Research into what separates surviving martingale/grid EAs from ones
+// that blow up consistently names one feature above the others: "a hard
+// stop loss enforced at the portfolio level - if cumulative drawdown
+// hits the defined threshold, all positions close and the EA stops."
+// This EA had a daily PROFIT target (above) but nothing on the loss
+// side until now - added 2026-08-21. Off by default since it's new
+// behavior that didn't exist before; the user should turn it on
+// deliberately, not have it silently change how live accounts behave.
+// Unlike DailyTargetHit() (which deliberately uses realized balance so
+// it doesn't flicker on floating P/L noise), this checks EQUITY - a
+// martingale basket's actual danger is in floating loss building up
+// before anything is realized, so the whole point of this circuit
+// breaker is to react to that, not wait for it to become permanent.
+input bool     InpUseDailyLossLimit     = false; // Force-Close Everything If Daily Loss Hits This %
+input double   InpDailyLossLimitPercent = 5.0;   // Daily Loss Limit (% of day-start balance, checked against live equity)
+
 input group "=== Dashboard ==="
 input bool     InpShowDashboard = true;   // Show Dashboard
 input int      InpDashboardX    = 10;     // Dashboard X Position
@@ -190,6 +207,7 @@ int g_trendAtrHandle3 = INVALID_HANDLE;
 
 int    g_dayStartDateCode = -1;
 double g_dayStartBalance  = 0.0;
+bool   g_dailyLossLimitLoggedToday = false;
 
 // Watermark for LogRecentClosedDeals() - only deals strictly after this
 // time get logged/re-checked, so a leg that already got logged once
@@ -425,6 +443,9 @@ void OnTick()
   {
    RefreshBaskets();
    UpdateDayTracking();
+
+   if(DailyLossLimitHit())
+      ForceCloseOnDailyLossLimit();
 
    ManageBasketExits(SIDE_BUY);
    ManageBasketExits(SIDE_SELL);
@@ -698,6 +719,9 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
 
    if(DailyTargetHit())
       return; // today's profit target already reached - resumes automatically at the next day rollover
+
+   if(DailyLossLimitHit())
+      return; // today's loss limit hit - OnTick() also force-closes both baskets, see there
 
    if(!LicenseOk())
       return; // invalid/missing key - existing baskets still manage/close normally, only new entries pause; dashboard shows why
@@ -1221,6 +1245,7 @@ void UpdateDayTracking()
      {
       g_dayStartDateCode = todayCode;
       g_dayStartBalance  = AccountInfoDouble(ACCOUNT_BALANCE);
+      g_dailyLossLimitLoggedToday = false; // new day - the loss-limit force-close can fire (and log) again if needed
      }
   }
 
@@ -1235,6 +1260,40 @@ bool DailyTargetHit()
       return false;
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
    return((balance - g_dayStartBalance) >= InpDailyProfitTargetUSD);
+  }
+
+// Equity-based, on purpose - see the input group comment above for why
+// this deliberately does NOT use the same realized-balance-only approach
+// as DailyTargetHit(). Once true, ManageBasketEntries() halts new entries
+// (existing non-blocking gate pattern) and OnTick() additionally force-
+// closes both baskets - the two together are what actually cap the day's
+// worst case, not just stop it from getting worse via new legs.
+bool DailyLossLimitHit()
+  {
+   if(!InpUseDailyLossLimit || g_dayStartBalance <= 0)
+      return false;
+   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   double lossPct = (g_dayStartBalance - equity) / g_dayStartBalance * 100.0;
+   return(lossPct >= InpDailyLossLimitPercent);
+  }
+
+// Called every tick once DailyLossLimitHit() is true - closes both
+// baskets outright (not just "stop adding new legs", which is what the
+// non-blocking ManageBasketEntries() gate already does on its own).
+// Idempotent: once there's nothing left to close, CloseBasket() is a
+// harmless no-op, so calling this repeatedly every tick for the rest of
+// the day is fine - only logs once per day via g_dailyLossLimitLoggedToday.
+void ForceCloseOnDailyLossLimit()
+  {
+   if(!g_dailyLossLimitLoggedToday)
+     {
+      PrintFormat("GoldDualBasketDCA: DAILY LOSS LIMIT HIT (%.1f%% of day-start balance) - force-closing both baskets.",
+                  InpDailyLossLimitPercent);
+      g_dailyLossLimitLoggedToday = true;
+     }
+   RefreshBaskets();
+   CloseBasket(SIDE_BUY, "daily loss limit hit", g_buyBasket.floatingPL);
+   CloseBasket(SIDE_SELL, "daily loss limit hit", g_sellBasket.floatingPL);
   }
 
 // Hardcoded list of currently-issued keys - checked locally, no network
@@ -1367,7 +1426,7 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, InpDashboardX - 10);
       ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, InpDashboardY - 10);
       ObjectSetInteger(0, bg, OBJPROP_XSIZE, 280);
-      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 565);
+      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 580);
       ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'12,12,16');
       ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, bg, OBJPROP_COLOR, C'120,95,40'); // warm gold-tinted border - brand accent, matches gold/XAUUSD theme
@@ -1411,9 +1470,9 @@ void CreateDashboard()
       ObjectSetInteger(0, icon, OBJPROP_ZORDER, 2);
      }
 
-   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 491, 260, 24, "X  CLOSE ALL", C'120,20,20');
-   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 519, 126, 22, "Close BUY", C'20,80,20');
-   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 519, 126, 22, "Close SELL", C'20,80,20');
+   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 506, 260, 24, "X  CLOSE ALL", C'120,20,20');
+   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 534, 126, 22, "Close BUY", C'20,80,20');
+   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 534, 126, 22, "Close SELL", C'20,80,20');
   }
 
 void UpdateDashboard()
@@ -1456,6 +1515,14 @@ void UpdateDashboard()
                              : "$" + DoubleToString(dailyPL, 2) + " / $" + DoubleToString(InpDailyProfitTargetUSD, 2);
    DbLabel("DailyTarget", lx, y, PadRight("Daily Target", lblW) + dailyTargetText,
            dailyTargetHit ? clrLime : clrSilver, 8);
+   y += lh;
+   bool dailyLossHit = DailyLossLimitHit();
+   double dailyLossPct = (g_dayStartBalance > 0) ? (g_dayStartBalance - equity) / g_dayStartBalance * 100.0 : 0;
+   string dailyLossText = !InpUseDailyLossLimit ? "off"
+                           : dailyLossHit ? "HIT (baskets closed)"
+                           : DoubleToString(dailyLossPct, 1) + "% / " + DoubleToString(InpDailyLossLimitPercent, 1) + "%";
+   DbLabel("DailyLoss", lx, y, PadRight("Daily Loss Limit", lblW) + dailyLossText,
+           dailyLossHit ? clrRed : clrSilver, 8);
    y += lh + 6;
 
    DbDivider("Div1", x, y, 260, C'55,55,65');

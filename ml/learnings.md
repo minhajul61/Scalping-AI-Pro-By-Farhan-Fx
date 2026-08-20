@@ -1203,3 +1203,78 @@ Farhan Fx` Python project's `learnings.md`.)
   backtest in this project's history.
 
   Compiled clean (0 errors, 0 warnings) as v1. Not yet deployed anywhere.
+
+- **2026-08-21 (same day, back to the dual-basket EA - "make it more
+  powerful, lower drawdown, higher profit"):** researched what
+  specifically separates surviving martingale/grid EAs from ones that
+  blow up ([MQL5 blog](https://www.mql5.com/en/blogs/post/768549)) -
+  four features named: gentler-than-doubling averaging, smart entry
+  filtering (already present here - ATR spike + trend filter), a strict
+  pre-calculated worst-case leg limit, and **"a hard stop loss enforced
+  at the portfolio level - if cumulative drawdown hits the defined
+  threshold, all positions close."** This EA had a daily PROFIT target
+  but nothing on the loss side at all - a real, confirmed gap.
+
+  Added **`InpUseDailyLossLimit`** (default false) - unlike
+  `DailyTargetHit()` (deliberately realized-balance-only, so it doesn't
+  flicker on floating noise), this checks live EQUITY against day-start
+  balance, since the whole point is reacting to floating loss building
+  up, not waiting for it to become permanent. When hit: `ManageBasketEntries()`
+  halts new entries (existing non-blocking pattern) **and** `OnTick()`
+  additionally force-closes both baskets via `ForceCloseOnDailyLossLimit()`
+  - halting new entries alone doesn't cap an already-open basket's
+  ongoing floating loss, only the force-close does. New dashboard line.
+
+  **Tested against the exact July 2026 window that used to wipe real
+  accounts** (per this file's earlier entries) - real Tester runs
+  (Model=4, every tick/real ticks, XAUUSDc/CXM, 2026.07.01-08.10,
+  $10,000 deposit):
+
+  | Config | Net Profit | PF | Max Equity DD |
+  |---|---|---|---|
+  | v19 defaults (2.0x mult, loss limit off) | $603.59 | 3.04 | 2.46% |
+  | + Daily Loss Limit 5% (mult still 2.0x) | $603.59 | 3.04 | 2.46% (never triggered) |
+  | Softer multiplier (1.3x) + Loss Limit 5% | $389.57 | 2.72 | **3.72%** |
+
+  Two honest findings, one good and one counter-intuitive:
+  1. **The same window that used to wipe accounts now shows only 2.46%
+     max equity drawdown with current (already-improved) defaults** -
+     this week's cumulative fixes (tighter DCA distance, the server-side
+     TP work, max-legs tuning) already made this EA meaningfully safer
+     without today's new feature even being needed for this window.
+  2. **Softening the lot multiplier from 2.0x to 1.3x made things
+     *worse*, not better** - lower profit AND higher equity drawdown.
+     Counter-intuitive but explainable: a gentler multiplier needs more
+     legs to reach the same recovery target, so more capital stays
+     deployed for longer during an adverse move, producing a *deeper*
+     floating drawdown even though the eventual realized numbers were
+     smaller. Isolated by testing the loss-limit alone (identical to
+     baseline, confirming it never triggered) vs. combined with the
+     softer multiplier (the multiplier was the whole effect) - don't
+     trust a combined test to tell you which lever did what.
+
+  **Recommendation given to the user:** keep `InpLotMultiplier` at 2.0
+  (softening it measurably hurt in real testing, not just theory), but
+  turn `InpUseDailyLossLimit` on - it cost nothing in this test (never
+  triggered) and exists specifically for a genuine tail event, like the
+  still-unresolved live-only DCA cascade bug two entries up, where
+  something goes wrong in a way backtests haven't reproduced.
+
+  Compiled clean (0 errors, 0 warnings) as v19.
+
+- **2026-08-21 (same day, near-miss worth recording): several project
+  files vanished from disk mid-session, cause undetermined.** Mid-way
+  through documenting the above, found `ml/learnings.md`, the entire
+  `ml/` folder, both new EAs' `.mq5`/`.ex5`, and the `.mq4` port all
+  missing from the working directory - `git status` showed them as
+  deleted relative to HEAD. Root cause was **not** identified (not this
+  session's own `rm -rf` calls, which were all scoped to the temp
+  scratchpad directory, never this project folder) - a concurrent
+  process on the same machine is suspected but unconfirmed. Genuinely
+  no data was lost: everything was already committed at `ef14c17` and
+  pushed to GitHub, so `git checkout HEAD -- .` (run only after asking
+  and getting explicit user confirmation, since it's a working-tree-
+  overwriting command) restored every file exactly. **Lesson: this is
+  exactly why committing and pushing promptly after real, verified work
+  matters** - the working tree itself turned out not to be trustworthy
+  as the sole copy of anything, even mid-session on the same machine.

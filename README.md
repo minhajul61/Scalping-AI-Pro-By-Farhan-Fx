@@ -3,6 +3,29 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-08-21 (later same day): dual-basket EA gets a daily loss limit, v19
+
+Research into what separates surviving martingale/grid EAs from ones that
+blow up named one feature above the rest: a hard portfolio-level loss stop
+that force-closes everything once cumulative drawdown hits a threshold.
+This EA had a daily *profit* target but nothing on the loss side - added
+`InpUseDailyLossLimit` (default off) + `InpDailyLossLimitPercent` (5.0):
+checks live equity (not just realized balance, since floating loss is the
+actual danger), halts new entries, and force-closes both baskets.
+
+Tested against the exact July 2026 window that used to wipe real accounts
+(documented lower in this file/`ml/learnings.md`): with current, already-
+improved defaults, max equity drawdown over that window is now only
+**2.46%** (was enough to wipe a $5-10k account back when this was
+documented). Also tested softening `InpLotMultiplier` from 2.0 to 1.3 as
+an additional lever - counter-intuitively, this made things *worse*
+(lower profit, higher drawdown: 3.72% vs 2.46%), isolated via a control
+test to confirm the loss limit itself had zero effect in this window (it
+never triggered - baseline-identical numbers) and the multiplier change
+was the entire cause. Recommendation: keep the multiplier at 2.0, turn
+the new loss limit on as a no-cost safety net for a genuine tail event.
+Full numbers in `ml/learnings.md`'s second 2026-08-21 entry.
+
 ## 2026-08-21: third EA - `FarhanFX Order Flow Strategy.mq5` (v1)
 
 A cumulative-volume-delta (CVD) divergence EA, built after the Trend

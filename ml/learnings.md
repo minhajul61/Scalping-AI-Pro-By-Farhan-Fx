@@ -1146,3 +1146,60 @@ Farhan Fx` Python project's `learnings.md`.)
   only result** - no live/demo track record yet, same honest caveat
   already applied to `E:\Trend Flowing Ai Brain\`'s own numbers. Not yet
   deployed to any live/demo chart.
+
+- **2026-08-21 (same day, follow-up: user reacted to the Trend EA's
+  modest first backtest, asked for "a different strategy - order flow"):**
+  before building anything, checked what's actually possible - XAUUSD is
+  an OTC CFD, no consolidated exchange order book, so real institutional
+  order flow (Level 2/footprint, which would need CME GC futures data) is
+  not available through this MT5/broker setup at all. Confirmed via
+  research, explained to the user, who agreed to the realistic
+  alternative: a tick-direction volume-delta proxy (classify each real
+  tick as buy/sell pressure by price direction or the broker's own trade-
+  side flag when present, accumulate into a running CVD).
+
+  Built **`FarhanFX Order Flow Strategy.mq5`** (v1), a fourth pattern in
+  this folder alongside the dual-basket DCA EA and the Trend EA: a
+  cumulative-volume-delta divergence signal (price makes a new confirmed
+  pivot high/low, but CVD at that pivot doesn't confirm it - the classic
+  order-flow "distribution"/"accumulation" reversal call), real ATR-based
+  SL, single fixed-R:R TP (2:1) instead of the Trend EA's scaled ladder,
+  same dashboard/license/sizing patterns reused.
+
+  **Sanity-checked the CVD math before trusting a full backtest**: logged
+  the first 30 bars' buyVol/sellVol/delta/runningCVD next to real price
+  moves - directionally correct in every sample checked (price up bars
+  had positive delta, down bars negative, magnitudes roughly tracked the
+  size of the move) - cheap insurance against a sign/classification bug,
+  per this project's now-standard verification discipline.
+
+  **Real Strategy Tester run** (Model=4, every tick/real ticks - required
+  here specifically since CVD depends on real tick data), same XAUUSDc/
+  CXM/2026.06.01-08.18 window as the Trend EA for a direct, apples-to-
+  apples comparison:
+
+  | | Trend EA | Order Flow EA |
+  |---|---|---|
+  | Trades | 121 | **7** |
+  | Profit Factor | 1.66 | 1.17 |
+  | Net profit | +$55.62 | +$5.64 |
+  | Max drawdown | $14.87 | $34.15 |
+
+  Confirmed from the deals table (not inferred): every entry tagged
+  `FarhanFXFlow-buy/sell` (genuinely from the divergence signal path),
+  every close tagged `tp <price>` or `sl <price>` (both real, both
+  fired correctly - 3 TP wins, 4 SL losses in this window).
+
+  **Honest verdict:** the mechanism works as designed, but the divergence
+  condition (confirmed price pivot + confirmed CVD pivot disagreeing,
+  plus the absorption filter) is rare - 7 trades in 2.5 months is nowhere
+  near enough to draw a real conclusion, and what did fire performed
+  worse per-trade than the Trend EA's simpler ribbon-flip signal, not
+  better. All 7 were SELL entries - plausibly just this window's mostly-
+  declining price action rather than a real long/short asymmetry, but
+  not independently confirmed either way. This is a legitimate, reported-
+  as-found negative-ish result, not something to paper over just because
+  the user wanted a bigger number - same discipline as every other
+  backtest in this project's history.
+
+  Compiled clean (0 errors, 0 warnings) as v1. Not yet deployed anywhere.

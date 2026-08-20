@@ -1,9 +1,56 @@
 # XAUUSD Dual Basket DCA EA
 
-This folder now holds **two independent EAs** - read this section first to
-know which one you're looking at.
+This folder now holds **three independent EAs** - read this section first
+to know which one you're looking at.
 
-## 2026-08-21: new sibling EA - `FarhanFX MTF Trend Strategy.mq5` (v1)
+## 2026-08-21: third EA - `FarhanFX Order Flow Strategy.mq5` (v1)
+
+A cumulative-volume-delta (CVD) divergence EA, built after the Trend
+Strategy EA's first backtest (below) came back modest and the user asked
+to try order flow instead. Important honest caveat up front: XAUUSD is an
+OTC CFD with no consolidated exchange order book, so **real institutional
+order flow (Level 2/footprint data, which would come from CME GC futures)
+is not available through this MT5/broker setup** - confirmed via research
+and explicitly agreed with the user before building. What this EA actually
+computes is a **tick-direction volume-delta proxy**: every real tick in a
+bar is classified as buy- or sell-pressure (by the broker's own trade-side
+flag when present, otherwise by price direction vs. the previous tick),
+summed into that bar's delta, and accumulated into a running CVD that
+resets each trading day.
+
+**Signal**: bearish divergence (price makes a new confirmed pivot high,
+but CVD at that pivot is lower than at the previous pivot - price up
+without real buying pressure behind it) and the bullish mirror. Real
+broker-side SL (`1.5x ATR`) and a single fixed-R:R take-profit
+(`InpRewardRiskRatio`, default 2.0) - deliberately the simpler exit style
+vs. the Trend EA's 6-level scaled ladder, so the two EAs are two genuinely
+different, comparable data points. Same dashboard/license/broker-preset/
+branding patterns and position-sizing convention as the Trend EA below.
+
+**Verified via a real Strategy Tester run** (Model=4, every tick/real
+ticks - required here specifically, since CVD math depends on real
+tick-level data; Model=1 would not exercise the real logic at all),
+XAUUSDc/CXM, the identical 2026.06.01-08.18 window used for the Trend EA
+so the two are directly comparable:
+
+| | Trend Strategy (EMA ribbon) | Order Flow (CVD divergence) |
+|---|---|---|
+| Trades | 121 | **7** |
+| Profit Factor | 1.66 | 1.17 |
+| Net profit | +$55.62 | +$5.64 |
+| Max drawdown | $14.87 (0.15%) | $34.15 (0.34%) |
+
+Honestly: the order-flow signal is real (SL/TP fire correctly, the CVD
+math checked out bar-by-bar against real price action in a sanity pass)
+but **fires far too rarely to draw any real conclusion from 7 trades**,
+and what did fire performed worse per-trade than the Trend EA, not
+better. All 7 trades were SELL entries in this window - no BUY divergence
+fired at all, likely just a reflection of this specific window's mostly-
+declining price action rather than an asymmetry bug, but not independently
+confirmed. See `ml/learnings.md`'s 2026-08-21 entries for the full
+writeup. Not yet deployed to any live/demo chart.
+
+## 2026-08-21: second EA - `FarhanFX MTF Trend Strategy.mq5` (v1)
 
 A deliberate architectural break from the dual-basket EA below: single
 position per direction, **real broker-side stop-loss on every entry**, no

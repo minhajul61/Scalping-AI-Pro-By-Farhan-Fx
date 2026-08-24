@@ -1570,3 +1570,32 @@ Farhan Fx` Python project's `learnings.md`.)
   lesson for any future `PadRight`-style helper in this file: pick the
   width from the longest real label, not a round number that happens to
   fit most of them.
+
+- **2026-08-24 (v25, the real bug behind "this doesn't look
+  professional"):** user's blunt reaction to the v24 screenshot led to
+  actually root-causing why the panel looked like bare floating text
+  with no visible card, instead of just re-coloring things and hoping.
+  `CreateDashboard()`'s background/accent/icon and `CreateButton()`'s
+  colors/sizes were only ever set inside an `ObjectFind()`-gated
+  create-once block - fine for a fresh chart, but this exact CXM demo
+  chart has had the EA attached without interruption since v15/v16
+  (when branding was first added), so every subsequent recompile found
+  the objects already existing and skipped every property-setting line.
+  The visible panel was plausibly showing colors from many versions ago
+  the whole time, unaffected by anything changed since - `DbLabel`/
+  `DbDivider` (which already re-apply every call) were the only pieces
+  that ever visibly updated, which is exactly why v24's spacing fix was
+  the one thing that actually showed up.
+
+  Fixed the actual bug (every property now re-applies every call, not
+  just the ones already doing so) and used the same pass to genuinely
+  redesign it: brighter background clearly distinct from the pure-black
+  chart, full-brightness gold border, a dark-gold header strip, and
+  green/red/slate-tinted card boxes behind BUY/SELL/FILTERS so the
+  sections read as grouped panels. Compiled clean, smoke-tested with the
+  dashboard enabled - no runtime errors. **Lesson for this file's own
+  future: any chart-object property meant to reflect "what the current
+  code says" (not a one-time initial position) belongs outside the
+  create-once gate - the create-once pattern is for *existence*, not
+  for *appearance*, and conflating the two is invisible until someone's
+  actually looking at a chart that's been running a long time.**

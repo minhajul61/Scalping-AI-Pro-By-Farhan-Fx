@@ -70,7 +70,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v24"
+#define EA_BUILD_VERSION "v25"
 
 #include <Trade\Trade.mqh>
 
@@ -1473,12 +1473,21 @@ string PadRight(string s, int width)
    return s;
   }
 
+// 2026-08-24: every property here used to be set only inside the
+// ObjectCreate-once block below - fine the very first time an EA is
+// attached, but this chart has been running the SAME EA (same object
+// names) continuously since v15/v16 without ever detaching, and this
+// function is called again on every OnInit (every recompile/restart).
+// Since ObjectFind() found the button already existing, none of these
+// properties were ever re-applied - a live chart could easily still be
+// showing colors/sizes from many versions ago, invisible to every later
+// code change. Now everything re-applies every call; only the one-time
+// ObjectCreate stays gated.
 void CreateButton(string name, int x, int y, int w, int h, string text, color bg)
   {
    string full = DB_PREFIX + name;
-   if(ObjectFind(0, full) >= 0)
-      return;
-   ObjectCreate(0, full, OBJ_BUTTON, 0, 0, 0);
+   if(ObjectFind(0, full) < 0)
+      ObjectCreate(0, full, OBJ_BUTTON, 0, 0, 0);
    ObjectSetInteger(0, full, OBJPROP_CORNER, CORNER_LEFT_UPPER);
    ObjectSetInteger(0, full, OBJPROP_XDISTANCE, x);
    ObjectSetInteger(0, full, OBJPROP_YDISTANCE, y);
@@ -1495,63 +1504,121 @@ void CreateButton(string name, int x, int y, int w, int h, string text, color bg
    ObjectSetInteger(0, full, OBJPROP_ZORDER, 100);
   }
 
+// A tinted "card" rectangle behind a block of dashboard lines - purely a
+// visual grouping cue (BUY/SELL/FILTERS each get their own subtly-tinted
+// panel instead of floating text with no container). Low ZORDER so
+// DbLabel() text (ZORDER 100) always draws on top of it regardless of
+// call order.
+void DbCard(string name, int x, int y, int w, int h, color bg, color border)
+  {
+   string full = DB_PREFIX + name;
+   if(ObjectFind(0, full) < 0)
+      ObjectCreate(0, full, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, full, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, full, OBJPROP_XDISTANCE, x);
+   ObjectSetInteger(0, full, OBJPROP_YDISTANCE, y);
+   ObjectSetInteger(0, full, OBJPROP_XSIZE, w);
+   ObjectSetInteger(0, full, OBJPROP_YSIZE, h);
+   ObjectSetInteger(0, full, OBJPROP_BGCOLOR, bg);
+   ObjectSetInteger(0, full, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+   ObjectSetInteger(0, full, OBJPROP_COLOR, border);
+   ObjectSetInteger(0, full, OBJPROP_BACK, false);
+   ObjectSetInteger(0, full, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, full, OBJPROP_HIDDEN, true);
+   ObjectSetInteger(0, full, OBJPROP_ZORDER, 10);
+  }
+
+// 2026-08-24: full visual redesign, prompted directly by the user's own
+// live screenshot ("does this look like a professional dashboard?").
+// Two real problems, not just one:
+// 1. The old panel background (C'12,12,16') was nearly indistinguishable
+//    from the chart's own pure-black background (ApplyBlackChartTheme())
+//    - so the "card" existed in code but was effectively invisible,
+//    leaving text floating directly over candles with no container.
+// 2. Every property here (colors, sizes) was only ever set once, inside
+//    an ObjectFind()-gated "create if missing" block - correct for a
+//    brand-new chart, but this exact chart has had the EA attached
+//    continuously since v15/v16 and never removed, so on every later
+//    recompile these lines were skipped entirely (object already
+//    existed) and the panel kept showing whatever colors/sizes existed
+//    weeks ago, invisible to every visual change made since. Every
+//    property below now re-applies on every call (only ObjectCreate
+//    itself stays gated) so a restart/recompile always shows the
+//    current code's actual intended look, not a stale leftover.
 void CreateDashboard()
   {
+   int px = InpDashboardX - 10, py = InpDashboardY - 10, pw = 300, ph = 605;
+
    string bg = DB_PREFIX + "BG";
    if(ObjectFind(0, bg) < 0)
-     {
       ObjectCreate(0, bg, OBJ_RECTANGLE_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, bg, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-      ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, InpDashboardX - 10);
-      ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, InpDashboardY - 10);
-      ObjectSetInteger(0, bg, OBJPROP_XSIZE, 280);
-      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 595);
-      ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'12,12,16');
-      ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
-      ObjectSetInteger(0, bg, OBJPROP_COLOR, C'120,95,40'); // warm gold-tinted border - brand accent, matches gold/XAUUSD theme
-      ObjectSetInteger(0, bg, OBJPROP_BACK, false);
-      ObjectSetInteger(0, bg, OBJPROP_SELECTABLE, false);
-      ObjectSetInteger(0, bg, OBJPROP_HIDDEN, true);
-      ObjectSetInteger(0, bg, OBJPROP_ZORDER, 0);
-     }
+   ObjectSetInteger(0, bg, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, px);
+   ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, py);
+   ObjectSetInteger(0, bg, OBJPROP_XSIZE, pw);
+   ObjectSetInteger(0, bg, OBJPROP_YSIZE, ph);
+   ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'21,23,30'); // clearly lighter than pure-black chart bg - reads as an actual card now
+   ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+   ObjectSetInteger(0, bg, OBJPROP_COLOR, C'212,175,55'); // full-brightness gold frame, brand accent
+   ObjectSetInteger(0, bg, OBJPROP_BACK, false);
+   ObjectSetInteger(0, bg, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, bg, OBJPROP_HIDDEN, true);
+   ObjectSetInteger(0, bg, OBJPROP_ZORDER, 0);
 
-   // Thin gold accent strip along the top edge - purely cosmetic branding,
-   // same purpose as the border tint above.
+   // Header strip - a distinct band behind the icon/title/version block so
+   // "who this is" (brand) reads as visually separate from "what it's
+   // doing" (live data), same header-bar convention as most trading
+   // dashboards (mirrors the tradinjournal.com-style panel already used
+   // on this user's web dashboard project).
+   string hdr = DB_PREFIX + "HeaderStrip";
+   if(ObjectFind(0, hdr) < 0)
+      ObjectCreate(0, hdr, OBJ_RECTANGLE_LABEL, 0, 0, 0);
+   ObjectSetInteger(0, hdr, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, hdr, OBJPROP_XDISTANCE, px + 2);
+   ObjectSetInteger(0, hdr, OBJPROP_YDISTANCE, py + 2);
+   ObjectSetInteger(0, hdr, OBJPROP_XSIZE, pw - 4);
+   ObjectSetInteger(0, hdr, OBJPROP_YSIZE, 66);
+   ObjectSetInteger(0, hdr, OBJPROP_BGCOLOR, C'42,34,14'); // dark warm gold-brown, distinct from the body
+   ObjectSetInteger(0, hdr, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+   ObjectSetInteger(0, hdr, OBJPROP_COLOR, C'42,34,14');
+   ObjectSetInteger(0, hdr, OBJPROP_BACK, false);
+   ObjectSetInteger(0, hdr, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, hdr, OBJPROP_HIDDEN, true);
+   ObjectSetInteger(0, hdr, OBJPROP_ZORDER, 1);
+
+   // Thin gold accent strip along the very top edge - purely cosmetic
+   // branding, on top of the header strip.
    string accent = DB_PREFIX + "Accent";
    if(ObjectFind(0, accent) < 0)
-     {
       ObjectCreate(0, accent, OBJ_RECTANGLE_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, accent, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-      ObjectSetInteger(0, accent, OBJPROP_XDISTANCE, InpDashboardX - 10);
-      ObjectSetInteger(0, accent, OBJPROP_YDISTANCE, InpDashboardY - 10);
-      ObjectSetInteger(0, accent, OBJPROP_XSIZE, 280);
-      ObjectSetInteger(0, accent, OBJPROP_YSIZE, 3);
-      ObjectSetInteger(0, accent, OBJPROP_BGCOLOR, C'212,175,55'); // gold
-      ObjectSetInteger(0, accent, OBJPROP_BORDER_TYPE, BORDER_FLAT);
-      ObjectSetInteger(0, accent, OBJPROP_COLOR, C'212,175,55');
-      ObjectSetInteger(0, accent, OBJPROP_BACK, false);
-      ObjectSetInteger(0, accent, OBJPROP_SELECTABLE, false);
-      ObjectSetInteger(0, accent, OBJPROP_HIDDEN, true);
-      ObjectSetInteger(0, accent, OBJPROP_ZORDER, 1);
-     }
+   ObjectSetInteger(0, accent, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, accent, OBJPROP_XDISTANCE, px);
+   ObjectSetInteger(0, accent, OBJPROP_YDISTANCE, py);
+   ObjectSetInteger(0, accent, OBJPROP_XSIZE, pw);
+   ObjectSetInteger(0, accent, OBJPROP_YSIZE, 3);
+   ObjectSetInteger(0, accent, OBJPROP_BGCOLOR, C'212,175,55'); // gold
+   ObjectSetInteger(0, accent, OBJPROP_BORDER_TYPE, BORDER_FLAT);
+   ObjectSetInteger(0, accent, OBJPROP_COLOR, C'212,175,55');
+   ObjectSetInteger(0, accent, OBJPROP_BACK, false);
+   ObjectSetInteger(0, accent, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, accent, OBJPROP_HIDDEN, true);
+   ObjectSetInteger(0, accent, OBJPROP_ZORDER, 2);
 
    string icon = DB_PREFIX + "Icon";
    if(ObjectFind(0, icon) < 0)
-     {
       ObjectCreate(0, icon, OBJ_BITMAP_LABEL, 0, 0, 0);
-      ObjectSetInteger(0, icon, OBJPROP_CORNER, CORNER_LEFT_UPPER);
-      ObjectSetInteger(0, icon, OBJPROP_XDISTANCE, InpDashboardX - 6);
-      ObjectSetInteger(0, icon, OBJPROP_YDISTANCE, InpDashboardY - 6);
-      ObjectSetString(0, icon, OBJPROP_BMPFILE, "::Images\\FarhanFX_Icon.bmp");
-      ObjectSetInteger(0, icon, OBJPROP_SELECTABLE, false);
-      ObjectSetInteger(0, icon, OBJPROP_HIDDEN, true);
-      ObjectSetInteger(0, icon, OBJPROP_BACK, false);
-      ObjectSetInteger(0, icon, OBJPROP_ZORDER, 2);
-     }
+   ObjectSetInteger(0, icon, OBJPROP_CORNER, CORNER_LEFT_UPPER);
+   ObjectSetInteger(0, icon, OBJPROP_XDISTANCE, InpDashboardX - 6);
+   ObjectSetInteger(0, icon, OBJPROP_YDISTANCE, InpDashboardY - 6);
+   ObjectSetString(0, icon, OBJPROP_BMPFILE, "::Images\\FarhanFX_Icon.bmp");
+   ObjectSetInteger(0, icon, OBJPROP_SELECTABLE, false);
+   ObjectSetInteger(0, icon, OBJPROP_HIDDEN, true);
+   ObjectSetInteger(0, icon, OBJPROP_BACK, false);
+   ObjectSetInteger(0, icon, OBJPROP_ZORDER, 3);
 
-   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 521, 260, 24, "X  CLOSE ALL", C'120,20,20');
-   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 549, 126, 22, "Close BUY", C'20,80,20');
-   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 549, 126, 22, "Close SELL", C'20,80,20');
+   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 521, 280, 24, "X  CLOSE ALL", C'120,20,20');
+   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 549, 136, 22, "Close BUY", C'20,80,20');
+   CreateButton("CloseSellBtn", InpDashboardX + 144, InpDashboardY + 549, 136, 22, "Close SELL", C'20,80,20');
   }
 
 void UpdateDashboard()
@@ -1615,12 +1682,13 @@ void UpdateDashboard()
            beforeStart ? clrOrange : clrSilver, 8);
    y += lh + 6;
 
-   DbDivider("Div1", x, y, 260, C'55,55,65');
+   int buyCardTop = y;
+   DbDivider("Div1", x, y, 280, C'55,55,65');
    y += 9;
 
    DbLabel("BuyHdr", lx, y, StringFormat("BUY BASKET  (leg %d/%d, cycle %d)",
            (InpMaxLegsPerBasket > 0 ? g_buyBasket.legCount % InpMaxLegsPerBasket : g_buyBasket.legCount), InpMaxLegsPerBasket,
-           (InpMaxLegsPerBasket > 0 ? g_buyBasket.legCount / InpMaxLegsPerBasket + 1 : 1)), C'0,170,220', 8);
+           (InpMaxLegsPerBasket > 0 ? g_buyBasket.legCount / InpMaxLegsPerBasket + 1 : 1)), C'110,210,140', 8); // soft green - "buy" at a glance
    y += lh;
    DbLabel("BuyAvg", lx, y, PadRight("Avg Entry", lblW) + DoubleToString(g_buyBasket.weightedAvgEntry, 2), clrWhite, 8);
    y += lh;
@@ -1638,12 +1706,14 @@ void UpdateDashboard()
    DbLabel("BuyToDca", lx, y, PadRight("To DCA", lblW) + "$" + DoubleToString(buyToDca, 2), clrSilver, 8);
    y += lh + 6;
 
-   DbDivider("Div2", x, y, 260, C'55,55,65');
+   DbCard("BuyCard", x - 4, buyCardTop - 4, 288, (y - buyCardTop) + 8, C'14,26,20', C'40,70,55');
+   int sellCardTop = y;
+   DbDivider("Div2", x, y, 280, C'55,55,65');
    y += 9;
 
    DbLabel("SellHdr", lx, y, StringFormat("SELL BASKET (leg %d/%d, cycle %d)",
            (InpMaxLegsPerBasket > 0 ? g_sellBasket.legCount % InpMaxLegsPerBasket : g_sellBasket.legCount), InpMaxLegsPerBasket,
-           (InpMaxLegsPerBasket > 0 ? g_sellBasket.legCount / InpMaxLegsPerBasket + 1 : 1)), C'0,170,220', 8);
+           (InpMaxLegsPerBasket > 0 ? g_sellBasket.legCount / InpMaxLegsPerBasket + 1 : 1)), C'230,120,90', 8); // soft red/orange - "sell" at a glance
    y += lh;
    DbLabel("SellAvg", lx, y, PadRight("Avg Entry", lblW) + DoubleToString(g_sellBasket.weightedAvgEntry, 2), clrWhite, 8);
    y += lh;
@@ -1661,7 +1731,9 @@ void UpdateDashboard()
    DbLabel("SellToDca", lx, y, PadRight("To DCA", lblW) + "$" + DoubleToString(sellToDca, 2), clrSilver, 8);
    y += lh + 6;
 
-   DbDivider("Div3", x, y, 260, C'55,55,65');
+   DbCard("SellCard", x - 4, sellCardTop - 4, 288, (y - sellCardTop) + 8, C'28,16,14', C'80,45,40');
+   int filterCardTop = y;
+   DbDivider("Div3", x, y, 280, C'55,55,65');
    y += 9;
 
    DbLabel("FilterHdr", lx, y, "FILTERS", C'0,170,220', 8);
@@ -1697,7 +1769,10 @@ void UpdateDashboard()
    bool licenseOk = LicenseOk();
    DbLabel("License", lx, y, PadRight("License", lblW) + (licenseOk ? "OK" : "not set (gate off - trades not blocked)"),
            licenseOk ? clrLime : clrGray, 8);
-   y += lh + 10;
+   y += lh;
+
+   DbCard("FilterCard", x - 4, filterCardTop - 4, 288, (y - filterCardTop) + 8, C'16,20,28', C'50,60,75');
+   y += 10;
 
    ChartRedraw();
   }

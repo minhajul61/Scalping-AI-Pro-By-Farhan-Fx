@@ -3,6 +3,44 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-08-24 (later still): v25 - dashboard redesign, and the real reason
+## v24's spacing fix was the ONLY thing that visibly changed on the live chart
+
+User's blunt reaction to the v24 screenshot: does this look professional
+at all? Fair - the panel had no visible card/border, just text floating
+directly over candles. Root-caused, not guessed: `CreateDashboard()`'s
+background/accent/icon objects, and `CreateButton()`'s colors/sizes, were
+only ever set **once**, inside an `ObjectFind()`-gated "create if
+missing" block. That's correct for a brand-new chart, but the CXM demo
+chart in the screenshots has had this EA attached continuously since
+v15/v16 (branding was added then) and never removed - so on every single
+recompile since, those specific objects already existed and every one of
+those property-setting lines was silently skipped. The chart was
+plausibly still showing colors/sizes from **months-old code**, invisible
+to every visual change made since - v24's `DbLabel`/`DbDivider` spacing
+fix showed up because those two helpers already re-applied their
+properties on every call; the panel background never did.
+
+Fixed properly, not just patched: every property in `CreateButton()` and
+`CreateDashboard()` (background, border, header strip, accent, icon,
+buttons) now re-applies on every call - only the one-time `ObjectCreate`
+itself stays gated. This closes the whole *class* of "stale visual
+leftover from an old version" bug for good, not just this one instance.
+
+Also did an actual redesign while in there, not just the bugfix:
+brighter panel background (`C'21,23,30'` vs. the old near-black
+`C'12,12,16'` - now clearly distinguishable from the pure-black chart),
+a full-brightness gold border, a distinct dark-gold header strip behind
+the brand/version block, and tinted "card" boxes behind the BUY (green-
+tinted), SELL (red-tinted), and FILTERS (slate-tinted) sections so they
+read as separate grouped panels instead of one undifferentiated column
+of text. BUY/SELL basket headers now use green/red-orange instead of
+both being the same cyan, for at-a-glance scanning. Compiled clean (v25,
+0 errors/0 warnings), smoke-tested (dashboard enabled, short window) -
+no runtime errors from the new objects. Visual judgment on the actual
+result is the user's call once reloaded on a real chart - text-described
+here, not screenshotted by this session.
+
 ## 2026-08-24 (later still): v24 - dashboard label-spacing bug, found from
 ## the user's own live CXM screenshot
 

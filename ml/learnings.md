@@ -1455,3 +1455,86 @@ Farhan Fx` Python project's `learnings.md`.)
   wrong - 5.34%) is the real, honest cost of letting a deep basket ride
   instead of cutting it - that trade-off is real and should be expected
   to bite eventually, this is one window's result, not a guarantee.
+
+- **2026-08-24 (v22, floating-loss-scaled profit target - implemented,
+  but the verification backtest surfaced a bigger, more urgent problem
+  than the target formula itself):** explicit request: "$5000 floating
+  loss -> minimum $1000 profit before releasing" (a 20% ratio), because
+  the per-leg-growth-only target from v21 could let a basket that's
+  genuinely deep underwater release for a target that's tiny relative
+  to how much it just survived. Added `InpTargetPercentOfFloatingLoss`
+  (default 20.0) and rewrote `GetProfitTarget()` to
+  `MathMax(perLegBaseline, |floatingPL| * pct/100)` - the floating-loss
+  term is 0/inactive while a basket is shallow or in profit, and only
+  takes over once it's genuinely deep, exactly matching the user's
+  example. Compiled clean (v22, 0 errors/0 warnings).
+
+  **Verification hit a real methodological wall.** Every prior
+  apples-to-apples backtest in this file used CXM Direct's demo
+  (login 252424, symbol `XAUUSDc`) - the same account that blew up
+  live on 2026-08-24. That login's password is not cached anywhere
+  this session could reach (checked `accounts.dat` in the shared
+  "MetaTrader 5" terminal data folder - not present; the CXM historical
+  price/tick data *is* cached locally from an earlier session, but
+  Strategy Tester still refused to start without a resolvable login:
+  `"tester not started because the account is not specified"`).
+  Substituted the only account this session could actually use
+  (Exness-MT5Trial17, login 463741386, symbol plain `XAUUSD`) rather
+  than silently skip verification - **but that data source is NOT the
+  same one behind the earlier documented +$699.49/PF 1.81 result, and
+  its own report header self-reports only 12% real ticks** (mostly
+  OHLC-synthesized intrabar paths, not genuine tick-by-tick data) -
+  both real caveats on the number below, disclosed rather than hidden.
+
+  **A second, critical process bug was caught before this result could
+  even be trusted at all:** the first attempt on the correct symbol
+  produced an identical-down-to-the-cent catastrophic result whether
+  `InpTargetPercentOfFloatingLoss` was 20 or 0 - a giveaway. Checked the
+  Tester's own echoed `Inputs` list in the report and it was missing
+  entire input groups (License, Trading Hours, Daily Loss Limit, Chart
+  Visuals) and several individual v21/v22 inputs entirely - the Expert
+  file actually loaded from this terminal's own
+  `MQL5\Experts\Scalping Ai Pro By Farhan FX.ex5` was a stale copy from
+  **2026-08-16**, predating the entire v21 direction-change (7am gate,
+  unlimited legs, daily loss limit, the new floating-loss target -
+  none of it existed in that binary). `metaeditor64.exe /compile`
+  writes the `.ex5` next to the source file it's given, not into every
+  terminal's own `MQL5\Experts` folder - compiling via the Vantage
+  terminal's MetaEditor does NOT update what the separate "MetaTrader 5"
+  (CXM/Exness-shared) terminal actually runs in its own Tester. Copied
+  the freshly-compiled `.ex5` (and `.mq5`) from the repo into that
+  terminal's `MQL5\Experts\` (both the root and `Advisors\` subfolder)
+  before re-running - confirmed fixed by checking the report's own
+  echoed input list contained every v22 input this time. **New standing
+  rule for this project: before trusting any Tester report, check the
+  report's own printed `Inputs:` section actually contains every input
+  group the current source file has - a stale `.ex5` sitting in a
+  terminal's `Experts` folder is a silent-wrong-binary risk exactly like
+  the `.set`-file caching gotcha, just one layer up.**
+
+  **The real (correct-binary, caveated-data) result: $20,000 -> final
+  balance -$22,379.76, in well under one calendar day.** 983 trades,
+  profit factor 0.30, max balance drawdown 109.65%, margin level 0.03%
+  at stop-out. The entire blowup happened between 2026.07.01 07:00:00
+  (the very first bar the 7am gate allowed a trade) and 14:35:00 the
+  same day - about 7.5 hours - while XAUUSD rallied roughly
+  $3,972 -> $4,111 (~3.5%) in one direction. The SELL basket kept
+  adding legs into the rise the entire time (unlimited legs, no SL, per
+  the v21 explicit design) until margin ran out. This is the same
+  mechanism, not a different bug, as the real 2026-08-24 CXM blowup this
+  whole v21/v22 direction-change was meant to prevent - reproduced here
+  in a controlled backtest, on literal day one of the test window,
+  independent of the new floating-loss-target change (confirmed via the
+  before-mentioned accidental same-result-regardless-of-input check,
+  once repeated on the correct binary it was still the dominant risk).
+  **The floating-loss-scaled target does what it was asked to do - it
+  raises the bar for what counts as "enough profit to release a deep
+  basket" - but it cannot fix, and was never going to fix, the
+  underlying unbounded-exposure problem: unlimited legs with no per-leg
+  and no basket-level stop means one sustained multi-hour trend can
+  still exhaust the account's margin before the position ever has a
+  chance to average back to a releasable profit.** Reported to the user
+  honestly, alongside the CXM-data-access and stale-binary caveats,
+  rather than either hiding the result or unilaterally adding a safety
+  cap that would contradict their explicit "unlimited legs, never book
+  a loss" decision without asking first.

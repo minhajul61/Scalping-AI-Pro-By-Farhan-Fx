@@ -3,6 +3,54 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-08-24 (later still): v22 - floating-loss-scaled profit target,
+## and a real backtest that re-confirms the live blowup risk is structural
+
+Explicit request: "$5000 floating loss -> minimum $1000 profit before
+releasing" (a 20% ratio), because v21's per-leg-growth-only target could
+let a genuinely deep basket release for a target tiny relative to how
+much it just survived. Added `InpTargetPercentOfFloatingLoss` (default
+20.0) and rewrote `GetProfitTarget()` to
+`MAX(per-leg baseline, |floatingPL| * pct/100)` - matches the user's
+example exactly, only takes over once a basket is genuinely underwater.
+Compiled clean (0 errors, 0 warnings) as v22.
+
+**Verification surfaced two real process bugs before the result could be
+trusted, and then a result worth taking seriously on its own:**
+1. The terminal used for local Tester runs had a **stale `.ex5` from
+   2026-08-16** sitting in its own `MQL5\Experts\` folder - predating the
+   entire v21 direction-change. `metaeditor64.exe /compile` writes the
+   output next to the source file it's given, not into every terminal's
+   own Experts folder - a real gap in the compile workflow, now fixed by
+   always copying the fresh `.ex5`/`.mq5` into the target terminal's
+   `MQL5\Experts\` before testing, and by checking the Tester report's
+   own echoed `Inputs:` section actually lists every current input group
+   before trusting any number from it.
+2. Could not log into the CXM demo (252424, `XAUUSDc`) used for every
+   prior apples-to-apples backtest in this project - its password isn't
+   cached locally. Substituted the only reachable account (Exness demo,
+   plain `XAUUSD` symbol) rather than skip verification - but that
+   source's own report header self-reports only **12% real ticks**, a
+   real data-quality caveat on the number below.
+
+**The result, correct binary, caveated data: $20,000 -> final balance
+-$22,379.76, in under 8 hours** (2026.07.01 07:00-14:35 server time, the
+very first day the 7am gate allowed trading). XAUUSD rallied
+~$3,972 -> $4,111 (~3.5%) in one direction; the SELL basket kept adding
+legs into the rise the entire time (unlimited legs, no SL, per the v21
+design) until margin ran out - 983 trades, profit factor 0.30, margin
+level 0.03% at stop-out. Confirmed (by re-running with
+`InpTargetPercentOfFloatingLoss=0`) this is not caused by the new
+formula - it's the same structural risk that produced the real
+2026-08-24 CXM blowup, reproduced here in a controlled backtest on day
+one of the window.
+
+Reported honestly to the user, with the data-source/binary caveats made
+explicit rather than presented as a clean apples-to-apples result.
+**User's explicit decision after seeing this: keep unlimited legs as-is,
+no basket-level cap added - the risk is understood and accepted.** Full
+writeup in `ml/learnings.md`'s 2026-08-24 (v22) entry.
+
 ## 2026-08-24 correction: v21's -$275.58 result was wrong - a stale
 ## `.set`-file value silently re-enabled Daily Loss Limit during the test
 

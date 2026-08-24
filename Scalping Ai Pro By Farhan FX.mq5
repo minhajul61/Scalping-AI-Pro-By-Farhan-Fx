@@ -63,7 +63,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v21"
+#define EA_BUILD_VERSION "v22"
 
 #include <Trade\Trade.mqh>
 
@@ -115,6 +115,13 @@ input int      InpMaxLegsPerBasket      = 7;      // Legs Per Sizing Cycle (lot 
 input bool     InpUnlimitedLegs         = true;   // Unlimited Legs (2026-08-21, explicit request: no cap - basket keeps DCA'ing until profitable, no matter how many legs)
 input int      InpAbsoluteMaxLegsPerBasket = 50;  // Absolute Max Legs (only used if Unlimited Legs = false)
 input double   InpCycleTargetGrowth     = 0.5;    // Target Growth Per Cycle (0.5 = +50%)
+// 2026-08-24, explicit request: once a basket is genuinely underwater,
+// its target should scale with HOW underwater it is, not just how many
+// legs it's taken - "$5000 floating loss -> minimum $1000 profit before
+// releasing" (a 20% ratio). See GetProfitTarget() - this becomes the
+// dominant term once a basket is deep; the per-leg growth above still
+// sets the (much smaller) target for early/shallow legs.
+input double   InpTargetPercentOfFloatingLoss = 20.0; // Min Target As % Of Current Floating Loss (0 = off, use per-leg growth only)
 input bool     InpUseServerSideTP       = true;   // Attach Real TP To Each Leg (fires on the broker's server, less slippage than the EA closing legs one-by-one)
 
 input group "=== DCA / Martingale ==="
@@ -570,13 +577,35 @@ void RefreshBaskets()
 // taken on real risk the flat/sawtooth version understated.
 // The very first (bootstrap) leg always stays at the flat base - growth
 // only starts from the first DCA add onward.
+//
+// 2026-08-24, explicit request: on top of the per-leg growth above, once
+// a basket is genuinely underwater the target must scale with HOW deep
+// it is, not just how many legs it took to get there - "$5000 floating
+// loss -> minimum $1000 profit before releasing" (InpTargetPercentOfFloatingLoss,
+// a 20% ratio by default). Two legs can both be "leg 6" with wildly
+// different floating loss depending on how far price ran, and the old
+// leg-count-only formula charged them the same target - this fixes that.
+// The final target is whichever of the two is larger: the per-leg
+// baseline still governs early/shallow legs (floating loss is small or
+// even positive there, so the % term is near zero), while the floating-
+// loss term takes over and dominates once a basket is deep underwater.
 double GetProfitTarget(const SBasket &b)
   {
+   double baseline;
    if(InpMaxLegsPerBasket <= 0 || b.legCount <= 1)
-      return InpBasketProfitTargetUSD;
-   double growthPerLeg = InpCycleTargetGrowth / InpMaxLegsPerBasket;
-   int legsPastFirst = b.legCount - 1;
-   return InpBasketProfitTargetUSD * (1.0 + legsPastFirst * growthPerLeg);
+      baseline = InpBasketProfitTargetUSD;
+   else
+     {
+      double growthPerLeg = InpCycleTargetGrowth / InpMaxLegsPerBasket;
+      int legsPastFirst = b.legCount - 1;
+      baseline = InpBasketProfitTargetUSD * (1.0 + legsPastFirst * growthPerLeg);
+     }
+
+   double floatingLossBased = 0;
+   if(InpTargetPercentOfFloatingLoss > 0 && b.floatingPL < 0)
+      floatingLossBased = MathAbs(b.floatingPL) * (InpTargetPercentOfFloatingLoss / 100.0);
+
+   return MathMax(baseline, floatingLossBased);
   }
 
 // The price level at which this basket's combined floating P/L (summed

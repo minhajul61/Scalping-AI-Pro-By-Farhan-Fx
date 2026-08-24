@@ -63,7 +63,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v20"
+#define EA_BUILD_VERSION "v21"
 
 #include <Trade\Trade.mqh>
 
@@ -110,9 +110,10 @@ input string   InpLicenseKey = ""; // License Key (given individually to each cl
 
 input group "=== Basket & Profit Target ==="
 input double   InpInitialLot            = 0.01;   // Initial Lot Size
-input double   InpBasketProfitTargetUSD = 2.0;    // Take Profit ($) - grows each new cycle
-input int      InpMaxLegsPerBasket      = 7;      // Max DCA Legs Per Cycle
-input int      InpAbsoluteMaxLegsPerBasket = 50;  // Absolute Max Legs (emergency hard limit)
+input double   InpBasketProfitTargetUSD = 1.0;    // Take Profit ($) - grows a little every DCA leg (see GetProfitTarget())
+input int      InpMaxLegsPerBasket      = 7;      // Legs Per Sizing Cycle (lot size still resets every N legs - keeps any single leg from hitting the broker's own max-lot cap; "unlimited" below removes the LEG-COUNT limit, not this)
+input bool     InpUnlimitedLegs         = true;   // Unlimited Legs (2026-08-21, explicit request: no cap - basket keeps DCA'ing until profitable, no matter how many legs)
+input int      InpAbsoluteMaxLegsPerBasket = 50;  // Absolute Max Legs (only used if Unlimited Legs = false)
 input double   InpCycleTargetGrowth     = 0.5;    // Target Growth Per Cycle (0.5 = +50%)
 input bool     InpUseServerSideTP       = true;   // Attach Real TP To Each Leg (fires on the broker's server, less slippage than the EA closing legs one-by-one)
 
@@ -131,7 +132,7 @@ input ENUM_TIMEFRAMES  InpTrendTF           = PERIOD_H1; // Trend Timeframe
 input int              InpTrendMAPeriod     = 50;        // Trend MA Period
 input int              InpTrendAtrPeriod    = 14;        // Trend ATR Period
 input double           InpTrendStrengthATRMult = 0.5;    // Trend Strength (x ATR)
-input bool             InpUseMultiTFTrend   = false;     // Require Multiple Timeframes To Agree
+input bool             InpUseMultiTFTrend   = true;      // Require Multiple Timeframes To Agree (2026-08-21: default on - "trend filter valo vabe kaj kore" - H1+H4+D1 must all agree, not just H1)
 input ENUM_TIMEFRAMES  InpTrendTF2          = PERIOD_H4; // Second Trend Timeframe
 input ENUM_TIMEFRAMES  InpTrendTF3          = PERIOD_D1; // Third Trend Timeframe
 
@@ -143,6 +144,16 @@ input int      InpNewsMinutesAfter    = 30;     // Minutes After News
 input bool     InpUseManualNewsWindow = false;  // Also Block A Specific Date/Time
 input string   InpManualNewsStart     = "";     // Manual Block Start (yyyy.mm.dd hh:mi)
 input string   InpManualNewsEnd       = "";     // Manual Block End (yyyy.mm.dd hh:mi)
+
+input group "=== Trading Hours ==="
+// 2026-08-21, explicit request: new entries only from this hour onward each
+// day (broker/server time, i.e. the same clock TimeCurrent() already uses
+// everywhere else in this EA) - blocked before it, resumes automatically
+// at the same hour the next day. Existing baskets keep being managed
+// (closed at target, etc.) at any hour - this only gates NEW entries,
+// same non-blocking pattern as every other gate in this EA.
+input bool     InpUseTradingHours   = true; // Only Trade After This Hour Each Day
+input int      InpTradingStartHour  = 7;    // Trading Start Hour (0-23, broker/server time)
 
 input group "=== Daily Profit Target ==="
 input bool     InpUseDailyProfitTarget = false; // Stop New Trades After Reaching This Daily Profit
@@ -728,6 +739,9 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
    else
       b = g_sellBasket;
 
+   if(IsBeforeTradingStart())
+      return; // before InpTradingStartHour - existing baskets still manage/close normally, only new entries pause
+
    if(IsNewsBlackout())
       return; // paused around medium/high-impact news (calendar and/or manual window), both bootstrap and DCA-adds
 
@@ -737,8 +751,11 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
    if(DailyLossLimitHit())
       return; // today's loss limit hit - OnTick() also force-closes both baskets, see there
 
-   if(!LicenseOk())
-      return; // invalid/missing key - existing baskets still manage/close normally, only new entries pause; dashboard shows why
+   // License check temporarily removed 2026-08-21 per explicit request -
+   // "get it working successfully first, deal with license later." The
+   // key list and LicenseOk() function are still in the file (below,
+   // unchanged) so re-adding this gate later is a one-line change:
+   //    if(!LicenseOk()) return;
 
    if(b.legCount == 0)
      {
@@ -772,7 +789,7 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
                   (side == SIDE_BUY ? "BUY" : "SELL"), bid, ask, b.lastLegEntry, InpDcaDistancePrice, b.legCount,
                   TimeToString(b.lastLegTime, TIME_SECONDS));
 
-   if(adverse && b.legCount < InpAbsoluteMaxLegsPerBasket)
+   if(adverse && (InpUnlimitedLegs || b.legCount < InpAbsoluteMaxLegsPerBasket))
      {
       // Safety net, independent of whatever caused the adverse check to
       // pass: never add a leg faster than this after the previous one,
@@ -1276,6 +1293,20 @@ bool DailyTargetHit()
    return((balance - g_dayStartBalance) >= InpDailyProfitTargetUSD);
   }
 
+// Blocks new entries before InpTradingStartHour each day - existing
+// baskets keep being managed regardless (same non-blocking gate pattern
+// as every other check here). No "end hour" - once past the start hour,
+// stays open for the rest of that day; resets automatically at midnight
+// server time since the hour check is re-evaluated fresh every call.
+bool IsBeforeTradingStart()
+  {
+   if(!InpUseTradingHours)
+      return false;
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   return(dt.hour < InpTradingStartHour);
+  }
+
 // Equity-based, on purpose - see the input group comment above for why
 // this deliberately does NOT use the same realized-balance-only approach
 // as DailyTargetHit(). Once true, ManageBasketEntries() halts new entries
@@ -1440,7 +1471,7 @@ void CreateDashboard()
       ObjectSetInteger(0, bg, OBJPROP_XDISTANCE, InpDashboardX - 10);
       ObjectSetInteger(0, bg, OBJPROP_YDISTANCE, InpDashboardY - 10);
       ObjectSetInteger(0, bg, OBJPROP_XSIZE, 280);
-      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 580);
+      ObjectSetInteger(0, bg, OBJPROP_YSIZE, 595);
       ObjectSetInteger(0, bg, OBJPROP_BGCOLOR, C'12,12,16');
       ObjectSetInteger(0, bg, OBJPROP_BORDER_TYPE, BORDER_FLAT);
       ObjectSetInteger(0, bg, OBJPROP_COLOR, C'120,95,40'); // warm gold-tinted border - brand accent, matches gold/XAUUSD theme
@@ -1484,9 +1515,9 @@ void CreateDashboard()
       ObjectSetInteger(0, icon, OBJPROP_ZORDER, 2);
      }
 
-   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 506, 260, 24, "X  CLOSE ALL", C'120,20,20');
-   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 534, 126, 22, "Close BUY", C'20,80,20');
-   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 534, 126, 22, "Close SELL", C'20,80,20');
+   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 521, 260, 24, "X  CLOSE ALL", C'120,20,20');
+   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 549, 126, 22, "Close BUY", C'20,80,20');
+   CreateButton("CloseSellBtn", InpDashboardX + 134, InpDashboardY + 549, 126, 22, "Close SELL", C'20,80,20');
   }
 
 void UpdateDashboard()
@@ -1537,6 +1568,13 @@ void UpdateDashboard()
                            : DoubleToString(dailyLossPct, 1) + "% / " + DoubleToString(InpDailyLossLimitPercent, 1) + "%";
    DbLabel("DailyLoss", lx, y, PadRight("Daily Loss Limit", lblW) + dailyLossText,
            dailyLossHit ? clrRed : clrSilver, 8);
+   y += lh;
+   bool beforeStart = IsBeforeTradingStart();
+   string tradingHoursText = !InpUseTradingHours ? "off"
+                              : beforeStart ? StringFormat("before %02d:00 (paused)", InpTradingStartHour)
+                              : StringFormat("open (from %02d:00)", InpTradingStartHour);
+   DbLabel("TradingHours", lx, y, PadRight("Trading Hours", lblW) + tradingHoursText,
+           beforeStart ? clrOrange : clrSilver, 8);
    y += lh + 6;
 
    DbDivider("Div1", x, y, 260, C'55,55,65');

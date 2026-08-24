@@ -3,6 +3,51 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-08-24: v20 blew a demo account to $0.62 (real, understood, not a
+## new bug) -> v21: unlimited legs, never book a loss, license removed
+
+Three days after v20 went live unattended on the CXM demo, it dropped
+from $10,175 to **$0.62**. Root-caused from the account's own exported
+history (not guessed): gold moved ~$37 (~0.8%) in ~10 minutes, and a BUY
+basket that had already cycled deep (0.32/0.64-lot legs) kept adding legs
+straight through the crash - one single 0.64-lot leg alone lost
+**-$2,354.80**. `InpUseDailyLossLimit` (built exactly for this) was off.
+This is the real, live version of exactly what this project's own
+research named: "months of small wins, one trend erases it all" - not a
+new failure mode, the first live demonstration of the standing "no
+stop-loss ever" decision's actual cost.
+
+The user's response was not to add the safety net, but to go further in
+the opposite direction - implemented as explicitly asked, after stating
+the one concrete mechanical consequence once (a broker margin call
+becomes the only remaining backstop with no self-imposed leg cap):
+- **`InpUseTradingHours`** (default true) - new entries only from
+  **7am** server time daily, existing baskets still managed anytime.
+- **`InpUnlimitedLegs`** (default true) - no cap on total legs; a basket
+  can DCA indefinitely. The lot-size-reset-every-`InpMaxLegsPerBasket`-legs
+  cycling stays, so "unlimited legs" doesn't also mean "unlimited
+  single-leg lot size" (which would hit the broker's own max-lot limit
+  almost immediately).
+- **`InpUseMultiTFTrend`** default flipped to **true** - H1+H4+D1 must
+  all agree now, not just H1.
+- **License check removed** from the entry gate (function/key-list still
+  in the file - one line to restore) - "get it working first, license
+  later."
+- **`InpBasketProfitTargetUSD`** lowered to **$1.00** (from $2.00).
+
+Confirmed via the Tester report: **zero `sl`-tagged closes anywhere** -
+the no-loss-booking design works exactly as specified, every close is a
+basket-level TP hit. **Real Tester run** (Model=4, every tick, XAUUSDc/
+CXM, the same 2026.07.01-08.10 stress window, $20,000 deposit): **net
+-$275.58, profit factor 0.80, max equity drawdown 5.34%, 3,125 trades.**
+Still a net loss overall even with zero SL-closes, because a basket's
+shared TP can let a late-joined leg realize its own loss even while the
+basket as a whole reaches target - reported as found. Full writeup,
+including the 10-leg target-growth worked example ($1.64 at leg 10, still
+climbing since legs no longer cap), in `ml/learnings.md`'s 2026-08-24
+entry. Compiled clean (0 errors, 0 warnings) as v21, not yet deployed
+anywhere - the account that blew up was demo, no real money lost.
+
 ## 2026-08-21 (later still): smooth per-leg target growth, v20 - backtest
 ## says worse, kept for live evaluation per explicit user decision
 

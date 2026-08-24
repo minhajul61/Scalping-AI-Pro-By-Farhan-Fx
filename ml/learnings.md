@@ -1327,3 +1327,79 @@ Farhan Fx` Python project's `learnings.md`.)
   if live also comes back worse, reverting to the step function is a
   one-function change away (see `GetProfitTarget()`'s git history at
   the v19 tag/commit for the exact prior formula).
+
+- **2026-08-24 (v20 live on CXM demo blew the account to $0.62 - real,
+  understood, not a new bug - then v21: unlimited legs, never book a
+  loss, trading-hour gate, license removed, per explicit user
+  decision):** three days after v20 went live unattended, the CXM demo
+  account (252424, started at $10,175) dropped to **$0.62**. Root-caused
+  from the exported `ReportHistory-252424.html` (parsed with Python, not
+  guessed from screenshots) rather than assumed:
+  - Gold moved from ~4633 to ~4596 (~$37, ~0.8%) in about **10 minutes**
+    (2026.08.24 03:17-03:27).
+  - A BUY basket had already cycled deep (0.32/0.64-lot legs = late
+    positions within a sizing cycle) before this move, and kept adding
+    legs as price fell straight through the ladder - individual leg
+    losses up to **-$2,354.80** on a single 0.64-lot leg.
+  - Leg-open gaps were all 2-4 minutes apart (not the sub-5-second
+    pattern of the still-unresolved cascade bug from 2026-08-18) -
+    genuinely a large, fast, real price move overwhelming the DCA
+    ladder, not a repeat of that bug.
+  - **`InpUseDailyLossLimit` was off** (its default) the whole time - the
+    one feature built specifically for this scenario never got a chance
+    to act.
+
+  This is exactly the risk this project's own research (2026-08-21
+  entries) named directly: "months of small wins, one trend erases it
+  all." Not a new failure mode - the first real live demonstration of
+  the standing, explicit, repeatedly-confirmed "no stop-loss ever"
+  decision's actual cost.
+
+  **User's response, not to add the safety net but to go further in the
+  opposite direction** - explicit instructions, implemented as asked
+  after stating the one concrete mechanical consequence once (broker
+  margin call becomes the only remaining backstop once there's no
+  self-imposed leg cap):
+  - `InpUseTradingHours` (default true) + `InpTradingStartHour` (7) -
+    new entries blocked before 7am server time daily, resumes
+    automatically; existing baskets still managed at any hour.
+  - `InpUnlimitedLegs` (default true) - `InpAbsoluteMaxLegsPerBasket` is
+    now ignored when true; a basket can add legs indefinitely. Kept
+    `InpMaxLegsPerBasket`'s lot-size-reset-every-N-legs cycling
+    mechanism as-is (a defensible reading of "remove the leg [cap]
+    system" - it's what keeps "unlimited legs" from also meaning
+    "unlimited single-leg lot size", which would hit the broker's own
+    max-lot-per-order limit almost immediately).
+  - `InpUseMultiTFTrend` default flipped `false` -> `true` - H1+H4+D1
+    must all agree now, not just H1, per "trend filter valo vabe kaj
+    kore" (make the trend filter work well).
+  - The `LicenseOk()` gate call removed from `ManageBasketEntries()`
+    (function/key-list left in the file, one line to restore later) -
+    "license k remove koro, age success hok, tarpor licance niye kaj
+    korbo."
+  - `InpBasketProfitTargetUSD` default lowered 2.0 -> 1.0, per a
+    follow-up request, worked out for a 10-leg basket using the still-
+    active v20 smooth-growth formula: `target = 1.0 * (1 + 9 *
+    (0.5/7)) = $1.64` at leg 10, continuing to grow (no reset, since
+    legs are now unlimited) for any leg count beyond that.
+
+  No SL-tagged closes exist anywhere in this build - confirmed by
+  grepping the Tester report for `"sl "` occurrences (zero), matching
+  "kuno loss book korbe na" exactly as asked; every close is still a
+  basket-level TP hit, even when a specific late-added leg within that
+  basket nets a loss on its own.
+
+  **Real Strategy Tester run** (Model=4, every tick/real ticks, XAUUSDc/
+  CXM, 2026.07.01-08.10 - the same catastrophic-event window used to
+  verify v19/v20, $20,000 deposit): **net -$275.58, profit factor 0.80,
+  max equity drawdown $1,069.11 (5.34%), 3,125 trades.** Confirmed 0
+  `sl`-tagged closes in the report (the no-loss-booking design working
+  exactly as specified) - and still a net loss overall, because a
+  basket's shared TP can let a late-joined, poorly-timed leg realize a
+  loss on its own books even while the basket as a whole reaches
+  target; enough of those across 3,125 trades summed negative. Reported
+  as found - not adjusted, not softened.
+
+  Compiled clean (0 errors, 0 warnings) as v21. Not yet deployed
+  anywhere as of this commit - the CXM account that blew up is demo, no
+  real money was lost.

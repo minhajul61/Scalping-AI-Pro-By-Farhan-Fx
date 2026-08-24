@@ -3,6 +3,34 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-08-24 correction: v21's -$275.58 result was wrong - a stale
+## `.set`-file value silently re-enabled Daily Loss Limit during the test
+
+Asked to investigate why v21 (see the entry below) still lost money
+despite "never book a loss," parsed the Tester report properly (grouped
+deals by close time+price+side) instead of re-guessing, and found the
+real cause: a 47-leg basket closed at **-$1,013.63** - not via SL, not
+via TP (which can't produce a basket-wide loss by construction) - via
+`ForceCloseOnDailyLossLimit()`. `InpUseDailyLossLimit` was `false` in
+the compiled defaults and never set in `[TesterInputs]`, but a **stale
+cached `.set` file** from an earlier v19 test session (where it was
+deliberately `true`) silently overrode the default - this project's own
+documented `.set`-file caching gotcha, which bit this session anyway.
+
+Re-ran with `InpUseDailyLossLimit=false` explicitly passed this time,
+same window, same $20,000 deposit: **net +$699.49, profit factor 1.81,
+max equity drawdown 7.39%, 2,938 trades.** The basket that previously
+got force-closed at a big loss was allowed to keep averaging and
+eventually recovered - the "never book a loss, unlimited legs" theory
+held up in this specific backtest window once actually tested correctly.
+Drawdown is meaningfully higher than the (also wrong) earlier number,
+which is the real, honest cost of letting a basket ride instead of
+cutting it - one window's result, not a guarantee it always recovers.
+**Lesson written down for future test runs: always pass every input
+that changes behavior explicitly in `[TesterInputs]`, never assume the
+compiled default silently applies in the Tester.** Full writeup in
+`ml/learnings.md`.
+
 ## 2026-08-24: v20 blew a demo account to $0.62 (real, understood, not a
 ## new bug) -> v21: unlimited legs, never book a loss, license removed
 

@@ -1403,3 +1403,55 @@ Farhan Fx` Python project's `learnings.md`.)
   Compiled clean (0 errors, 0 warnings) as v21. Not yet deployed
   anywhere as of this commit - the CXM account that blew up is demo, no
   real money was lost.
+
+  **CORRECTION, same day, before the ink even dried:** the per-leg-loss
+  explanation above was incomplete. Asked to push the target higher
+  ("dca te r o profit barate hobe jeno kichu trade loss e geleo jeno
+  profit thake"), investigated the actual -$275.58 result properly
+  instead of just raising a number - parsed the Tester report's deals
+  table (Python, grouped by close time+price+side, not eyeballed) and
+  found 407 basket-close groups, only 2 net-negative. One of the two
+  was the Tester's own end-of-test forced liquidation (harmless, tiny).
+  **The other was a 47-leg basket closing at -$1,013.63 - all 47 legs
+  negative, not tagged `sl`, not a TP hit either** (TP by construction
+  can't produce a basket-wide loss). Grepped the actual Tester log
+  around that exact timestamp and found the real cause directly:
+
+  ```
+  GoldDualBasketDCA: DAILY LOSS LIMIT HIT (5.0% of day-start balance) - force-closing both baskets.
+  ```
+
+  **`InpUseDailyLossLimit` was NOT actually off during the v21 test that
+  produced -$275.58**, despite the compiled default being `false` and
+  despite not setting it in `[TesterInputs]` - a stale cached `.set`
+  file value (`true`, left over from earlier v19 testing sessions)
+  silently overrode the compiled default. This project's own README
+  already documents this exact `.set`-file caching gotcha; it bit this
+  session anyway because the assumption "not specifying an input means
+  the compiled default applies" was wrong for Tester runs specifically.
+  Lesson reinforced, now written down a second time: **always pass
+  every input explicitly in `[TesterInputs]` for anything that changes
+  behavior, especially bools that default differently from what a
+  previous test used - never rely on the compiled default silently
+  applying.**
+
+  Also a real gap in the earlier verification itself: checking for
+  `"sl "`-tagged closes only proves no *stop-loss* closes happened - it
+  says nothing about EA-initiated `CloseBasket()` calls from other
+  paths (daily-loss-limit, daily-target, manual buttons), which carry
+  no special tag in the deal comment at all. "Zero `sl` closes" was
+  true and irrelevant to what actually happened.
+
+  **Re-ran with `InpUseDailyLossLimit=false` genuinely, explicitly, set
+  in `[TesterInputs]` this time** (same window, same $20,000 deposit):
+  **net +$699.49, profit factor 1.81, max equity drawdown $1,479.24
+  (7.39%), 2,938 trades.** Confirmed via the same deals-table parse: 0
+  `sl`/daily-loss-tagged closes this time, genuinely all TP hits. The
+  basket that previously got force-closed at -$1,013.63 was allowed to
+  keep averaging in this run and eventually recovered - the user's
+  "never book a loss, unlimited legs" theory held up in this specific
+  backtest window, once actually tested without an accidental safety
+  net interfering. Higher peak drawdown (7.39% vs the earlier - also
+  wrong - 5.34%) is the real, honest cost of letting a deep basket ride
+  instead of cutting it - that trade-off is real and should be expected
+  to bite eventually, this is one window's result, not a guarantee.

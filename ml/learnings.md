@@ -1621,3 +1621,27 @@ Farhan Fx` Python project's `learnings.md`.)
   dashboard bug in a row this file only actually confirmed via the
   user's own screenshots, not backtests - a real blind spot: nothing in
   the Tester or compile step can catch a chart-object rendering bug).**
+
+- **2026-08-24 (v27, overflow fix + a genuinely misleading "/7" label):**
+  next screenshot showed the License line's value text running past the
+  panel's right edge (40-char string vs. a ~300px panel - just too
+  narrow) - shortened the string and widened the panel/cards/dividers/
+  buttons for margin. Separately, and more importantly: the user pushed
+  back hard on "BUY BASKET (leg 2/7, cycle 1)", reading `/7` as a 7-leg
+  cap contradicting the explicit "unlimited martingale" decision. It
+  wasn't actually a cap - `InpMaxLegsPerBasket` only controls when lot
+  size resets back down (so a single leg's lot doesn't double forever
+  and hit the broker's max-lot limit) - but the notation genuinely
+  invited that reading, and the user's objection was fair even though
+  the underlying behavior was already correct. Changed the header to a
+  plain running total + "(unlimited)" tag instead of the leg/cycle
+  math - removes the ambiguity at the source instead of trying to
+  explain it away. Did **not** delete `InpMaxLegsPerBasket` despite
+  being asked to "remove the rest of the settings" in the same message -
+  it's still real, load-bearing safety logic, unlike the two inputs
+  actually deleted in v23 which did nothing. **Lesson: "this setting is
+  confusing" and "this setting is unnecessary" are different complaints
+  - the first was fixed by fixing the label; caving and deleting the
+  underlying setting because a display bug made it look like a cap
+  would have removed real protection to make a text-formatting problem
+  go away.**

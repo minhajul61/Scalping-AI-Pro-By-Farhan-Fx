@@ -70,7 +70,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v26"
+#define EA_BUILD_VERSION "v27"
 
 #include <Trade\Trade.mqh>
 
@@ -1547,7 +1547,12 @@ void DbCard(string name, int x, int y, int w, int h, color bg, color border)
 //    current code's actual intended look, not a stale leftover.
 void CreateDashboard()
   {
-   int px = InpDashboardX - 10, py = InpDashboardY - 10, pw = 300, ph = 605;
+   // 2026-08-24: widened 300->340 (and every child element to match) -
+   // a live screenshot showed the License line's value text running
+   // past the panel's right edge onto the chart. That specific string
+   // was also shortened (see the License DbLabel call below), but this
+   // extra margin covers any other value text that gets long later.
+   int px = InpDashboardX - 10, py = InpDashboardY - 10, pw = 340, ph = 605;
 
    string bg = DB_PREFIX + "BG";
    if(ObjectFind(0, bg) < 0)
@@ -1616,9 +1621,9 @@ void CreateDashboard()
    ObjectSetInteger(0, icon, OBJPROP_BACK, false);
    ObjectSetInteger(0, icon, OBJPROP_ZORDER, 3);
 
-   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 521, 280, 24, "X  CLOSE ALL", C'120,20,20');
-   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 549, 136, 22, "Close BUY", C'20,80,20');
-   CreateButton("CloseSellBtn", InpDashboardX + 144, InpDashboardY + 549, 136, 22, "Close SELL", C'20,80,20');
+   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 521, 320, 24, "X  CLOSE ALL", C'120,20,20');
+   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 549, 156, 22, "Close BUY", C'20,80,20');
+   CreateButton("CloseSellBtn", InpDashboardX + 164, InpDashboardY + 549, 156, 22, "Close SELL", C'20,80,20');
   }
 
 void UpdateDashboard()
@@ -1645,9 +1650,9 @@ void UpdateDashboard()
    // deterministic row layout below (this dashboard never changes which
    // rows it draws, so these never drift) - see the matching DbDivider
    // calls further down for the same numbers used unlabeled.
-   DbCard("BuyCard", x - 4, InpDashboardY + 173, 288, 113, C'14,26,20', C'40,70,55');
-   DbCard("SellCard", x - 4, InpDashboardY + 278, 288, 113, C'28,16,14', C'80,45,40');
-   DbCard("FilterCard", x - 4, InpDashboardY + 383, 288, 122, C'16,20,28', C'50,60,75');
+   DbCard("BuyCard", x - 4, InpDashboardY + 173, 328, 113, C'14,26,20', C'40,70,55');
+   DbCard("SellCard", x - 4, InpDashboardY + 278, 328, 113, C'28,16,14', C'80,45,40');
+   DbCard("FilterCard", x - 4, InpDashboardY + 383, 328, 122, C'16,20,28', C'50,60,75');
 
    // Icon (created once in CreateDashboard()) sits at (x-6, y-6), 64x47px -
    // text starts to its right, then drops back to the full-width left
@@ -1700,12 +1705,19 @@ void UpdateDashboard()
            beforeStart ? clrOrange : clrSilver, 8);
    y += lh + 6;
 
-   DbDivider("Div1", x, y, 280, C'55,55,65');
+   DbDivider("Div1", x, y, 320, C'55,55,65');
    y += 9;
 
-   DbLabel("BuyHdr", lx, y, StringFormat("BUY BASKET  (leg %d/%d, cycle %d)",
-           (InpMaxLegsPerBasket > 0 ? g_buyBasket.legCount % InpMaxLegsPerBasket : g_buyBasket.legCount), InpMaxLegsPerBasket,
-           (InpMaxLegsPerBasket > 0 ? g_buyBasket.legCount / InpMaxLegsPerBasket + 1 : 1)), C'110,210,140', 8); // soft green - "buy" at a glance
+   // 2026-08-24: was "(leg X/7, cycle N)" - the "/7" is the lot-sizing
+   // cycle length (InpMaxLegsPerBasket - lot resets every N legs so no
+   // single leg balloons to the broker's max-lot limit), NOT a cap on
+   // how many legs the basket can take - but the user read it as a cap
+   // and, reasonably, objected ("unlimited martingale bolechi, tao
+   // dekhacche"). There has been no leg-count cap since v23 (the only
+   // toggle that ever capped legs was deleted then). Now shows the
+   // plain running total with an explicit "(unlimited)" tag so it can't
+   // be misread as a ceiling.
+   DbLabel("BuyHdr", lx, y, StringFormat("BUY BASKET  (%d legs, unlimited)", g_buyBasket.legCount), C'110,210,140', 8); // soft green - "buy" at a glance
    y += lh;
    DbLabel("BuyAvg", lx, y, PadRight("Avg Entry", lblW) + DoubleToString(g_buyBasket.weightedAvgEntry, 2), clrWhite, 8);
    y += lh;
@@ -1723,12 +1735,10 @@ void UpdateDashboard()
    DbLabel("BuyToDca", lx, y, PadRight("To DCA", lblW) + "$" + DoubleToString(buyToDca, 2), clrSilver, 8);
    y += lh + 6;
 
-   DbDivider("Div2", x, y, 280, C'55,55,65');
+   DbDivider("Div2", x, y, 320, C'55,55,65');
    y += 9;
 
-   DbLabel("SellHdr", lx, y, StringFormat("SELL BASKET (leg %d/%d, cycle %d)",
-           (InpMaxLegsPerBasket > 0 ? g_sellBasket.legCount % InpMaxLegsPerBasket : g_sellBasket.legCount), InpMaxLegsPerBasket,
-           (InpMaxLegsPerBasket > 0 ? g_sellBasket.legCount / InpMaxLegsPerBasket + 1 : 1)), C'230,120,90', 8); // soft red/orange - "sell" at a glance
+   DbLabel("SellHdr", lx, y, StringFormat("SELL BASKET (%d legs, unlimited)", g_sellBasket.legCount), C'230,120,90', 8); // soft red/orange - "sell" at a glance
    y += lh;
    DbLabel("SellAvg", lx, y, PadRight("Avg Entry", lblW) + DoubleToString(g_sellBasket.weightedAvgEntry, 2), clrWhite, 8);
    y += lh;
@@ -1746,7 +1756,7 @@ void UpdateDashboard()
    DbLabel("SellToDca", lx, y, PadRight("To DCA", lblW) + "$" + DoubleToString(sellToDca, 2), clrSilver, 8);
    y += lh + 6;
 
-   DbDivider("Div3", x, y, 280, C'55,55,65');
+   DbDivider("Div3", x, y, 320, C'55,55,65');
    y += 9;
 
    DbLabel("FilterHdr", lx, y, "FILTERS", C'0,170,220', 8);
@@ -1780,7 +1790,13 @@ void UpdateDashboard()
    // when trades keep happening regardless would be actively misleading,
    // not just inaccurate.
    bool licenseOk = LicenseOk();
-   DbLabel("License", lx, y, PadRight("License", lblW) + (licenseOk ? "OK" : "not set (gate off - trades not blocked)"),
+   // 2026-08-24: was "not set (gate off - trades not blocked)" (40
+   // chars) - combined with the label column that ran past the panel's
+   // right edge in a live screenshot. Shortened to say the same thing
+   // in less space; panel/card width also increased below as a margin
+   // for any other value string that gets long (a HIT daily-loss-limit
+   // message, etc.).
+   DbLabel("License", lx, y, PadRight("License", lblW) + (licenseOk ? "OK" : "off (not blocking)"),
            licenseOk ? clrLime : clrGray, 8);
    y += lh;
 

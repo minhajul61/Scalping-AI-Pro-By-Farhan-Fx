@@ -3,6 +3,41 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-08-24 (later still): v27 - text overflowing the panel edge fixed,
+## and the "(leg X/7, cycle N)" header was genuinely misleading, not just ugly
+
+Two things from the user's next screenshot, one real bug and one real UX
+problem the user was right to push back on:
+1. **Text running past the panel's right edge** - worst on the License
+   line ("not set (gate off - trades not blocked)", 40 characters, was
+   simply wider than the 288-300px panel/cards). Shortened that string
+   to "off (not blocking)" and widened the whole panel/cards/dividers/
+   buttons (300->340px overall) as margin for any other value text that
+   gets long later (a HIT daily-loss-limit message, etc.).
+2. **"BUY BASKET (leg 2/7, cycle 1)"** - the user read `/7` as a
+   7-leg cap and pushed back hard: "unlimited martingale bolechi, tao
+   dekhacche" (I said unlimited martingale, so why is this still
+   showing). The user's reading was reasonable even though it wasn't
+   actually a cap - `/7` was `InpMaxLegsPerBasket`, the *lot-sizing*
+   cycle length (lot resets every N legs so no single leg balloons to
+   the broker's max-lot limit - a different, still-needed safety
+   mechanism, not a leg-count ceiling; there has been no leg-count cap
+   at all since v23). The notation itself was the problem, not the
+   underlying behavior - changed the header to a plain running total
+   with an explicit tag: **"BUY BASKET (7 legs, unlimited)"** - can't be
+   misread as a ceiling. `InpMaxLegsPerBasket` itself was deliberately
+   **not** removed despite the user also asking to "remove the rest of
+   the settings" this same message - it's still doing real safety work
+   (without it, a single leg's lot size would double forever within one
+   uninterrupted run instead of resetting every 7 legs, hitting the
+   broker's own max-lot limit far sooner) - flagged this distinction
+   back to the user rather than silently deleting a load-bearing safety
+   setting because of a wording request made in the middle of a
+   different, display-only complaint.
+
+Compiled clean (v27, 0 errors/0 warnings), smoke-tested (dashboard on,
+short window) - no runtime errors.
+
 ## 2026-08-24 (later still): v26 - v25's cards were hiding the text they
 ## were supposed to sit behind (real bug, caught from another live screenshot)
 

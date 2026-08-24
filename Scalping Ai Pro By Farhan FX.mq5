@@ -1650,9 +1650,15 @@ void UpdateDashboard()
    bool hedgingOk = ((ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE) == ACCOUNT_MARGIN_MODE_RETAIL_HEDGING);
    DbLabel("Hedging", lx, y, PadRight("Hedging", lblW) + (hedgingOk ? "OK" : "FAIL"), hedgingOk ? clrLime : clrRed, 8);
    y += lh;
+   // 2026-08-21: the LicenseOk() gate itself was removed from
+   // ManageBasketEntries() per explicit request ("license check off for
+   // now, add it back later") - this line is informational only now, so
+   // it must say so clearly. Leaving it as "INVALID (no new trades)"
+   // when trades keep happening regardless would be actively misleading,
+   // not just inaccurate.
    bool licenseOk = LicenseOk();
-   DbLabel("License", lx, y, PadRight("License", lblW) + (licenseOk ? "OK" : "INVALID (no new trades)"),
-           licenseOk ? clrLime : clrRed, 8);
+   DbLabel("License", lx, y, PadRight("License", lblW) + (licenseOk ? "OK" : "not set (gate off - trades not blocked)"),
+           licenseOk ? clrLime : clrGray, 8);
    y += lh + 10;
 
    ChartRedraw();

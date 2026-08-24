@@ -3,6 +3,35 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-08-24 (later still): v23 - deleted the now-permanently-dead
+## `InpUnlimitedLegs`/`InpAbsoluteMaxLegsPerBasket` toggle pair
+
+Explicit request: "যেগুলো setting কাজে লাগবে না সেগুলো delete করো, যাতে
+professional লাগে" (delete whatever settings aren't needed, so the
+Inputs dialog looks professional) - asked right after confirming
+unlimited legs as a **final** decision (see the v22 entry above: shown
+a real backtest reproducing the live blowup mechanism, chose to keep
+unlimited legs anyway). With that choice now permanent, the
+`InpUnlimitedLegs`/`InpAbsoluteMaxLegsPerBasket` pair was never going to
+flip again - checked every other input for the same "declared but never
+really live" pattern first (grepped each one's usage count across the
+file) and this was the only genuine case; everything else still gates
+real, actively-relevant behavior even where off by default (Daily Loss
+Limit, News Filter overrides, etc. - "off by default" is not the same
+as "not needed," so those stayed). `InpLicenseKey`/`LicenseOk()` stayed
+too, deliberately - the user's own stated plan is to return to licensing
+later ("licence পরে কাজ করবো"), so removing it now would just mean
+rebuilding it soon; it's on hold, not dead.
+
+Deleted both inputs, hardcoded the DCA-add condition to unconditional
+(`if(adverse)`), updated the file header and `InpMaxLegsPerBasket`'s
+inline comment to stop referring to a cap that no longer exists.
+Recompiled clean (v23, 0 errors/0 warnings). Verified behaviorally
+identical to v22 via a short smoke backtest (same window, same inputs
+otherwise) - byte-identical trade sequence and stop-out point, as
+expected since `InpUnlimitedLegs` was already permanently `true` before
+this change; this was a pure Inputs-dialog cleanup, not a logic change.
+
 ## 2026-08-24 (later still): v22 - floating-loss-scaled profit target,
 ## and a real backtest that re-confirms the live blowup risk is structural
 

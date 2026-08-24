@@ -4,13 +4,20 @@
 //|  baskets (requires a hedging-mode account), each targeting a      |
 //|  floating-profit dollar amount, then closing and immediately      |
 //|  reopening. On a $-price adverse move past the last leg, adds a   |
-//|  martingale DCA leg, capped at a max legs/basket. ATR-spike,      |
-//|  higher-timeframe trend, and economic-news filters gate DCA adds. |
-//|  No stop-loss anywhere, ever - per explicit, repeated user        |
-//|  request (always martingale an against-trend basket until it     |
-//|  hits its profit target, no exceptions, no pauses). An account    |
-//|  login allow-list guards against the wrong-account incident seen  |
-//|  on this user's other bots.                                      |
+//|  martingale DCA leg - no total-leg cap. ATR-spike, higher-        |
+//|  timeframe trend, and economic-news filters gate DCA adds.        |
+//|  No stop-loss anywhere, ever, and no cap on how many legs a       |
+//|  basket can take on - per explicit, repeated user request (always |
+//|  martingale an against-trend basket until it hits its profit      |
+//|  target, no exceptions, no pauses). Confirmed 2026-08-24 as a      |
+//|  final decision, not a default: a real $20,000 backtest reproduced |
+//|  the same account-blowing mechanism as this EA's real 2026-08-24   |
+//|  live incident (unlimited legs into a sustained one-direction      |
+//|  move exhausts margin before a basket can average back to profit) |
+//|  - the user saw that result and chose to keep unlimited legs      |
+//|  anyway, risk understood and accepted. See ml\learnings.md.       |
+//|  An account login allow-list guards against the wrong-account     |
+//|  incident seen on this user's other bots.                         |
 //|                                                                    |
 //|  2026-08-12: simplified per explicit user request. Earlier         |
 //|  versions of this EA also had a daily self-tuner, a historical     |
@@ -63,7 +70,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v22"
+#define EA_BUILD_VERSION "v23"
 
 #include <Trade\Trade.mqh>
 
@@ -111,9 +118,7 @@ input string   InpLicenseKey = ""; // License Key (given individually to each cl
 input group "=== Basket & Profit Target ==="
 input double   InpInitialLot            = 0.01;   // Initial Lot Size
 input double   InpBasketProfitTargetUSD = 1.0;    // Take Profit ($) - grows a little every DCA leg (see GetProfitTarget())
-input int      InpMaxLegsPerBasket      = 7;      // Legs Per Sizing Cycle (lot size still resets every N legs - keeps any single leg from hitting the broker's own max-lot cap; "unlimited" below removes the LEG-COUNT limit, not this)
-input bool     InpUnlimitedLegs         = true;   // Unlimited Legs (2026-08-21, explicit request: no cap - basket keeps DCA'ing until profitable, no matter how many legs)
-input int      InpAbsoluteMaxLegsPerBasket = 50;  // Absolute Max Legs (only used if Unlimited Legs = false)
+input int      InpMaxLegsPerBasket      = 7;      // Legs Per Sizing Cycle (lot size resets every N legs - keeps any single leg from hitting the broker's own max-lot cap; the basket itself has no total-leg cap - see the file header)
 input double   InpCycleTargetGrowth     = 0.5;    // Target Growth Per Cycle (0.5 = +50%)
 // 2026-08-24, explicit request: once a basket is genuinely underwater,
 // its target should scale with HOW underwater it is, not just how many
@@ -818,7 +823,7 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
                   (side == SIDE_BUY ? "BUY" : "SELL"), bid, ask, b.lastLegEntry, InpDcaDistancePrice, b.legCount,
                   TimeToString(b.lastLegTime, TIME_SECONDS));
 
-   if(adverse && (InpUnlimitedLegs || b.legCount < InpAbsoluteMaxLegsPerBasket))
+   if(adverse) // no leg-count cap - see file header, this is a confirmed final decision
      {
       // Safety net, independent of whatever caused the adverse check to
       // pass: never add a leg faster than this after the previous one,

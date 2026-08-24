@@ -1538,3 +1538,21 @@ Farhan Fx` Python project's `learnings.md`.)
   rather than either hiding the result or unilaterally adding a safety
   cap that would contradict their explicit "unlimited legs, never book
   a loss" decision without asking first.
+
+- **2026-08-24 (v23, deleted dead settings for a cleaner Inputs dialog):**
+  right after confirming unlimited legs as final (see v22 above), asked
+  to delete whatever inputs aren't needed "so it looks professional."
+  Checked every input's usage count across the file (grep, not
+  guessing) before touching anything - only `InpUnlimitedLegs` /
+  `InpAbsoluteMaxLegsPerBasket` were genuinely dead (the toggle they
+  controlled can never flip again now that unlimited is a confirmed
+  final decision); every other input still gates real behavior even
+  where off by default, and `InpLicenseKey` stayed since the user's own
+  plan is to return to licensing later, not never. Removed both inputs,
+  hardcoded the DCA-add condition to `if(adverse)`, updated the header
+  comments. Recompiled clean (v23). Smoke-tested (short window, same
+  inputs otherwise, correct binary copied into the shared test
+  terminal's `MQL5\Experts\` this time - see the v22 entry's new
+  standing rule) - byte-identical trade sequence and stop-out point vs.
+  v22, confirming this was a pure cosmetic cleanup with zero behavior
+  change, as expected.

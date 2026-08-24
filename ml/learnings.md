@@ -1556,3 +1556,17 @@ Farhan Fx` Python project's `learnings.md`.)
   standing rule) - byte-identical trade sequence and stop-out point vs.
   v22, confirming this was a pure cosmetic cleanup with zero behavior
   change, as expected.
+
+- **2026-08-24 (v24, dashboard label-spacing bug, caught from a live
+  screenshot):** user posted a screenshot of v23 actually running on the
+  CXM demo (252424) - `Daily Targetoff`, `Daily Loss Limitoff`, and
+  `Trading Hoursopen (from 07:00)` were all running the label straight
+  into the value, no space. `PadRight(s, width)` only appends spaces
+  while `StringLen(s) < width` - it silently does nothing once `s`
+  already meets/exceeds `width`, rather than guaranteeing at least one
+  separator space. `lblW` was 12; "Daily Loss Limit" is 17 chars, larger
+  than every other label on the panel by enough that this specific bug
+  never showed anywhere else. Fixed by raising `lblW` to 18. A real
+  lesson for any future `PadRight`-style helper in this file: pick the
+  width from the longest real label, not a round number that happens to
+  fit most of them.

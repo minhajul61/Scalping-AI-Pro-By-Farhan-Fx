@@ -70,7 +70,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v23"
+#define EA_BUILD_VERSION "v24"
 
 #include <Trade\Trade.mqh>
 
@@ -1558,7 +1558,11 @@ void UpdateDashboard()
   {
    RefreshBaskets();
 
-   int x = InpDashboardX, lx = InpDashboardX + 2, y = InpDashboardY, lh = 15, lblW = 12;
+   // lblW must be >= the longest label text below ("Daily Loss Limit" = 17
+   // chars) or PadRight() silently adds zero spaces once a label already
+   // meets/exceeds the width, running straight into its value with no gap
+   // (caught live 2026-08-24: "Daily Targetoff", "Trading Hoursopen ...").
+   int x = InpDashboardX, lx = InpDashboardX + 2, y = InpDashboardY, lh = 15, lblW = 18;
 
    // Icon (created once in CreateDashboard()) sits at (x-6, y-6), 64x47px -
    // text starts to its right, then drops back to the full-width left

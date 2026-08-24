@@ -3,6 +3,26 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-08-24 (later still): v24 - dashboard label-spacing bug, found from
+## the user's own live CXM screenshot
+
+User posted a screenshot of v23 actually running live on the CXM demo
+(252424) - first real look at this build outside a backtest. Everything
+substantive checked out (correct version number, correct leg/cycle
+counts, correct "License: not set (gate off...)" text, filters all
+reading sane, trading-hours gate active), but three dashboard lines were
+visibly running label text straight into the value with no space:
+`Daily Targetoff`, `Daily Loss Limitoff`, `Trading Hoursopen (from
+07:00)`. Root cause: `PadRight()` only *adds* spaces while the label is
+shorter than the target column width (`lblW = 12`) - "Daily Loss Limit"
+is 17 characters, "Trading Hours" is 13, "Daily Target" is exactly 12 -
+all three either meet or exceed 12, so zero padding got added. Every
+other label on the dashboard happened to be short enough that this never
+showed. Fixed by raising `lblW` to 18 (covers the longest label with
+room to spare) - cosmetic only, no logic touched. Recompiled clean as
+v24. Not yet on the live CXM chart - that's the user's own deployment,
+this only updates the repo's `.ex5`.
+
 ## 2026-08-24 (later still): v23 - deleted the now-permanently-dead
 ## `InpUnlimitedLegs`/`InpAbsoluteMaxLegsPerBasket` toggle pair
 

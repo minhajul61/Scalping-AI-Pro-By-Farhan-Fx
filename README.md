@@ -3,6 +3,34 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-08-24 (later still): v26 - v25's cards were hiding the text they
+## were supposed to sit behind (real bug, caught from another live screenshot)
+
+User posted another screenshot immediately after reloading v25: most of
+the text inside the BUY/SELL/FILTERS cards had vanished, replaced by
+solid-looking colored boxes with only fragments of text peeking out at
+the edges. Root cause: MT5 draws overlapping corner-anchored objects
+(`OBJ_LABEL` vs `OBJ_RECTANGLE_LABEL`) in the order they were first
+added to the chart's object list - **not** strictly by `OBJPROP_ZORDER`,
+which this file had assumed would keep the cards (zorder 10) beneath the
+labels (zorder 100). Every `DbCard()` call in v25 was physically placed
+*after* its section's `DbLabel()` calls in the source, so on first
+creation the cards were added to the object list *later* than their own
+labels - and later-created wins the paint order, so the cards painted
+on top and hid the text.
+
+Fixed by moving all three `DbCard()` calls to the very top of
+`UpdateDashboard()`, before any label is drawn, using the exact
+(deterministic - this dashboard always draws the same rows) pixel
+offsets the old inline-captured versions computed, so cards are always
+first in the object list and labels always paint on top of them,
+regardless of what ZORDER claims. Compiled clean (v26, 0 errors/0
+warnings), smoke-tested (dashboard on, short window) - no runtime
+errors. `OnDeinit()` already unconditionally runs
+`ObjectsDeleteAll(0, DB_PREFIX)` on every reason including recompile, so
+a normal reload is enough to pick this up - no special "detach fully"
+step needed, unlike the v22-era stale-.ex5-in-the-wrong-terminal issue.
+
 ## 2026-08-24 (later still): v25 - dashboard redesign, and the real reason
 ## v24's spacing fix was the ONLY thing that visibly changed on the live chart
 

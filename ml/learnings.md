@@ -1599,3 +1599,25 @@ Farhan Fx` Python project's `learnings.md`.)
   create-once gate - the create-once pattern is for *existence*, not
   for *appearance*, and conflating the two is invisible until someone's
   actually looking at a chart that's been running a long time.**
+
+- **2026-08-24 (v26, cards were hiding their own text):** another live
+  screenshot, immediately after v25 - the BUY/SELL/FILTERS cards were
+  drawing ON TOP of the text they were meant to sit behind, leaving only
+  fragments visible. Wrong assumption caught in the act: `OBJPROP_ZORDER`
+  does not reliably control paint order for overlapping corner-anchored
+  objects (`OBJ_LABEL` vs `OBJ_RECTANGLE_LABEL`) in this MT5 build -
+  paint order actually follows the order objects were first added to the
+  chart's object list, later-added wins. Every `DbCard()` call in v25
+  physically sat after its section's labels in the source, so on first
+  creation the cards were added later and painted over them. Fixed by
+  moving all card creation to the very top of `UpdateDashboard()`,
+  before any label - using hardcoded pixel offsets computed from the
+  (fixed, deterministic) row layout instead of runtime-captured
+  before/after y-values, since the cards now have to exist before the
+  rows that would normally produce those values. **Lesson: don't trust
+  ZORDER for stacking anchored MT5 chart objects - control paint order
+  by controlling creation order instead, verified by actually looking at
+  a live chart, not by reasoning about the API alone (this is the second
+  dashboard bug in a row this file only actually confirmed via the
+  user's own screenshots, not backtests - a real blind spot: nothing in
+  the Tester or compile step can catch a chart-object rendering bug).**

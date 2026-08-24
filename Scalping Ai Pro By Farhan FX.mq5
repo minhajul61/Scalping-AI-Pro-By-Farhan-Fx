@@ -70,7 +70,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v25"
+#define EA_BUILD_VERSION "v26"
 
 #include <Trade\Trade.mqh>
 
@@ -1631,6 +1631,24 @@ void UpdateDashboard()
    // (caught live 2026-08-24: "Daily Targetoff", "Trading Hoursopen ...").
    int x = InpDashboardX, lx = InpDashboardX + 2, y = InpDashboardY, lh = 15, lblW = 18;
 
+   // 2026-08-24: the section "cards" MUST be created before any of this
+   // section's DbLabel() calls, not after - caught live from the user's
+   // own screenshot (card boxes were hiding almost all the text behind
+   // them). MT5 draws overlapping anchored objects (OBJ_LABEL vs
+   // OBJ_RECTANGLE_LABEL) in the order they were first added to the
+   // chart's object list, NOT strictly by OBJPROP_ZORDER as this file
+   // originally assumed - whichever object is created first paints
+   // first, and later-created objects paint on top regardless of
+   // ZORDER. Drawing every card here, up front, guarantees the labels
+   // (added afterwards, below) are always the ones created later and so
+   // always paint on top. The y-offsets are hardcoded from the exact,
+   // deterministic row layout below (this dashboard never changes which
+   // rows it draws, so these never drift) - see the matching DbDivider
+   // calls further down for the same numbers used unlabeled.
+   DbCard("BuyCard", x - 4, InpDashboardY + 173, 288, 113, C'14,26,20', C'40,70,55');
+   DbCard("SellCard", x - 4, InpDashboardY + 278, 288, 113, C'28,16,14', C'80,45,40');
+   DbCard("FilterCard", x - 4, InpDashboardY + 383, 288, 122, C'16,20,28', C'50,60,75');
+
    // Icon (created once in CreateDashboard()) sits at (x-6, y-6), 64x47px -
    // text starts to its right, then drops back to the full-width left
    // margin once the icon's height has cleared.
@@ -1682,7 +1700,6 @@ void UpdateDashboard()
            beforeStart ? clrOrange : clrSilver, 8);
    y += lh + 6;
 
-   int buyCardTop = y;
    DbDivider("Div1", x, y, 280, C'55,55,65');
    y += 9;
 
@@ -1706,8 +1723,6 @@ void UpdateDashboard()
    DbLabel("BuyToDca", lx, y, PadRight("To DCA", lblW) + "$" + DoubleToString(buyToDca, 2), clrSilver, 8);
    y += lh + 6;
 
-   DbCard("BuyCard", x - 4, buyCardTop - 4, 288, (y - buyCardTop) + 8, C'14,26,20', C'40,70,55');
-   int sellCardTop = y;
    DbDivider("Div2", x, y, 280, C'55,55,65');
    y += 9;
 
@@ -1731,8 +1746,6 @@ void UpdateDashboard()
    DbLabel("SellToDca", lx, y, PadRight("To DCA", lblW) + "$" + DoubleToString(sellToDca, 2), clrSilver, 8);
    y += lh + 6;
 
-   DbCard("SellCard", x - 4, sellCardTop - 4, 288, (y - sellCardTop) + 8, C'28,16,14', C'80,45,40');
-   int filterCardTop = y;
    DbDivider("Div3", x, y, 280, C'55,55,65');
    y += 9;
 
@@ -1771,7 +1784,6 @@ void UpdateDashboard()
            licenseOk ? clrLime : clrGray, 8);
    y += lh;
 
-   DbCard("FilterCard", x - 4, filterCardTop - 4, 288, (y - filterCardTop) + 8, C'16,20,28', C'50,60,75');
    y += 10;
 
    ChartRedraw();

@@ -1792,3 +1792,58 @@ Farhan Fx` Python project's `learnings.md`.)
   back at the earlier reasoning.** Compiled clean, verified (same Aug
   window/inputs as v28) - final balance matched to the cent
   ($61,310.73), confirming zero behavior change.
+
+- **2026-08-27/28 (root-caused the exact drawdown event, explicit
+  request: "which day did the 58% DD happen, what happened, fix that
+  day"):** reconstructed the full equity curve from the raw Deals table
+  (117,124 rows) rather than guessing - replayed each leg open/close
+  chronologically, tracking weighted-average entry + total volume per
+  side (same math as the EA's own dashboard), computing equity at every
+  event as balance + floating P/L at that event's price. Found the
+  exact peak-to-trough: **2026-08-26, 22:17:12 to 22:19:39 - a 2.5
+  minute window.** Gold moved ~$13 (4599->4612) fast enough that the
+  SELL basket's DCA leg kept re-triggering close to the
+  `InpMinSecondsBetweenLegs` floor (5s), doubling lot size **9 times in
+  a row** (0.62->1.26->2.54->5.10->10.22->20.46->40.94->81.90->163.82
+  lots) - at the deepest point equity was $25,599 against a $60,959
+  balance (the 58% drawdown, confirmed to the dollar). The basket then
+  closed almost immediately after (22:19:39) once price paused for a
+  few points - because the rapid re-averaging had already dragged the
+  weighted-average entry price to within a couple dollars of the
+  current price, only a small pullback was needed to hit target. Not
+  a trend or news event - a mechanical martingale-ramp-speed problem.
+
+  **Tested the obvious fix - slowing the ramp down
+  (`InpMinSecondsBetweenLegs` 5->15/30/60/120/300) - and it backfired
+  almost everywhere:**
+  ```
+  cooldown(s)      net$        PF   trades   balDD%   eqDD%   minMargin%
+  5 (baseline)   46,318.84    1.26   58,562   14.50    58.03      45.91
+  300            19,636.44    1.52   12,089   22.60    61.72     143.40
+  15            -17,446.05    0.60    7,862  110.75   114.21       0.67
+  120           -17,175.90    0.38    2,611  111.04   115.98      14.14
+  30            -22,807.56    0.73   18,371  126.61   143.41       0.32
+  60            -17,469.47    0.31    3,237  113.89   148.47       0.02
+  ```
+  Only 300s stayed net-positive, and even that came out *worse* on
+  equity drawdown (61.72% vs. 58.03%) while giving up more than half
+  the profit. 15/30/60/120s all blew the account. **Why the "obvious"
+  fix backfired, worked out not just observed:** the fast re-averaging
+  during the spike is exactly what let the basket recover almost
+  immediately once price paused - it's the mechanism that *ends* deep
+  drawdowns quickly, not what causes them. Slowing the leg cadence
+  means the weighted-average entry lags much further behind a moving
+  price for much longer, so instead of one sharp 2.5-minute spike, the
+  basket stays deeply underwater for far longer stretches across the
+  month, and often never gets the extra averaging it needed to survive
+  at all. Confirms (a third time, after the 17-config sweep and the
+  July data-quality dead end) that this design's risk knobs behave
+  counter-intuitively and most changes make it worse, not better.
+
+  **Not yet tried, and the more promising next candidate:** capping the
+  *maximum single-leg lot size* (letting legs keep adding on schedule,
+  but flattening the martingale growth once it reaches a ceiling,
+  instead of letting it keep doubling to 163+ lots) - directly targets
+  the mechanism (unbounded exponential size growth within a short
+  window) without touching the add-cadence that the basket depends on
+  to recover. Proposed to the user, not yet implemented or tested.

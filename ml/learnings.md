@@ -1737,3 +1737,25 @@ Farhan Fx` Python project's `learnings.md`.)
   month's sweep result, especially one this sensitive to small
   parameter changes, is closer to a curve-fit than a validated edge
   until re-tested on a different window.
+
+- **2026-08-27, same day (July 2026 re-run attempted, data unusable -
+  reported as such, not treated as a real second data point):** re-ran
+  the exact same 17-config sweep on 2026.07.01-07.31 to check whether
+  `trend_off`'s August advantage held up on a different month. Every
+  single config came back at **0% real ticks and only 664 M1 bars**
+  for a whole month (should be tens of thousands) - this Exness login's
+  locally cached tick/history database simply doesn't have real July
+  data, only a tiny synthetic stub. All 17 configs failed in nearly
+  identical ways (several rows matched to the cent, e.g.
+  `trend_singleTF` and the baseline both at exactly -$17,438.15) -
+  itself the tell that this was a data-availability artifact, not a
+  genuine second market test; a real price-driven sweep would not
+  produce that much cross-config agreement. **Discarded, not reported
+  as evidence against `trend_off` or for anything else** - a bad-data
+  result that happens to look like a finding is more dangerous than an
+  honestly-reported "couldn't test this" would be. Confirms (again) the
+  standing limitation: this session's only reliable real-tick data
+  source for this EA is whatever specific window has already been
+  fetched/cached locally (August 2026 for XAUUSD/Exness-MT5Trial17, at
+  84%) - it is not safe to assume an arbitrary date range will have
+  usable data without checking `History Quality:` first.

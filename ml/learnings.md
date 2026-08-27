@@ -1776,3 +1776,19 @@ Farhan Fx` Python project's `learnings.md`.)
   just the source on paper. Same fragility/single-month caveat as
   before still applies and was restated in the README rather than
   quietly dropped now that it's the default instead of an experiment.
+
+- **2026-08-27 (v29, License deleted for real):** the v23 entry above
+  deliberately kept `InpLicenseKey` when asked to remove "unneeded"
+  settings, reasoning the user planned to revisit licensing later so it
+  wasn't dead, just dormant. The user pushed back directly this time -
+  it kept showing up in the Inputs dialog and they didn't want it there
+  regardless of future plans. Removed the input, the `=== License ===`
+  group, the hardcoded key array, `LicenseOk()`, the dashboard row, and
+  the stale re-add-later comment. Fully recoverable from git history if
+  genuinely revisited. **Lesson connecting back to the same one from
+  v23: a documented reason for keeping something doesn't survive the
+  user directly saying they don't want to see it - re-litigate the
+  decision when the person who made it pushes back, don't just point
+  back at the earlier reasoning.** Compiled clean, verified (same Aug
+  window/inputs as v28) - final balance matched to the cent
+  ($61,310.73), confirming zero behavior change.

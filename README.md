@@ -3,6 +3,29 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-08-27 (later still): v29 - License input/logic deleted entirely,
+## per direct pushback ("licance kkey keno ascha")
+
+The `InpLicenseKey` input (kept deliberately in the v23 settings-cleanup
+pass, since the user had said licensing would be revisited later) kept
+showing up in the Inputs dialog every time the EA was attached, and the
+user pushed back on it directly rather than it staying a theoretical
+"kept for later" decision. Removed for real this time: the
+`InpLicenseKey` input, the `=== License ===` input group, the
+`g_authorizedLicenseKeys[]` hardcoded key list, the `LicenseOk()`
+function, the dashboard's License row, and the now-stale comment in
+`ManageBasketEntries()` about re-adding the gate later. The FILTERS
+dashboard card shrank by one row (122px -> 107px) to match one fewer
+line. All of this is fully recoverable from git history if licensing is
+ever genuinely revisited - nothing was lost, just no longer live in the
+current file or visible in the Inputs dialog.
+
+Compiled clean (v29, 0 errors/0 warnings). Verified via a Tester run
+using the same August window/inputs as the v28 verification - final
+balance matched to the cent ($61,310.73 = $15,000 deposit +
+$46,310.73 net), confirming this was purely a settings-list cleanup
+with zero effect on trading behavior.
+
 ## 2026-08-27: v28 - sweep-winning settings baked in as the new compiled
 ## defaults, per explicit request ("ami nije korbo, tumi sob setting kore doy")
 

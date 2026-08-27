@@ -70,7 +70,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v28"
+#define EA_BUILD_VERSION "v29"
 
 #include <Trade\Trade.mqh>
 
@@ -111,9 +111,6 @@ input long     InpExpectedLogin      = 0;         // Account Login (0 = skip che
 input ENUM_BROKER_PRESET InpBrokerPreset = BROKER_CUSTOM;   // Broker Preset (auto-sets Max Spread)
 input ENUM_ACCOUNT_TYPE  InpAccountType  = ACCOUNT_TYPE_USD; // Account Type (scales Max Spread for cent accounts)
 input int      InpMaxSpreadPoints    = 300;       // Max Spread (points) - used when Broker Preset = Custom
-
-input group "=== License ==="
-input string   InpLicenseKey = ""; // License Key (given individually to each client)
 
 input group "=== Basket & Profit Target ==="
 input double   InpInitialLot            = 0.01;   // Initial Lot Size
@@ -798,12 +795,6 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
    if(DailyLossLimitHit())
       return; // today's loss limit hit - OnTick() also force-closes both baskets, see there
 
-   // License check temporarily removed 2026-08-21 per explicit request -
-   // "get it working successfully first, deal with license later." The
-   // key list and LicenseOk() function are still in the file (below,
-   // unchanged) so re-adding this gate later is a one-line change:
-   //    if(!LicenseOk()) return;
-
    if(b.legCount == 0)
      {
       // Don't even start a basket fighting a strong higher-timeframe trend -
@@ -1388,54 +1379,6 @@ void ForceCloseOnDailyLossLimit()
    CloseBasket(SIDE_SELL, "daily loss limit hit", g_sellBasket.floatingPL);
   }
 
-// Hardcoded list of currently-issued keys - checked locally, no network
-// call at all, so this can never lag/hang the EA and never delays the
-// dashboard. To add/remove a key: edit this array, recompile, redeploy
-// to that specific client - give each client their own key individually
-// when they join, never share one key across multiple people.
-//
-// IMPORTANT (2026-08-14): an earlier version of this EA's license check
-// ran before the dashboard was created and returned INIT_FAILED on a
-// missing/wrong key - the chart then showed a fully blank panel with no
-// explanation, which looked like the EA had frozen. Fixed here: OnInit()
-// no longer refuses to run over the license at all - the dashboard
-// always renders and clearly shows "License: OK" or "License: INVALID",
-// and only NEW trades (bootstrap/DCA) pause when invalid; nothing here
-// can add latency since it is a plain local array loop, no WebRequest.
-string g_authorizedLicenseKeys[] =
-  {
-   "SAIP-EBYZ-G5D5-Q6NZ-7SJG",
-   "SAIP-FNWO-AK0W-AX9T-PTQC",
-   "SAIP-UBP7-6SNT-V3CO-I2FR",
-   "SAIP-JFK8-HYB8-E00Z-AZPH",
-   "SAIP-UIV9-N7D7-2AY2-J79B",
-   "SAIP-5BKE-HR6W-AUUP-PH25",
-   "SAIP-GBBO-OFM7-D70Y-XPYL",
-   "SAIP-345R-7HU9-NNEP-KKYL",
-   "SAIP-NZL1-VMLC-476Z-KLOW",
-   "SAIP-TK1T-SJ0W-NVTG-9QV8",
-   "SAIP-8H34-JVTR-KJQV-QLZK",
-   "SAIP-VGI3-524U-I9AM-WEIT",
-   "SAIP-FNR2-SUOF-8K2T-U8FA",
-   "SAIP-GW3I-N0RS-QF0F-BFBD",
-   "SAIP-MT8B-OD0J-MEEU-Z4DJ",
-   "SAIP-PY5O-46IZ-WGTF-Z5TW",
-   "SAIP-SU4V-6UU7-BW82-RYHC",
-   "SAIP-1ELE-GXWQ-X681-A8CF",
-   "SAIP-6QS2-EHAO-RZ01-5TD2",
-   "SAIP-115E-ODQJ-MFP0-MT3X"
-  };
-
-bool LicenseOk()
-  {
-   if(InpLicenseKey == "")
-      return false;
-   for(int i = 0; i < ArraySize(g_authorizedLicenseKeys); i++)
-      if(InpLicenseKey == g_authorizedLicenseKeys[i])
-         return true;
-   return false;
-  }
-
 //+------------------------------------------------------------------+
 //| Dashboard                                                          |
 //+------------------------------------------------------------------+
@@ -1665,7 +1608,10 @@ void UpdateDashboard()
    // calls further down for the same numbers used unlabeled.
    DbCard("BuyCard", x - 4, InpDashboardY + 173, 328, 113, C'14,26,20', C'40,70,55');
    DbCard("SellCard", x - 4, InpDashboardY + 278, 328, 113, C'28,16,14', C'80,45,40');
-   DbCard("FilterCard", x - 4, InpDashboardY + 383, 328, 122, C'16,20,28', C'50,60,75');
+   // Height 122->107: shrunk by one row (lh=15) after the License row
+   // was removed below (2026-08-27, license input+display deleted
+   // entirely - see the file's git history if this is ever revisited).
+   DbCard("FilterCard", x - 4, InpDashboardY + 383, 328, 107, C'16,20,28', C'50,60,75');
 
    // Icon (created once in CreateDashboard()) sits at (x-6, y-6), 64x47px -
    // text starts to its right, then drops back to the full-width left
@@ -1795,22 +1741,6 @@ void UpdateDashboard()
    y += lh;
    bool hedgingOk = ((ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE) == ACCOUNT_MARGIN_MODE_RETAIL_HEDGING);
    DbLabel("Hedging", lx, y, PadRight("Hedging", lblW) + (hedgingOk ? "OK" : "FAIL"), hedgingOk ? clrLime : clrRed, 8);
-   y += lh;
-   // 2026-08-21: the LicenseOk() gate itself was removed from
-   // ManageBasketEntries() per explicit request ("license check off for
-   // now, add it back later") - this line is informational only now, so
-   // it must say so clearly. Leaving it as "INVALID (no new trades)"
-   // when trades keep happening regardless would be actively misleading,
-   // not just inaccurate.
-   bool licenseOk = LicenseOk();
-   // 2026-08-24: was "not set (gate off - trades not blocked)" (40
-   // chars) - combined with the label column that ran past the panel's
-   // right edge in a live screenshot. Shortened to say the same thing
-   // in less space; panel/card width also increased below as a margin
-   // for any other value string that gets long (a HIT daily-loss-limit
-   // message, etc.).
-   DbLabel("License", lx, y, PadRight("License", lblW) + (licenseOk ? "OK" : "off (not blocking)"),
-           licenseOk ? clrLime : clrGray, 8);
    y += lh;
 
    y += 10;

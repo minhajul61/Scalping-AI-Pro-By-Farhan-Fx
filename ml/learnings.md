@@ -1951,3 +1951,11 @@ Farhan Fx` Python project's `learnings.md`.)
   honest options are a real loss-realizing circuit breaker (which
   contradicts the standing "never book a loss" decision) or accepting
   this as a permanent, real tail risk of the current design.
+
+  **User's decision, given both options plainly: accept the risk.** No
+  loss-realizing circuit breaker requested. v30 (unlimited legs, no
+  per-leg/basket SL, `InpMaxSingleLegLot=17`) stands as final, with the
+  2026-07-01-style sustained-move tail risk explicitly understood and
+  accepted rather than papered over - the same standing "never book a
+  loss" decision reaffirmed with the strongest evidence yet in front of
+  it (a real, 100%-quality-data account wipeout), not made blind.

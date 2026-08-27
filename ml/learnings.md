@@ -1670,3 +1670,70 @@ Farhan Fx` Python project's `learnings.md`.)
   it's the more honest one to lead with. No forced margin closures
   occurred this run, but the margin level trace shows it was genuinely
   closer to happening than the balance-only view would suggest.
+
+- **2026-08-27 (17-config parameter sweep - explicit request: "tune
+  Leg/multiplier/trend/tp point, compare, find the best setting" to
+  bring the 75% equity drawdown down):** all 17 runs on the same
+  Aug 2026 window/data source as the previous entry (84% real ticks,
+  same Exness/XAUUSD substitute - still no CXM 252424 credentials
+  cached locally), one-factor-at-a-time from the 15-leg baseline
+  (mult 2.0, DCA distance $1.2, multi-TF trend filter on): leg cycle
+  length in {5,7,10,15,20,25}, lot multiplier in {1.3,1.5,1.8,2.0}, DCA
+  distance in {0.6,0.8,1.2,1.8,2.5,3.0}, trend filter {off, single-TF
+  only, stricter 1.0x ATR}. First attempt's `Report=sweep_v27\name`
+  path silently failed to write any report file for any of 13 completed
+  runs (MT5's Tester `Report=` parameter does not reliably create/use a
+  subfolder) - caught before trusting empty results, fixed by using
+  flat filenames, re-ran clean.
+
+  Results, sorted by equity drawdown (the honest risk metric): net$ /
+  PF / trades / balDD% / eqDD% / minMargin% -
+  `trend_off` 46,310.73 / 1.26 / 58,562 / 14.50 / **58.03** / 45.89;
+  `trend_strict1.0` 38,058.69 / 1.29 / 43,512 / 11.19 / 73.00 / 71.87;
+  `leg_25` 36,802.47 / 1.28 / 42,215 / 13.93 / 74.87 / 65.22;
+  `leg_20` 36,784.56 / 1.29 / 42,163 / 11.50 / 74.90 / 65.12;
+  baseline (15/2.0/1.2/multiTF) 36,660.21 / 1.29 / 42,101 / 11.50 /
+  75.09 / 64.46; `dca_1.8` 20,211.60 / 1.28 / 25,312 / 15.50 / 86.56 /
+  29.93; `trend_singleTF` 29,577.78 / 1.32 / 32,980 / 13.02 / 87.66 /
+  27.36; `mult_1.8` 33,133.04 / 1.27 / 40,657 / 12.70 / 95.56 / 7.79;
+  then nine outright blow-ups, all net-negative with 100%+ drawdown:
+  `leg_05` -15,222.52/103.66%, `leg_07` -16,230.30/107.55%, `mult_1.5`
+  -15,516.87/112.83%, `mult_1.3` -16,398.47/114.20%, `dca_3.0`
+  -18,426.72/122.96%, `leg_10` -15,673.71/123.47%, `dca_0.6`
+  -16,706.01/126.71%, `dca_2.5` -18,283.68/130.60%, `dca_0.8`
+  -22,712.62/146.98%.
+
+  **Two findings, both important, neither of them "here's the tuned
+  setting":**
+  1. **`trend_off` (disabling the trend filter entirely) is both the
+     highest-profit AND lowest-equity-drawdown config in the whole
+     sweep** - 58.03% vs. the baseline's 75.09%. Counterintuitive
+     (trend filter exists specifically to avoid fighting a strong
+     move), and very plausibly an artifact of what this one month's
+     price path happened to do (the filter blocked some entries that
+     turned out fine) rather than a generally robust improvement - not
+     claimed as such without testing other windows.
+  2. **The parameter space is extremely fragile, not smoothly
+     tunable.** 9 of 16 non-baseline variants outright blew the account
+     net-negative with 100%+ drawdown - including moving the lot
+     multiplier or DCA distance in *either* direction from the current
+     values, and reducing the leg-cycle length. Small changes flip the
+     same design between "+$36k" and "-$22k, 147% drawdown" on the exact
+     same price data. That fragility is itself the headline finding:
+     this isn't a system with a gentle risk/reward dial, it's one where
+     most nearby settings are catastrophically worse and a few happen
+     to survive this particular month's specific adverse excursions.
+  3. **The equity-drawdown floor found across every survivor was 58%.**
+     No combination of these four levers got it meaningfully lower
+     while staying profitable - consistent with the standing structural
+     conclusion (v22 entry, and the 2026-08-24 CXM live blowup itself):
+     unlimited legs with no per-leg or basket-level stop puts a hard
+     floor under how much tuning alone can reduce floating risk. These
+     four inputs shape *which* month's excursions it survives, not
+     *whether* deep floating drawdown is possible at all.
+
+  Reported the full table and both findings to the user rather than
+  picking the top row and presenting it as "the answer" - a single
+  month's sweep result, especially one this sensitive to small
+  parameter changes, is closer to a curve-fit than a validated edge
+  until re-tested on a different window.

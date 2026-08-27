@@ -1905,3 +1905,49 @@ Farhan Fx` Python project's `learnings.md`.)
   42.73% (vs. 58.03% uncapped) - both metrics improved together, not a
   trade-off.** Recommending 17 or 20 to the user as the new default,
   pending confirmation given the demonstrated fragility one step away.
+
+- **2026-08-28 (v30, real 100%-quality July data, via the user's own CXM
+  live account - and it wipes the account completely, negative balance,
+  same calendar day as every prior July blowup this session):** the
+  user ran v30's own Strategy Tester on their live CXM terminal
+  (718181/CXMDirect-Live, symbol `XAUUSDp`, 2026.07.01-07.31) and got
+  **100% real ticks** - the first genuinely trustworthy July data this
+  entire session (every earlier attempt on the Exness login came back
+  at 0-12%). Result: **net -$23,828.73 on a $15,000 deposit, balance
+  drawdown 148.68%, equity drawdown 167.40%, profit factor 0.19, largest
+  single loss trade -$9,129.** Reproduced exactly (to the cent) by
+  re-running the identical config myself once the user confirmed they
+  were done with the terminal (avoiding the shared-terminal conflict
+  risk flagged earlier), then applied the same equity-curve
+  reconstruction as the 2026-08-26 root-cause.
+
+  **The event: 2026-07-01, 07:00:00-14:04:00 - the entire test's 1,956
+  deals happened on ONE DAY, and it's the exact same calendar day that
+  caused the original v22 blowup earlier this session (on Exness data,
+  a different broker feed) - not a coincidence, a genuinely major
+  trending day that shows up as catastrophic across every data source
+  tested.** Equity climbed calmly all morning (peak $16,186 at 13:43),
+  then between **13:43:26 and 14:04:00 - 21 minutes** - price moved
+  ~$20 (3987.76 -> 4007.56), the SELL basket's volume grew to 37.46
+  lots even *with the new 17-lot-per-leg cap active*, and **the account
+  went fully negative (-$8,828.73 balance)** - a real stop-out, not
+  just a deep floating drawdown that later recovered like 2026-08-26.
+
+  **This is the critical finding: the lot cap helps a short, sharp
+  spike (where the cap limits how big any ONE leg gets before price
+  reverses) but does nothing against a sustained, bigger move over
+  20+ minutes, because there is still no limit on TOTAL leg count or
+  total basket exposure - many capped-size legs can still add up to
+  full account loss if the move doesn't pause in time.** Every
+  parameter tuned so far this session (leg cycle length, lot
+  multiplier, DCA distance, trend filter, add-cadence throttling, and
+  now the lot cap) changes *which* specific days/spikes the design
+  survives - none of them touch the structural fact that "unlimited
+  legs, never book a loss" has no real ceiling on loss during a
+  sufficiently large sustained move. Reported to the user plainly, not
+  softened: no amount of further parameter tuning within this design's
+  current rules (no per-leg SL, no basket-level stop, no total leg
+  cap) can be expected to fix this specific failure mode - the two
+  honest options are a real loss-realizing circuit breaker (which
+  contradicts the standing "never book a loss" decision) or accepting
+  this as a permanent, real tail risk of the current design.

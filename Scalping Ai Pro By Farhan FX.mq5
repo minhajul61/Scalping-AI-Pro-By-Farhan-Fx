@@ -70,7 +70,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v29"
+#define EA_BUILD_VERSION "v30"
 
 #include <Trade\Trade.mqh>
 
@@ -135,6 +135,18 @@ input group "=== DCA / Martingale ==="
 input double   InpDcaDistancePrice  = 1.2;        // DCA Distance ($)
 input double   InpLotMultiplier     = 2.0;        // Lot Multiplier
 input int      InpMinSecondsBetweenLegs = 5;      // Min Seconds Between Legs (safety net vs a cascade - 0 disables)
+// 2026-08-28, explicit request after root-causing the 58% equity
+// drawdown (a 2.5-minute spike that fired 9 back-to-back doublings, see
+// ml/learnings.md): two independent, more targeted safety nets than
+// InpMinSecondsBetweenLegs, tested against the same window. Result:
+// InpMaxLegsPerBar backfired badly at every value tried (same
+// mechanism as slowing InpMinSecondsBetweenLegs down - both throttle
+// the fast re-averaging this design depends on to recover quickly) -
+// stays off (0) by default. InpMaxSingleLegLot=17 genuinely improved
+// BOTH net profit and equity drawdown together (58.03% -> 42.73%) -
+// set as the new default.
+input int      InpMaxLegsPerBar     = 0;          // Max DCA Legs Per M1 Bar (0 = unlimited - tested, made things worse, left off)
+input double   InpMaxSingleLegLot   = 17;         // Max Single-Leg Lot Size (0 = unlimited - caps martingale growth without slowing the add cadence)
 
 input group "=== Filters ==="
 input bool             InpUseAtrSpikeFilter = true;      // Use ATR Spike Filter
@@ -226,6 +238,11 @@ struct SBasket
                               // them apart, which let the wrong leg's price get used as the DCA
                               // distance reference and let legs cascade far faster than intended -
                               // real incident, 2026-08-18, see ml/learnings.md)
+   int      legsThisBar;     // 2026-08-28: how many of this basket's legs opened within the
+                              // current M1 bar - feeds InpMaxLegsPerBar, a targeted brake on
+                              // the multi-doublings-within-one-bar pattern behind the
+                              // 2026-08-26 58% equity drawdown, without slowing normal
+                              // spread-out DCA (see ml/learnings.md).
   };
 
 SBasket g_buyBasket, g_sellBasket;
@@ -511,6 +528,7 @@ void ResetBasket(SBasket &b)
    b.lastLegLots      = 0;
    b.lastLegTime      = 0;
    b.lastLegTimeMsc   = 0;
+   b.legsThisBar      = 0;
   }
 
 void ScanBasket(ENUM_BASKET_SIDE side, SBasket &b)
@@ -518,6 +536,7 @@ void ScanBasket(ENUM_BASKET_SIDE side, SBasket &b)
    ResetBasket(b);
    long wantType = (side == SIDE_BUY) ? POSITION_TYPE_BUY : POSITION_TYPE_SELL;
    double sumPriceLots = 0;
+   datetime curBarOpen = iTime(_Symbol, PERIOD_M1, 0);
 
    for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
@@ -543,6 +562,8 @@ void ScanBasket(ENUM_BASKET_SIDE side, SBasket &b)
       b.totalLots  += lots;
       b.floatingPL += profit;
       sumPriceLots += entry * lots;
+      if(t >= curBarOpen)
+         b.legsThisBar++;
 
       // Millisecond precision, not just POSITION_TIME (1-second resolution) -
       // two legs opening within the same second (this EA can do that; a
@@ -838,6 +859,8 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
       // few seconds again even if it existed).
       if(InpMinSecondsBetweenLegs > 0 && (TimeCurrent() - b.lastLegTime) < InpMinSecondsBetweenLegs)
          return;
+      if(InpMaxLegsPerBar > 0 && b.legsThisBar >= InpMaxLegsPerBar)
+         return; // this bar already used its quota - the next leg waits for the bar to close, per explicit request
       if(InpUseAtrSpikeFilter && IsAtrSpiking())
          return; // "news proxy" - don't average into a volatility spike
       if(InpUseTrendFilter && IsAgainstTrend(side))
@@ -860,6 +883,16 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
 double NextLotSize(int legCount, double previousLegLots)
   {
    double raw = InpInitialLot * MathPow(InpLotMultiplier, legCount);
+
+   // 2026-08-28: caps exponential martingale growth without touching the
+   // add cadence - a basket that hits the cap during a fast spike still
+   // adds legs on the same schedule, just at a flat (then +1 step per
+   // leg, since the monotonic-growth guarantee below still applies) size
+   // instead of doubling every time. Directly targets the mechanism
+   // behind the 2026-08-26 58% equity drawdown (9 doublings, 0.62->163.82
+   // lots, in 2.5 minutes) - see ml/learnings.md.
+   if(InpMaxSingleLegLot > 0)
+      raw = MathMin(raw, InpMaxSingleLegLot);
 
    double minLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double maxLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);

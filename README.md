@@ -3,6 +3,50 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-08-28: v30 - root-caused the 58% equity drawdown to an exact
+## 2.5-minute event, tried two fixes, one worked and became the new default
+
+Explicit request: find the specific day the 58% equity drawdown
+happened, understand it, and reduce it "no matter what it takes."
+Reconstructed the full equity curve from the raw Deals table (117,124
+rows - not guessed) by replaying every leg open/close chronologically,
+tracking weighted-average entry + volume per side and computing equity
+at each event. Found the exact event: **2026-08-26, 22:17:12-22:19:39 -
+a 2.5-minute, ~$13 price spike** that fired 9 back-to-back DCA doublings
+on the SELL basket (0.62 -> 163.82 lots), dropping equity to $25,599
+against a $60,959 balance - then recovering almost immediately once
+price paused a few points, because the rapid re-averaging had already
+dragged the average entry close to current price. Not news, not a
+trend day - a mechanical martingale-ramp-speed problem, confirmed to
+the dollar and the minute.
+
+**Two independent fixes built and tested against that same window:**
+- `InpMaxLegsPerBar` (user's own idea - wait for the M1 bar to close
+  before firing more than N legs within it, so a fast burst gets
+  throttled without slowing normal spread-out DCA) - **backfired
+  badly at every value tried**, down to -$48,909/203% drawdown in the
+  worst case. Same mechanism as the earlier `InpMinSecondsBetweenLegs`
+  test: this design's recovery depends on fast re-averaging, and
+  anything that slows the add-rate down extends how long a basket
+  stays underwater elsewhere in the month more than it helps during
+  any one spike. Left off (0) by default - implemented and kept in the
+  file in case a smarter version is worth revisiting, but not shipped
+  active.
+- `InpMaxSingleLegLot` (cap martingale growth at a flat ceiling instead
+  of letting it keep doubling, without touching the add cadence) -
+  **worked.** Swept 5 through 40; best result at **17**: net +$48,327
+  (vs. +$46,318 uncapped) *and* equity drawdown **42.73%** (vs. 58.03%
+  uncapped) - both metrics improved together, not a trade-off. Not
+  perfectly smooth (15, right next to 17, was the single worst value
+  tested at 103.93% drawdown) but the 17-25 region was consistently
+  good, a real band rather than one fragile lucky number. **Set as the
+  new default (`InpMaxSingleLegLot = 17`).**
+
+Compiled clean (v30, 0 errors/0 warnings), verified with the compiled
+defaults alone (no `[TesterInputs]` overrides) - reproduced the exact
+swept numbers to the cent. Full mechanism writeup and both result
+tables in `ml/learnings.md`.
+
 ## 2026-08-27 (later still): v29 - License input/logic deleted entirely,
 ## per direct pushback ("licance kkey keno ascha")
 

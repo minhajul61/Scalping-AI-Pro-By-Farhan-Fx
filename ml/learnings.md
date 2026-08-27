@@ -1847,3 +1847,61 @@ Farhan Fx` Python project's `learnings.md`.)
   the mechanism (unbounded exponential size growth within a short
   window) without touching the add-cadence that the basket depends on
   to recover. Proposed to the user, not yet implemented or tested.
+
+- **2026-08-28 (v30, both proposed fixes built and tested - one worked,
+  one backfired badly):** implemented two new, independent inputs per
+  explicit request: `InpMaxSingleLegLot` (cap martingale growth at a
+  flat ceiling instead of letting it keep doubling) and
+  `InpMaxLegsPerBar` (the user's own idea - if a fast move triggers more
+  than N DCA adds within one M1 bar, make the rest wait for the bar to
+  close, i.e. for the next bar, before firing - only bites during a
+  fast multi-cross-per-minute burst like 2026-08-26, not normal
+  spread-out DCA). `legsThisBar` added to `SBasket`, computed in
+  `ScanBasket()` by comparing each open leg's `POSITION_TIME` to the
+  current bar's open time.
+
+  **`InpMaxLegsPerBar` backfired exactly like the cooldown-time test did,
+  for the same reason - discard, don't ship:**
+  ```
+  config          net$        PF   trades   balDD%   eqDD%   minMargin%
+  bar1_only     30,741.12    1.25   35,921   23.85   123.51       0.02
+  bar2_only    -25,016.20    0.47    5,273  151.20   167.72       0.31
+  bar1_lot5    -24,047.77    0.39    3,639  145.59   158.92       0.02
+  bar2_lot10   -18,749.88    0.49    4,277  119.41   129.85       0.50
+  bar1_lot10   -48,909.40    0.67   24,123  182.73   203.68       0.00
+  ```
+  Every single per-bar-limited config was worse than doing nothing, most
+  catastrophically. Same mechanism as the cooldown-time finding: this
+  design's fast recovery depends on the fast re-averaging that a
+  per-bar/cooldown throttle directly prevents - two independent
+  attempts at "slow the add-rate down" have now both made things worse,
+  which is itself the more important, generalizable finding: **any fix
+  that reduces how fast this basket can average toward the current
+  price will very likely hurt, not help, regardless of the specific
+  mechanism used to slow it down.**
+
+  **`InpMaxSingleLegLot` worked - genuinely lower drawdown AND slightly
+  higher profit, sorted by equity drawdown:**
+  ```
+  cap    net$        PF   trades   balDD%   eqDD%   minMargin%
+  17   48,327.37    1.28   58,554   11.54    42.73      86.83
+  20   47,636.21    1.28   58,548   12.42    47.31      74.21
+  25   48,737.03    1.28   58,549   12.67    51.25      72.88
+  30   46,568.08    1.27   58,551   10.99    64.31      65.77
+  5    46,152.75    1.29   58,441    6.21    75.83     116.92
+  40   47,438.65    1.27   58,551   12.03    71.71      47.44
+  10   49,779.81    1.30   58,524   14.10    80.61      74.67
+  12   52,423.35    1.31   58,533   15.17    90.13      33.50
+  none 46,318.84    1.26   58,562   14.50    58.03      45.91  <- v29 default
+  15   47,816.39    1.28   58,515   10.93   103.93       0.10
+  ```
+  **Not monotonic - 15 sits right next to 17 (the best result) and is
+  the single worst value tested (103.93% DD, margin down to 0.10%,
+  nearly a real stop-out).** The "good" region is roughly 17-25 (all
+  42-51% DD, clearly better than uncapped), not one isolated lucky
+  number - some real margin for this one, unlike the sharp single-point
+  cliffs seen elsewhere in this project's sweeps. Best single result:
+  **cap = 17, net +$48,327 (vs. +$46,318 uncapped), equity drawdown
+  42.73% (vs. 58.03% uncapped) - both metrics improved together, not a
+  trade-off.** Recommending 17 or 20 to the user as the new default,
+  pending confirmation given the demonstrated fragility one step away.

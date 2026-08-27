@@ -1759,3 +1759,20 @@ Farhan Fx` Python project's `learnings.md`.)
   fetched/cached locally (August 2026 for XAUUSD/Exness-MT5Trial17, at
   84%) - it is not safe to assume an arbitrary date range will have
   usable data without checking `History Quality:` first.
+
+- **2026-08-27 (v28, sweep result baked into compiled defaults):**
+  explicit request - "I'll do it myself, you set up all the settings,
+  I'll just press start" - so the winning sweep config needed to be the
+  actual shipped default, not something requiring manual Inputs-dialog
+  edits. Changed `InpMaxLegsPerBasket` 7->15 (7 was one of the worst
+  cycle lengths in the sweep) and `InpUseTrendFilter` true->false
+  (best net profit AND lowest equity drawdown of every config tested).
+  Left `InpLotMultiplier`/`InpDcaDistancePrice` unchanged - already at
+  the sweep's best values. Compiled clean, then **verified with a
+  Tester run using only the compiled defaults, zero `[TesterInputs]`
+  overrides** - reproduced the sweep's exact numbers (net $46,310.73,
+  PF 1.26, equity DD 58.03%, margin level 45.89%) to the cent,
+  confirming the shipped binary actually matches what was tested, not
+  just the source on paper. Same fragility/single-month caveat as
+  before still applies and was restated in the README rather than
+  quietly dropped now that it's the default instead of an experiment.

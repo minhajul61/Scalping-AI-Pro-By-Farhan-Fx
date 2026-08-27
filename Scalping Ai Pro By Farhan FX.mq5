@@ -70,7 +70,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v27"
+#define EA_BUILD_VERSION "v28"
 
 #include <Trade\Trade.mqh>
 
@@ -118,7 +118,12 @@ input string   InpLicenseKey = ""; // License Key (given individually to each cl
 input group "=== Basket & Profit Target ==="
 input double   InpInitialLot            = 0.01;   // Initial Lot Size
 input double   InpBasketProfitTargetUSD = 1.0;    // Take Profit ($) - grows a little every DCA leg (see GetProfitTarget())
-input int      InpMaxLegsPerBasket      = 7;      // Legs Per Sizing Cycle (lot size resets every N legs - keeps any single leg from hitting the broker's own max-lot cap; the basket itself has no total-leg cap - see the file header)
+// 2026-08-27: default raised 7->15 - the 17-config sweep (see
+// ml/learnings.md) found 7 was one of the worst cycle lengths tested
+// (blew the account net-negative on the August window); 15 was the
+// tested baseline that survived, and 20/25 were only marginally
+// different from it.
+input int      InpMaxLegsPerBasket      = 15;     // Legs Per Sizing Cycle (lot size resets every N legs - keeps any single leg from hitting the broker's own max-lot cap; the basket itself has no total-leg cap - see the file header)
 input double   InpCycleTargetGrowth     = 0.5;    // Target Growth Per Cycle (0.5 = +50%)
 // 2026-08-24, explicit request: once a basket is genuinely underwater,
 // its target should scale with HOW underwater it is, not just how many
@@ -139,7 +144,15 @@ input bool             InpUseAtrSpikeFilter = true;      // Use ATR Spike Filter
 input int              InpAtrPeriod         = 14;        // ATR Period
 input int              InpAtrBaselineBars   = 20;        // ATR Baseline Bars
 input double           InpMaxAtrRatio       = 1.5;       // Max ATR Ratio (spike threshold)
-input bool             InpUseTrendFilter    = true;      // Use Trend Filter
+// 2026-08-27: default flipped true->false - the 17-config sweep found
+// disabling the trend filter entirely gave BOTH the highest net profit
+// AND the lowest equity drawdown (58.03% vs. 75.09% with it on) on the
+// August 2026 window - counterintuitive (the filter exists to avoid
+// fighting a strong move) and only tested on one month so far; a
+// second month's data wasn't available at good tick quality to
+// cross-check it (see ml/learnings.md, 2026-08-27 entries). Still the
+// best real evidence available at the time this default was set.
+input bool             InpUseTrendFilter    = false;     // Use Trend Filter
 input ENUM_TIMEFRAMES  InpTrendTF           = PERIOD_H1; // Trend Timeframe
 input int              InpTrendMAPeriod     = 50;        // Trend MA Period
 input int              InpTrendAtrPeriod    = 14;        // Trend ATR Period

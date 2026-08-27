@@ -3,6 +3,39 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-08-27: v28 - sweep-winning settings baked in as the new compiled
+## defaults, per explicit request ("ami nije korbo, tumi sob setting kore doy")
+
+After the 17-config sweep (see the entries above and `ml/learnings.md`),
+the user asked to have the winning configuration set as the actual
+shipped defaults so attaching the EA fresh needs no manual Inputs-dialog
+changes - "I'll do it myself, you set up all the settings, I'll just
+press start." Two defaults changed:
+- **`InpMaxLegsPerBasket`: 7 -> 15** - 7 (the old default) was one of
+  the worst cycle lengths in the sweep, blowing the account net-negative
+  on the August window; 15 was the tested baseline that survived well.
+- **`InpUseTrendFilter`: true -> false** - disabling the trend filter
+  entirely gave both the highest net profit and the lowest equity
+  drawdown (58.03% vs. 75.09% with it on) of every config tested.
+
+`InpLotMultiplier` (2.0) and `InpDcaDistancePrice` ($1.2) were left
+unchanged - both already matched the sweep's best-performing values.
+Compiled clean (v28, 0 errors/0 warnings) and **re-verified with a
+fresh Tester run using ONLY the compiled defaults (no `[TesterInputs]`
+overrides at all)** to confirm the shipped `.ex5` actually reproduces
+the sweep's number, not just the source code on paper: net +$46,310.73,
+profit factor 1.26, equity drawdown 58.03%, margin level 45.89% -
+matched to the cent.
+
+**Same caveat as when this was first found, repeated because it still
+applies:** this is one month's real (84%-real-tick) data, and the
+17-config sweep showed the surrounding parameter space is extremely
+fragile - most nearby settings blew the account outright. A second
+month's data wasn't available at usable tick quality to cross-check
+`trend_off` (the July 2026 re-run came back at 0% real ticks / 664 bars
+- discarded, not used as evidence either way). Not a validated edge,
+the best real evidence available as of this commit.
+
 ## 2026-08-24 (later still): v27 - text overflowing the panel edge fixed,
 ## and the "(leg X/7, cycle N)" header was genuinely misleading, not just ugly
 

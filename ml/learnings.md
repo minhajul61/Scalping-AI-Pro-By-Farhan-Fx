@@ -1645,3 +1645,28 @@ Farhan Fx` Python project's `learnings.md`.)
   underlying setting because a display bug made it look like a cap
   would have removed real protection to make a text-formatting problem
   go away.**
+
+- **2026-08-24 (v27 real backtest, explicit request: 15-leg cycle,
+  $15,000, 2026.08.01-today, every tick/real ticks):** ran on the same
+  Exness/XAUUSD substitute data source as prior sessions (still no
+  cached CXM 252424 credentials in this terminal) - but this window's
+  own report self-reports **84% real ticks**, much better quality than
+  the July window's 12%, so this result is more trustworthy than the
+  v22 one. Confirmed correct binary + full input list via the report's
+  own echoed `Inputs:` section (including `InpMaxLegsPerBasket=15`)
+  before trusting anything, per the standing rule.
+
+  **Result: $15,000 -> net +$36,660.21 (42,101 trades, profit factor
+  1.29, Sharpe 3.25).** Sounds great in isolation, but the honest
+  companion number is **Equity Drawdown Maximal: $36,681.57 (75.09%)** -
+  at its worst point this month, the account's floating loss was three
+  times its own starting deposit relative to a peak equity it had
+  climbed to, and margin level bottomed at 64.46% (stressed, not yet a
+  stop-out, but a real broker's own margin-call threshold, typically
+  20-50%, was not far below that). Balance Drawdown Maximal (11.50%,
+  $4,721.75) looks much tamer because it only reflects *realized*
+  closes - the equity number is the one that actually reflects the
+  unlimited-legs design's real risk while a basket is still open, and
+  it's the more honest one to lead with. No forced margin closures
+  occurred this run, but the margin level trace shows it was genuinely
+  closer to happening than the balance-only view would suggest.

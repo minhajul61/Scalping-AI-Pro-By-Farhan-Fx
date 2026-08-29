@@ -2139,3 +2139,17 @@ Farhan Fx` Python project's `learnings.md`.)
   valuable verification this project has access to - keep testing new
   risk mechanisms against the known real stress events specifically,
   not just aggregate month-long sweeps.**
+
+- **2026-08-29 (v33 final confirmation, full August 2026 window, all
+  compiled defaults):** explicit request to re-confirm the final build
+  on the full month, not just the stress sub-window. FromDate 2026.08.01
+  -> 2026.08.27, $15,000 deposit, every tick/real ticks - this run's
+  own History Quality had grown to **96% real ticks** (up from 84% a
+  few days earlier - the local cache keeps improving as this project
+  keeps testing on it, worth remembering when comparing older numbers).
+  **Result: net +$50,940.97, profit factor 1.35, equity drawdown
+  30.27%, margin level 127.69%, recovery factor 2.59, Sharpe 7.87,
+  59,823 trades, largest single loss trade only -$894.21** (a small
+  fraction of what uncapped/earlier-buggy configs produced on the same
+  kind of event). Matches the swept v33 plateau numbers exactly -
+  this is the real, final, confirmed state of v33 as shipped.

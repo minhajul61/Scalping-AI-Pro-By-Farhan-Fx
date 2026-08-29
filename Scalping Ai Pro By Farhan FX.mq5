@@ -70,7 +70,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v30"
+#define EA_BUILD_VERSION "v31"
 
 #include <Trade\Trade.mqh>
 
@@ -129,6 +129,22 @@ input double   InpCycleTargetGrowth     = 0.5;    // Target Growth Per Cycle (0.
 // dominant term once a basket is deep; the per-leg growth above still
 // sets the (much smaller) target for early/shallow legs.
 input double   InpTargetPercentOfFloatingLoss = 20.0; // Min Target As % Of Current Floating Loss (0 = off, use per-leg growth only)
+// 2026-08-28, explicit request after the real 252424 stop-out (see
+// ml/learnings.md): "with this much volume, didn't price come down even
+// once - build a system that gets out easily, without a loss, once
+// floating is high." The formula above does the OPPOSITE once a basket
+// is deep - it demands MORE profit (20% of the floating loss) the worse
+// things get, which is exactly wrong once total exposure is already
+// dangerous: a basket carrying 30+ lots doesn't need a big dollar
+// target, it needs to leave the instant it's not losing anymore, since
+// waiting for a bigger target is what leaves it exposed for the broker's
+// own stop-out to hit first. Once total basket volume crosses this
+// threshold, the target drops to InpEmergencyExitTargetUSD (a small,
+// still-no-loss number) instead of the 20%-of-floating-loss demand -
+// only overrides the target when it would otherwise be LARGER, so this
+// never demands more, only ever offers an earlier, easier exit.
+input double   InpEmergencyExitVolumeLots = 20.0; // Emergency Exit: Total Basket Volume Threshold (lots, 0 = off)
+input double   InpEmergencyExitTargetUSD  = 0.50; // Emergency Exit Target ($) - small but still > 0, never books an actual loss
 input bool     InpUseServerSideTP       = true;   // Attach Real TP To Each Leg (fires on the broker's server, less slippage than the EA closing legs one-by-one)
 
 input group "=== DCA / Martingale ==="
@@ -641,7 +657,19 @@ double GetProfitTarget(const SBasket &b)
    if(InpTargetPercentOfFloatingLoss > 0 && b.floatingPL < 0)
       floatingLossBased = MathAbs(b.floatingPL) * (InpTargetPercentOfFloatingLoss / 100.0);
 
-   return MathMax(baseline, floatingLossBased);
+   double target = MathMax(baseline, floatingLossBased);
+
+   // Emergency exit: once total volume is already dangerous, stop
+   // demanding more profit to release it - offer the smaller
+   // (never-a-loss) target instead, so any small favorable move takes
+   // it, rather than holding out for a bigger target that may never
+   // come before the broker's own margin stop-out does. Only ever
+   // LOWERS the target (MathMin), never raises it above what the
+   // formula above already asked for.
+   if(InpEmergencyExitVolumeLots > 0 && b.totalLots >= InpEmergencyExitVolumeLots)
+      target = MathMin(target, InpEmergencyExitTargetUSD);
+
+   return target;
   }
 
 // The price level at which this basket's combined floating P/L (summed

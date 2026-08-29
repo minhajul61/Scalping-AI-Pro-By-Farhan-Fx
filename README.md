@@ -3,6 +3,50 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-08-28/29: v31 - emergency-exit-on-large-volume, a real
+## improvement in principle, but honestly does not fix the tail risk
+
+The same day the risk was accepted, the CXM demo (252424) blew up live,
+exactly matching the predicted mechanism (see the entries above). The
+user's response, a genuinely good idea: "with this much volume, didn't
+price come down even once - build a system that gets out easily,
+without a loss, once floating is high." Correct diagnosis of a real
+flaw: `GetProfitTarget()` demands MORE profit (20% of the floating
+loss) the deeper a basket goes - exactly backwards once total exposure
+is already dangerous.
+
+Added `InpEmergencyExitVolumeLots` (default 20) / `InpEmergencyExitTargetUSD`
+(default $0.50): once a basket's total volume crosses the threshold,
+the target drops to the small emergency value instead of the 20%
+formula - so any small favorable tick closes it, rather than holding
+out for a bigger target. Implemented as a pure `MathMin` on top of the
+existing target, so it can only ever lower the bar to close, never
+raise it - strictly non-harmful by construction.
+
+**Tested honestly, including the disappointing result:** a full-month
+sweep (2026.08.01-27) never exercised it at all (basket volume never
+reached even 10 lots that window) - not informative either way. Tested
+again narrowly against the known 2026-08-24-27 stress window
+(100% real ticks): the emergency exit **did** trigger (a small
+Balance Drawdown Absolute difference appeared, $0 -> $304.93) but
+**made no difference to the outcome** - net profit, equity drawdown
+(110.08%), and margin level (0.29%, a near-total wipeout) came out
+identical with it on or off. Root cause, worked out from the same
+2026-08-26/28 event analysis: **a target of any size - $5000 or
+$0.50 - requires at least one favorable tick to hit. During the worst
+excursions this project has found, price moves in one direction with
+no pause at all**, so a smaller target doesn't help if the market
+never gives back anything, however briefly. This is the clearest
+demonstration yet that only a mechanism willing to close at an actual
+loss (contradicting the standing "never book a loss" decision) can
+close this specific gap - clever target-sizing cannot, because it still
+depends on the market cooperating at least once.
+
+Shipped anyway (defaults 20 lots / $0.50) since it is a real, if
+partial, improvement with no downside by construction - just reported
+plainly that it does not solve the tail-risk case it was built for.
+Compiled clean (v31, 0 errors/0 warnings).
+
 ## 2026-08-28: v30 - root-caused the 58% equity drawdown to an exact
 ## 2.5-minute event, tried two fixes, one worked and became the new default
 

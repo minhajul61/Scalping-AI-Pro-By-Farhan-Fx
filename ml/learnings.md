@@ -1996,3 +1996,51 @@ Farhan Fx` Python project's `learnings.md`.)
   not proposed as a new problem needing a new fix, since the user's
   decision to accept this exact risk was made with this exact scenario
   already described to them minutes earlier.
+
+- **2026-08-28/29 (v31, emergency-exit-on-large-volume - implemented,
+  tested honestly, does not fix the tail case it targeted):** user's
+  response to the live blowup was a genuinely correct diagnosis: "with
+  this much volume, didn't price come down even once - build something
+  that gets out easily, without a loss, once floating is high."
+  Right call - `GetProfitTarget()`'s 20%-of-floating-loss term demands
+  MORE profit the deeper a basket goes, exactly backwards once total
+  exposure is already dangerous. Added `InpEmergencyExitVolumeLots`
+  (20 lots default) / `InpEmergencyExitTargetUSD` ($0.50 default): once
+  total basket volume crosses the threshold, target drops to the small
+  value via `MathMin` on top of the existing formula - can only ever
+  lower the bar to close, never raise it, so strictly non-harmful by
+  construction.
+
+  **Full-month sweep (2026.08.01-27) was uninformative - volume never
+  reached even the smallest tested threshold (10 lots) that window, so
+  `off` and every `vol10`-`vol30` variant came back byte-identical.**
+  Also surfaced a real methodology caveat worth flagging for future
+  sweeps: this same "off" config's result (net $51,596.99) differs
+  meaningfully from the v30 baseline recorded days earlier ($48,327.37)
+  for what should be an identical, no-op configuration - most likely
+  explained by this Exness login's local tick cache having grown/
+  changed between sessions (already observed once before, 12%->84%
+  real-tick quality improving over time) rather than a code bug, but a
+  reminder that cross-session numeric comparisons here carry some
+  irreducible noise; only qualitative, order-of-magnitude findings
+  (bar-limit backfiring, cooldown backfiring, lot-cap helping) should be
+  trusted at face value, not single-digit-percent deltas.
+
+  **Retested narrowly against the known 2026-08-24-27 stress window
+  (100% real ticks this time) - the emergency exit DID fire this time**
+  (Balance Drawdown Absolute changed from $0 to $304.93 with it on) -
+  **but made no difference to the outcome**: net profit, equity
+  drawdown (110.08%), and margin level (0.29%, a near-total wipeout)
+  came out identical on or off. Worked out why, not just observed: a
+  target of any size - large or $0.50 - still requires at least one
+  favorable tick to be hit. The worst excursions found this project
+  (2026-08-26, 2026-08-28 live, and this stress window) all show price
+  moving in essentially one direction with no real pause. A smaller
+  target doesn't help if the market never gives anything back, however
+  briefly - **this is the clearest demonstration yet that only a
+  mechanism willing to realize an actual loss can close this specific
+  gap; no amount of clever target-sizing can, because it still
+  fundamentally waits for the market to cooperate at least once.**
+  Shipped anyway (real, strictly non-harmful improvement for the cases
+  where a small pause DOES occur) with this limitation stated plainly,
+  not glossed over.

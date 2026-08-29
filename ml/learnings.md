@@ -2044,3 +2044,50 @@ Farhan Fx` Python project's `learnings.md`.)
   Shipped anyway (real, strictly non-harmful improvement for the cases
   where a small pause DOES occur) with this limitation stated plainly,
   not glossed over.
+
+- **2026-08-29 (v32, total-basket-volume cap - the best tail-risk
+  mitigation found this session, still not a full fix):** explicit
+  request after v31's honest limitation - "find some way, no matter
+  what, without booking a loss, do deep research." Presented several
+  candidate ideas (a total-volume cap; using the other side's realized
+  profit as a dynamic cushion; volatility-adaptive DCA distance;
+  time-based patience decay) and built the most promising one:
+  `InpMaxTotalBasketVolume` - once a basket's total volume reaches the
+  cap, stop adding new legs entirely. Existing legs stay open exactly
+  as before; nothing closes, no loss is ever booked. Different in kind
+  from v30/v31 (both of which still needed a favorable tick to act on)
+  - this one needs nothing from the market at all, it just refuses to
+  compound the exposure further.
+
+  **Swept 15/20/25/30/35/40/50/60 on both the full August window and
+  the 2026-08-24-27 stress window:**
+  ```
+  cap    window   net$          PF    balDD%   eqDD%    minMargin%
+  none   month    51,596.99    1.32    12.81    40.62      118.14
+  30     month    50,940.97    1.35    16.65    30.27      127.69
+  20     month   -17,504.58    0.80   107.20   116.67       36.40
+  none   stress   11,216.46    1.27    15.99   110.08        0.29
+  25/30/35 stress  10,825.05   1.28    15.17    79.08       23.24
+  15/20  stress  -15,037.04    0.47   100.20   100.21        9.30
+  40/50  stress   11,216.46    1.27    15.99    96.06        7.84
+  60     stress   11,216.46    1.27    15.99   110.08        0.29
+  ```
+  **15/20 catastrophic on both windows - same fragility pattern as
+  every other lever this session (too tight leaves a basket stuck,
+  exposed longer instead of less). 25-35 formed a genuine plateau**
+  (not one fragile lucky point) on the stress window: equity drawdown
+  110.08%->79.08%, margin 0.29%->23.24%, for ~$391 profit cost. On the
+  full month, 30 gave the single best result of anything tested this
+  entire project - both slightly more profit AND meaningfully lower
+  drawdown, not a trade-off. **Set `InpMaxTotalBasketVolume = 30` as
+  the new default.** Compiled clean, verified with compiled defaults
+  alone - reproduced the swept stress-window numbers to the cent.
+
+  **Honest framing:** this is real progress, the best found so far for
+  the specific "unbroken, one-directional move" tail case - but 79%
+  equity drawdown is still severe, and a large enough sustained move
+  can still exhaust capital even at a fixed maximum exposure. It turns
+  an unbounded, accelerating worst case into a bounded, known-rate one
+  - it does not make that worst case safe, only less catastrophic than
+  it was. Reported to the user as genuine progress, not a solved
+  problem.

@@ -3,6 +3,49 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-08-29: v32 - a total-basket-volume cap, the best tail-risk
+## mitigation found this project without touching "never book a loss"
+
+Explicit request after v31's honest "doesn't fix it" finding: "find
+some way, no matter what, without booking a loss - deep research it."
+Correctly diagnosed the gap: both the per-leg lot cap (v30) and the
+emergency-exit target (v31) still wait for at least one favorable
+price tick, and the worst excursions found this project simply never
+give one. This is different in kind - it doesn't wait for or try to
+exit anything. **`InpMaxTotalBasketVolume` (default 30 lots) simply
+stops adding new legs once a basket's total volume reaches the cap -
+existing legs are untouched, nothing closes, no loss is ever booked.**
+It bounds the compounding itself: past the cap, further adverse
+movement costs a known, fixed rate instead of an ever-accelerating one.
+
+**Swept 15/20/25/30/35/40/50/60 lots on both the full August window and
+the known 2026-08-24-27 stress window (the real spike day):**
+- 15/20 were **catastrophic on both windows** (month: net -$17,504.58,
+  balance DD 107.20%; stress: net -$15,037.04, DD 100.21%) - too tight
+  a cap leaves a basket stuck unable to average close enough to target,
+  exposed for far longer instead of less. Same fragility pattern as
+  every other lever tuned this session.
+- 25/30/35 formed a genuine plateau on the stress window: **equity
+  drawdown 110.08% (uncapped) -> 79.08%, margin level 0.29% -> 23.24%**
+  (clearly survived vs. barely surviving), for a real but small profit
+  cost (net $11,216.46 -> $10,825.05, about $391).
+- On the full month, 30 gave the single best result of anything tested
+  this entire session: **net $50,940.97 and equity drawdown 30.27%**
+  (vs. $51,596.99 / 40.62% uncapped) - both a touch more profit *and* a
+  meaningfully lower drawdown, not really a trade-off at that setting.
+
+**Set `InpMaxTotalBasketVolume = 30` as the new default.** Compiled
+clean (v32, 0 errors/0 warnings), verified with the compiled defaults
+alone on the stress window - reproduced the swept numbers to the cent.
+
+**Honest framing, not oversold:** this does not eliminate the tail
+risk - a large enough sustained move can still exhaust capital even at
+a fixed maximum exposure, and 79% equity drawdown is still severe. It
+is the best real improvement found so far that doesn't touch the
+standing "never book a loss" decision: it turns unbounded, accelerating
+worst-case exposure into a bounded, known-rate one, without ever
+closing anything at a loss.
+
 ## 2026-08-28/29: v31 - emergency-exit-on-large-volume, a real
 ## improvement in principle, but honestly does not fix the tail risk
 

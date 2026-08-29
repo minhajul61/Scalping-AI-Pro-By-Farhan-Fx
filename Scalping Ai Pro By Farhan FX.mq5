@@ -70,7 +70,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v31"
+#define EA_BUILD_VERSION "v32"
 
 #include <Trade\Trade.mqh>
 
@@ -145,6 +145,32 @@ input double   InpTargetPercentOfFloatingLoss = 20.0; // Min Target As % Of Curr
 // never demands more, only ever offers an earlier, easier exit.
 input double   InpEmergencyExitVolumeLots = 20.0; // Emergency Exit: Total Basket Volume Threshold (lots, 0 = off)
 input double   InpEmergencyExitTargetUSD  = 0.50; // Emergency Exit Target ($) - small but still > 0, never books an actual loss
+// 2026-08-29, explicit request ("find some way, no matter what, without
+// booking a loss") after both the lot cap and the emergency-exit target
+// were shown (backtest + real live) to be unable to stop a genuinely
+// one-directional, no-pullback move - because both still wait for a
+// favorable tick, and the worst excursions found this project simply
+// never give one. This is different in kind: it doesn't wait for
+// anything or try to exit early - it just STOPS ADDING MORE RISK once
+// total basket volume is already large, so a runaway move can no
+// longer compound the exposure further no matter how long it keeps
+// going. The basket does not close, no loss is booked - it just stops
+// growing and waits (however long that takes) for its target, same as
+// always. This turns an open-ended, unbounded worst case into a
+// bounded one: past the cap, further adverse price movement costs a
+// known, fixed rate ($ per point x capped volume) instead of an
+// ever-accelerating one.
+// 2026-08-29: swept 15/20/25/30/35/40/50/60 on both the full August
+// window and the known 2026-08-24-27 stress window. 15/20 were
+// catastrophic on BOTH windows (a too-tight cap leaves a basket stuck
+// unable to average close enough to target, exposed for far longer -
+// same fragility pattern as every other lever tuned this project).
+// 25/30/35 formed a genuine plateau: stress-window equity drawdown
+// 110.08% (uncapped) -> 79.08%, margin 0.29% -> 23.24%, for a real but
+// small profit cost (~$391 on the stress window). 30 gave the single
+// best full-month result of everything tested (net $50,940.97, equity
+// drawdown 30.27% vs. 40.62% uncapped) - set as the default.
+input double   InpMaxTotalBasketVolume = 30; // Max Total Basket Volume (lots, 0 = unlimited - stops adding NEW legs past this, existing legs untouched, no loss ever booked)
 input bool     InpUseServerSideTP       = true;   // Attach Real TP To Each Leg (fires on the broker's server, less slippage than the EA closing legs one-by-one)
 
 input group "=== DCA / Martingale ==="
@@ -889,6 +915,8 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
          return;
       if(InpMaxLegsPerBar > 0 && b.legsThisBar >= InpMaxLegsPerBar)
          return; // this bar already used its quota - the next leg waits for the bar to close, per explicit request
+      if(InpMaxTotalBasketVolume > 0 && b.totalLots >= InpMaxTotalBasketVolume)
+         return; // total exposure already at the cap - stop growing, existing legs keep waiting for target, no loss booked
       if(InpUseAtrSpikeFilter && IsAtrSpiking())
          return; // "news proxy" - don't average into a volatility spike
       if(InpUseTrendFilter && IsAgainstTrend(side))

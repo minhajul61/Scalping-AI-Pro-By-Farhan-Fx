@@ -2091,3 +2091,51 @@ Farhan Fx` Python project's `learnings.md`.)
   - it does not make that worst case safe, only less catastrophic than
   it was. Reported to the user as genuine progress, not a solved
   problem.
+
+- **2026-08-29 (v33, a real bug in v32's cap, found via real July data -
+  fixed, default corrected):** asked to test v32 on July using the
+  user's own CXM live account (the same real 100%-quality data source
+  as the earlier July finding). Got the *exact same* catastrophic
+  result as before the cap existed at all (-$23,828.73, identical to
+  the cent) - the tell that the cap wasn't actually doing anything.
+  Root cause: the check compared the cap against volume *before* the
+  next leg opened (`b.totalLots >= cap`), so a single large
+  (per-leg-capped, e.g. 17-lot) leg could jump straight past the cap in
+  one addition - pre-leg volume can still read as under the threshold
+  right up until that one leg pushes it far over. Confirmed exactly on
+  2026-07-01: leg 12 fired at a pre-leg total of 19.2 (under the "30"
+  cap), added 17 lots in one shot, landed at 36.2 - over the cap, too
+  late to matter.
+
+  **Fixed**: compute the prospective next leg's size first
+  (`NextLotSize()`, the same call `OpenLeg()` itself makes) and block
+  if `b.totalLots + prospectiveLot > cap`, not just if the basket is
+  already over it. Re-tested the real July event with the fix: net loss
+  improved from -$23,828.73 to **-$14,774.56** (~38% less damage) - a
+  real improvement, though still a near-total wipeout (98.98% equity
+  drawdown) on this specific extreme day - the cap slows the bleeding,
+  it doesn't stop a large enough sustained move.
+
+  **Re-swept the August windows with the corrected logic - the earlier
+  "25-35 plateau" finding was itself a symptom of the bug**, effectively
+  behaving like a much looser ~40ish cap. With the fix: 15-35 are now
+  all *worse* than uncapped (100-115% equity drawdown, vs. 110.08%
+  uncapped) - too tight, the identical "stuck longer, more exposed"
+  fragility already seen with every other lever tuned this project.
+  Real, correctly-verified plateau: **38-50** (stress window: equity
+  drawdown 110.08% -> 79.08%, margin 0.29% -> 23.24%; full month:
+  40.62% -> 30.27%). **Corrected default: `InpMaxTotalBasketVolume =
+  40`** (was 30). Compiled clean, verified with compiled defaults alone
+  - reproduced the plateau numbers to the cent.
+
+  **Lesson, worth restating plainly given how many times a version of
+  it has recurred this project: a feature that "does nothing different"
+  on the exact scenario it was built for is a stronger signal than any
+  amount of aggregate sweep statistics - the July re-test single-
+  handedly caught a bug that an entire 8-value August sweep had missed,
+  because the sweep's synthetic-tick-inflated August data never
+  actually drove any basket volume high enough to exercise the buggy
+  boundary condition. Real, extreme, single-event data remains the most
+  valuable verification this project has access to - keep testing new
+  risk mechanisms against the known real stress events specifically,
+  not just aggregate month-long sweeps.**

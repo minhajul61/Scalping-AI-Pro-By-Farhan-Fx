@@ -70,7 +70,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v32"
+#define EA_BUILD_VERSION "v33"
 
 #include <Trade\Trade.mqh>
 
@@ -161,16 +161,22 @@ input double   InpEmergencyExitTargetUSD  = 0.50; // Emergency Exit Target ($) -
 // known, fixed rate ($ per point x capped volume) instead of an
 // ever-accelerating one.
 // 2026-08-29: swept 15/20/25/30/35/40/50/60 on both the full August
-// window and the known 2026-08-24-27 stress window. 15/20 were
-// catastrophic on BOTH windows (a too-tight cap leaves a basket stuck
-// unable to average close enough to target, exposed for far longer -
-// same fragility pattern as every other lever tuned this project).
-// 25/30/35 formed a genuine plateau: stress-window equity drawdown
-// 110.08% (uncapped) -> 79.08%, margin 0.29% -> 23.24%, for a real but
-// small profit cost (~$391 on the stress window). 30 gave the single
-// best full-month result of everything tested (net $50,940.97, equity
-// drawdown 30.27% vs. 40.62% uncapped) - set as the default.
-input double   InpMaxTotalBasketVolume = 30; // Max Total Basket Volume (lots, 0 = unlimited - stops adding NEW legs past this, existing legs untouched, no loss ever booked)
+// window and the known 2026-08-24-27 stress window - first pass found
+// a genuine plateau at 25-35, but that was against a BUGGY version of
+// this check (see the bugfix note at the call site below): it compared
+// the cap against volume BEFORE the next leg, letting one large
+// (per-leg-capped, e.g. 17-lot) leg jump straight past the cap in a
+// single addition. Confirmed on real 2026-07-01 CXM data - "cap 30,
+// buggy" gave the IDENTICAL result to no cap at all. Fixed to check
+// what the NEXT leg would bring the total to, then re-swept: 15-35 are
+// now all WORSE than uncapped on the stress window (100-115% equity
+// drawdown) - too tight, same "stuck longer" fragility as everywhere
+// else in this project. The real plateau is 38-50 (all identical:
+// stress-window equity drawdown 110.08% -> 79.08%, margin
+// 0.29% -> 23.24%; full-month equity drawdown 40.62% -> 30.27%, net
+// profit slightly improved). 60 is too loose (barely better than
+// uncapped). Set to 40, the middle of the verified-correct plateau.
+input double   InpMaxTotalBasketVolume = 40; // Max Total Basket Volume (lots, 0 = unlimited - stops adding NEW legs past this, existing legs untouched, no loss ever booked)
 input bool     InpUseServerSideTP       = true;   // Attach Real TP To Each Leg (fires on the broker's server, less slippage than the EA closing legs one-by-one)
 
 input group "=== DCA / Martingale ==="
@@ -915,8 +921,6 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
          return;
       if(InpMaxLegsPerBar > 0 && b.legsThisBar >= InpMaxLegsPerBar)
          return; // this bar already used its quota - the next leg waits for the bar to close, per explicit request
-      if(InpMaxTotalBasketVolume > 0 && b.totalLots >= InpMaxTotalBasketVolume)
-         return; // total exposure already at the cap - stop growing, existing legs keep waiting for target, no loss booked
       if(InpUseAtrSpikeFilter && IsAtrSpiking())
          return; // "news proxy" - don't average into a volatility spike
       if(InpUseTrendFilter && IsAgainstTrend(side))
@@ -929,6 +933,25 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
       // size, while still letting it keep averaging (unconditionally, no
       // pause) if price keeps moving, per explicit request.
       int legIndexForSizing = b.legCount % InpMaxLegsPerBasket;
+
+      // 2026-08-29 bugfix: the total-volume cap MUST be checked against
+      // what the NEXT leg would bring the total to, not just the volume
+      // already open - checking b.totalLots alone let a single large
+      // (per-leg-capped, e.g. 17-lot) leg jump straight past the total
+      // cap in one shot, since the pre-leg volume could still be under
+      // the threshold right up until that one leg pushed it far over.
+      // Confirmed on real 2026-07-01 CXM data: with the cap "active" but
+      // checked the old way, the exact same -$23,828.73 result occurred
+      // as with no cap at all - leg 12 (17 lots) fired at a pre-leg
+      // total of 19.2, jumping straight to 36.2, blowing through a
+      // supposed 30-lot cap entirely unchecked. Now computes the
+      // prospective lot size first and blocks if THAT would breach the
+      // cap - this leg's addition is what has to stay under the limit,
+      // not just the state before it.
+      double prospectiveLot = NextLotSize(legIndexForSizing, b.lastLegLots);
+      if(InpMaxTotalBasketVolume > 0 && (b.totalLots + prospectiveLot) > InpMaxTotalBasketVolume)
+         return; // this leg would breach the total-volume cap - stop growing, existing legs keep waiting for target, no loss booked
+
       OpenLeg(side, legIndexForSizing, b.lastLegLots);
       RefreshBaskets(); // pick up the new leg + updated avg entry before recomputing the shared TP
       ApplyBasketTP(side);

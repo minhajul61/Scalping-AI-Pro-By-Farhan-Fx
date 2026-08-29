@@ -3,6 +3,39 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-08-29 (later): v33 - real bug found in v32's cap via real July
+## data, fixed, default corrected 30 -> 40
+
+Asked to test v32 on July using the user's own CXM live account (real
+100%-quality data, same source as the earlier July finding) - and got
+the exact same catastrophic result as before the cap existed
+(-$23,828.73, identical to the cent). That was the tell: v32's check
+compared the cap against volume **before** the next leg opened, so a
+single large (per-leg-capped, e.g. 17-lot) leg could jump straight past
+the cap in one addition, since the pre-leg total could still be under
+the threshold right up until that leg pushed it far over. Confirmed
+exactly on the 2026-07-01 event: leg 12 fired at a pre-leg total of
+19.2 lots (under the "30" cap), added 17 lots in one shot, and landed
+at 36.2 - over the cap, but too late to stop.
+
+**Fixed**: now computes the prospective next leg's size first and
+blocks if *that* would breach the cap, not just if the basket is
+already over it. Re-tested the real July event: net loss improved from
+-$23,828.73 to **-$14,774.56** (~38% less damage) - a real improvement,
+though still a near-total wipeout (98.98% equity drawdown) on this
+specific extreme day.
+
+**Re-swept the August stress/full-month windows with the corrected
+logic - the earlier "25-35" plateau was itself a symptom of the bug**
+(effectively behaving like a much looser, ~40ish cap). With the fix,
+15-35 are now all *worse* than uncapped (100-115% equity drawdown) -
+too tight, the same "stuck longer" fragility seen everywhere else in
+this project. The genuine plateau is **38-50** (all identical: stress-
+window equity drawdown 110.08% -> 79.08%, full-month 40.62% -> 30.27%).
+**Corrected default: `InpMaxTotalBasketVolume = 40`.** Compiled clean
+(v33, 0 errors/0 warnings), verified with compiled defaults alone -
+reproduced the plateau numbers to the cent.
+
 ## 2026-08-29: v32 - a total-basket-volume cap, the best tail-risk
 ## mitigation found this project without touching "never book a loss"
 

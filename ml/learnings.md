@@ -1959,3 +1959,40 @@ Farhan Fx` Python project's `learnings.md`.)
   accepted rather than papered over - the same standing "never book a
   loss" decision reaffirmed with the strongest evidence yet in front of
   it (a real, 100%-quality-data account wipeout), not made blind.
+
+- **2026-08-28 (real, live confirmation - the CXM demo, 252424, blew up
+  for real hours after the risk was accepted):** user reported the
+  account hit 0 and shared `ReportHistory-252424.html`/`.png` (their own
+  files, read for root-cause with implied permission as before). Real
+  data, not a backtest: balance climbed steadily all session to
+  $25,909.17, then two broker-triggered stop-out (`[so ...]`) cascades -
+  **09:52:21-09:53:04** (five legs force-closed in 43 seconds: 17.00,
+  10.24, 5.12, 2.56, 1.28 lots, for -$7,018.11/-$7,451.14/-$4,739.33/
+  -$2,881.61/-$1,676.51 - about **-$23,765 in under a minute**, balance
+  $25,908 -> $2,142.47) and **09:55:53-09:57:04** (wiping the remaining
+  balance down to $26.42, then $0.63 by end of day).
+
+  **`InpMaxSingleLegLot=17` worked exactly as coded - leg 12 shows
+  volume `17` instead of the martingale-implied `20.48` - but this
+  confirms, in real live trading now instead of just backtest, the
+  2026-08-28 v30 README/learnings finding from the July-2026 real-data
+  analysis: capping each leg's size does not cap TOTAL exposure.** By
+  the time leg 12 opened, the SELL basket was carrying roughly
+  1.28+2.56+5.12+10.24+17 = ~36.2 lots - accumulated over legs 8
+  through 12 in about 4 minutes (09:47:52-09:51:25) as price drifted up
+  only from ~4593 to ~4600. A further ~$7 move (4599.87 -> 4607.02) was
+  then enough to exhaust available margin and trigger the broker's own
+  stop-out mechanism, which liquidated every open leg at whatever price
+  it could, in sequence - not the EA choosing to book a loss (it never
+  does), the *broker* forcing closure once margin ran out. This is not
+  a new failure mode - it is the exact 2026-07-01 mechanism from the
+  backtest analysis above, now observed live, on the very account/day
+  the user had just accepted this risk for.
+
+  **Confirmed demo, not real money** (this is the same CXM Direct demo,
+  252424, used throughout this project's testing/live-eval history -
+  no real financial loss). Reported to the user factually: what
+  happened, why, and that it matches the predicted mechanism exactly -
+  not proposed as a new problem needing a new fix, since the user's
+  decision to accept this exact risk was made with this exact scenario
+  already described to them minutes earlier.

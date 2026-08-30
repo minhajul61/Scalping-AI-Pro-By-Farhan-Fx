@@ -3,6 +3,31 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-08-29 (later still): v34 - trading start time now precise to the
+## minute, set for 3h30m after the weekly market open (IST 07:00)
+
+User's question - "market opens at IST 3:30 AM, when does the bot
+actually start trading?" - surfaced that `InpTradingStartHour` (broker/
+server time) was never translated to the user's own timezone, and the
+input only supported whole hours anyway, which couldn't land on a
+half-hour IST target. Added `InpTradingStartMinute` (0-59) alongside
+the existing hour input; `IsBeforeTradingStart()` now compares hour
+first, then minute within the matching hour.
+
+User's request: start trading 3h30m after the weekly market open
+(IST 03:30), i.e. **IST 07:00**. CXM Direct's server clock is assumed
+**GMT+3** (the standard MT5-broker convention, same as Exness/IC
+Markets) - **not independently confirmed for this specific broker/
+account**, since verifying it would have meant connecting to the
+user's live terminal while they were using it. IST = GMT+5:30, so
+IST 07:00 = server 04:30 - set `InpTradingStartHour=4`,
+`InpTradingStartMinute=30`. If the real offset differs, these are
+exactly the two inputs that need correcting once the actual broker-
+time-vs-IST difference is known - no other code changes required.
+
+Compiled clean (v34, 0 errors/0 warnings), smoke-tested (confirmed the
+new input echoes correctly and the EA runs without error against it).
+
 ## 2026-08-29 (later): v33 - real bug found in v32's cap via real July
 ## data, fixed, default corrected 30 -> 40
 

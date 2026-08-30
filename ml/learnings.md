@@ -2153,3 +2153,17 @@ Farhan Fx` Python project's `learnings.md`.)
   fraction of what uncapped/earlier-buggy configs produced on the same
   kind of event). Matches the swept v33 plateau numbers exactly -
   this is the real, final, confirmed state of v33 as shipped.
+
+- **2026-08-29 (v34, trading start time now minute-precise, set for
+  IST 07:00):** user asked when the bot actually starts trading in
+  their own timezone (IST), given the market's weekly open is IST
+  03:30. Surfaced that `InpTradingStartHour` (broker/server time) had
+  no minute precision and was never translated to IST for the user at
+  all. Added `InpTradingStartMinute`. Set to land on IST 07:00 (3h30m
+  after weekly open, per explicit request) assuming CXM's server clock
+  is GMT+3 (standard MT5-broker convention) - **explicitly not verified
+  for this account**, since checking would have meant connecting to the
+  user's own live terminal while in use. `InpTradingStartHour=4`,
+  `InpTradingStartMinute=30` (server time) = IST 07:00 under that
+  assumption. Compiled clean, smoke-tested. If the real broker offset
+  differs, only these two inputs need correcting once known.

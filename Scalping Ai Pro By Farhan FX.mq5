@@ -70,7 +70,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v33"
+#define EA_BUILD_VERSION "v34"
 
 #include <Trade\Trade.mqh>
 
@@ -235,7 +235,18 @@ input group "=== Trading Hours ==="
 // (closed at target, etc.) at any hour - this only gates NEW entries,
 // same non-blocking pattern as every other gate in this EA.
 input bool     InpUseTradingHours   = true; // Only Trade After This Hour Each Day
-input int      InpTradingStartHour  = 7;    // Trading Start Hour (0-23, broker/server time)
+// 2026-08-29, explicit request: start trading 3h30m after the weekly
+// market open (IST 3:30 AM), i.e. IST 07:00 - added minute precision
+// since the hour-only input couldn't land on a half-hour IST time.
+// CXM Direct's server clock is assumed GMT+3 (the standard MT5-broker
+// convention, same as Exness/IC Markets) - NOT independently confirmed
+// for this specific broker/account. IST = GMT+5:30, so IST 07:00 =
+// server 04:30, which is what these two defaults are set to. If the
+// real offset turns out to be different, these two inputs are exactly
+// what needs adjusting - tell the actual broker-time-vs-IST difference
+// once and both values get corrected precisely, no other code changes.
+input int      InpTradingStartHour   = 4;    // Trading Start Hour (0-23, broker/server time)
+input int      InpTradingStartMinute = 30;   // Trading Start Minute (0-59, broker/server time)
 
 input group "=== Daily Profit Target ==="
 input bool     InpUseDailyProfitTarget = false; // Stop New Trades After Reaching This Daily Profit
@@ -1454,7 +1465,9 @@ bool IsBeforeTradingStart()
       return false;
    MqlDateTime dt;
    TimeToStruct(TimeCurrent(), dt);
-   return(dt.hour < InpTradingStartHour);
+   if(dt.hour != InpTradingStartHour)
+      return(dt.hour < InpTradingStartHour);
+   return(dt.min < InpTradingStartMinute); // same hour - minute decides
   }
 
 // Equity-based, on purpose - see the input group comment above for why
@@ -1770,8 +1783,8 @@ void UpdateDashboard()
    y += lh;
    bool beforeStart = IsBeforeTradingStart();
    string tradingHoursText = !InpUseTradingHours ? "off"
-                              : beforeStart ? StringFormat("before %02d:00 (paused)", InpTradingStartHour)
-                              : StringFormat("open (from %02d:00)", InpTradingStartHour);
+                              : beforeStart ? StringFormat("before %02d:%02d (paused)", InpTradingStartHour, InpTradingStartMinute)
+                              : StringFormat("open (from %02d:%02d)", InpTradingStartHour, InpTradingStartMinute);
    DbLabel("TradingHours", lx, y, PadRight("Trading Hours", lblW) + tradingHoursText,
            beforeStart ? clrOrange : clrSilver, 8);
    y += lh + 6;

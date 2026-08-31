@@ -2296,3 +2296,33 @@ Farhan Fx` Python project's `learnings.md`.)
   compressed in time. Reported to the user honestly, including that
   the headline July number is itself unreliable due to the data
   artifact, not just the guard's real limitation.
+
+- **2026-08-31 (recommended balance to avoid margin call, empirically
+  derived, not guessed):** explicit request for a concrete deposit
+  number. Swept deposit size 15k-100k against the known 2026-08-24-27
+  stress window (v36 defaults: 17-lot per-leg cap, 40-lot total cap,
+  200% margin guard) - since exposure is capped in absolute lots, not
+  scaled to equity, minimum margin level scales cleanly with deposit:
+  ```
+  deposit    net$         eqDD%    minMargin%
+  15,000    12,237.11     74.83       73.87
+  20,000    12,239.04     62.87      131.40
+  25,000    12,250.68     54.19      188.95
+  30,000    12,256.03     47.63      204.29   <- first to clear 200%
+  40,000    12,256.03     38.35      319.40
+  50,000    12,256.03     32.09      434.50
+  75,000    12,256.03     22.80      722.28
+  100,000   12,256.03     17.68     1010.05
+  ```
+  **$30,000 is the minimum deposit at which margin level stayed above
+  the guard's own 200% threshold for the entire worst stress event
+  found this project - meaning the guard's block never even needed to
+  engage, and margin level never approached the real observed 14-29%
+  stop-out range.** Net profit is essentially flat across all deposit
+  sizes (~$12,250) - a bigger balance doesn't change the strategy's
+  behavior, only how much cushion it has. Recommended $40,000-$50,000
+  to the user for a more comfortable buffer, given the separate,
+  already-documented finding that a sufficiently fast/large burst (the
+  2026-07-01-style event) can still outrun the margin guard regardless
+  of balance size - more capital buys more margin room, not immunity
+  from that specific failure mode.

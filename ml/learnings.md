@@ -2326,3 +2326,33 @@ Farhan Fx` Python project's `learnings.md`.)
   2026-07-01-style event) can still outrun the margin guard regardless
   of balance size - more capital buys more margin room, not immunity
   from that specific failure mode.
+
+- **2026-08-31 (attempted to test $30k against the actual real
+  2026-08-31 event - not possible, and the substitute found a real,
+  sobering caveat on the $30k recommendation):** could not get the
+  exact scenario: login 252424 (the account it happened on) has no
+  cached credentials in this shared terminal (`"tester not started
+  because the account is not specified"`); the CXM live login (718181)
+  returned "set mode to math calculations or adjust testing dates" -
+  zero bars for 2026.08.31, not cached at all. Tried Exness
+  (2026.08.28 onward) as the closest available substitute with real
+  data - and it surfaced something important: **the available history
+  for "today-forward" dates in this environment is only ever partially
+  real, cutting off at whatever moment corresponds to "now" (825-875
+  bars, ~14:30-14:35 each time) - not a caching gap, these dates
+  genuinely haven't fully "happened" yet in the environment's own
+  timeline, so no amount of re-fetching will make them complete.**
+
+  What data DID exist (real, not an artifact, up to the cutoff) showed
+  a genuine stop-out cascade starting at **$30,000 deposit**: balance
+  $31,909 -> $11,687 across six force-closed legs (0.01 through 10.24
+  lots) before the data ran out and the remaining legs (17, 5.12, 1.28,
+  0.32, 0.08, 0.02) got artificially closed "at end of test." **Honest
+  conclusion: $30,000 is the balance that stayed safe against the
+  worst *fully-verified* stress event (2026-08-24-27) - it is not a
+  guarantee against a larger or differently-shaped real move, of which
+  this project has now seen several (2026-07-01, 2026-08-26,
+  2026-08-28, 2026-08-31) and none of them were smaller than what a
+  $30k account with today's caps could survive cleanly.** Reported to
+  the user plainly rather than letting the earlier $30k number stand
+  unqualified.

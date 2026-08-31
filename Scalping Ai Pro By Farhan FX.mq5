@@ -70,7 +70,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v35"
+#define EA_BUILD_VERSION "v36"
 
 #include <Trade\Trade.mqh>
 
@@ -194,6 +194,27 @@ input double   InpMaxTotalBasketVolume = 40; // Max Total Basket Volume (lots, 0
 // instead of immediately re-engaging into whatever just hurt it.
 input int      InpStopOutCooldownHours = 24;  // Pause A Side After Its Own Stop-Out (hours, 0 = off)
 input bool     InpUseServerSideTP       = true;   // Attach Real TP To Each Leg (fires on the broker's server, less slippage than the EA closing legs one-by-one)
+
+input group "=== Margin Protection ==="
+// 2026-08-31, explicit demand: every fix so far (per-leg lot cap, total
+// basket volume cap, emergency exit target, stop-out cooldown) works by
+// LIMITING EXPOSURE, an indirect proxy for margin safety - none of them
+// look at the actual number that determines whether the broker forces a
+// stop-out: live margin level. A cap tuned for one account size/balance
+// (this project's 40-lot default was found on a ~$15-25k account) does
+// not automatically stay safe on a different balance, leverage, or
+// broker's own stop-out threshold. This is the direct fix: watch
+// ACCOUNT_MARGIN_LEVEL itself (Equity/Margin x 100, the exact metric
+// the broker's own stop-out compares against a threshold typically in
+// the 20-50% range - this account's real stop-outs fired between 14%
+// and 29%) and stop opening ANY new leg, on EITHER side, bootstrap or
+// DCA, the moment margin level drops below a wide safety buffer above
+// that zone. 200% default = roughly 7-14x the real observed stop-out
+// range - existing legs are never touched, no loss is ever booked, this
+// only ever refuses to add MORE risk once the account is already
+// meaningfully margin-stressed, regardless of which basket or side
+// caused it.
+input double   InpMinMarginLevelPercent = 200.0; // Block New Legs Below This Margin Level % (0 = off)
 
 input group "=== DCA / Martingale ==="
 input double   InpDcaDistancePrice  = 1.2;        // DCA Distance ($)
@@ -907,6 +928,10 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
       return; // this side was force-closed by the broker's own margin stop-out recently - pause it
               // (both bootstrap and DCA-adds) instead of immediately re-engaging into whatever hurt it
 
+   if(MarginLevelTooLow())
+      return; // account-wide margin is already stressed - refuse ANY new leg, either side, until
+              // it recovers (existing legs untouched, no loss booked) - see InpMinMarginLevelPercent
+
    if(b.legCount == 0)
      {
       // Don't even start a basket fighting a strong higher-timeframe trend -
@@ -1320,6 +1345,26 @@ bool HadRecentStopOut(ENUM_BASKET_SIDE side)
       return false;
    RefreshStopOutCooldowns();
    return (side == SIDE_BUY) ? g_stopOutCooldownBuy : g_stopOutCooldownSell;
+  }
+
+//+------------------------------------------------------------------+
+//| Margin protection - see InpMinMarginLevelPercent's comment for    |
+//| the full 2026-08-31 explicit-request context.                     |
+//+------------------------------------------------------------------+
+// ACCOUNT_MARGIN_LEVEL is exactly Equity/Margin*100 - the same number
+// the broker's own stop-out logic compares against its own threshold.
+// With zero open positions MT5 reports margin level as 0 (nothing to
+// divide by) - that must NOT read as "critically low," so this only
+// engages once real margin is actually in use.
+bool MarginLevelTooLow()
+  {
+   if(InpMinMarginLevelPercent <= 0)
+      return false;
+   double marginUsed  = AccountInfoDouble(ACCOUNT_MARGIN);
+   double marginLevel = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
+   if(marginUsed <= 0)
+      return false; // no open exposure at all - nothing to be stressed about
+   return(marginLevel < InpMinMarginLevelPercent);
   }
 
 //+------------------------------------------------------------------+
@@ -1822,9 +1867,9 @@ void UpdateDashboard()
    // Height 122->107: shrunk by one row (lh=15) after the License row
    // was removed below (2026-08-27, license input+display deleted
    // entirely - see the file's git history if this is ever revisited).
-   // Height 107->122: one more row added below (2026-08-31, stop-out
-   // cooldown status line).
-   DbCard("FilterCard", x - 4, InpDashboardY + 383, 328, 122, C'16,20,28', C'50,60,75');
+   // Height 107->122->137: two more rows added below (2026-08-31,
+   // stop-out cooldown + margin guard status lines).
+   DbCard("FilterCard", x - 4, InpDashboardY + 383, 328, 137, C'16,20,28', C'50,60,75');
 
    // Icon (created once in CreateDashboard()) sits at (x-6, y-6), 64x47px -
    // text starts to its right, then drops back to the full-width left
@@ -1964,6 +2009,15 @@ void UpdateDashboard()
                    : "clear";
    DbLabel("StopOutCooldown", lx, y, PadRight("SO Cooldown", lblW) + soText,
            (buyStopOutCooldown || sellStopOutCooldown) ? clrOrange : clrSilver, 8);
+   y += lh;
+   bool marginTooLow = MarginLevelTooLow();
+   double liveMarginLevel = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
+   string marginText = (InpMinMarginLevelPercent <= 0) ? "off"
+                        : (AccountInfoDouble(ACCOUNT_MARGIN) <= 0) ? "no exposure"
+                        : DoubleToString(liveMarginLevel, 0) + "% / " + DoubleToString(InpMinMarginLevelPercent, 0) + "%"
+                          + (marginTooLow ? " (blocking)" : "");
+   DbLabel("MarginGuard", lx, y, PadRight("Margin Guard", lblW) + marginText,
+           marginTooLow ? clrRed : clrSilver, 8);
    y += lh;
 
    y += 10;

@@ -3,6 +3,34 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-08-31 (later): v36 - live margin-level circuit breaker, the most
+## direct fix yet for margin-call risk, real and verified
+
+Explicit demand after v35: every fix so far worked by limiting exposure
+(lot count, basket volume) - an indirect proxy for margin safety that
+has to be re-tuned per account size/leverage/broker and never actually
+looks at what determines whether a stop-out fires. This is the direct
+fix: **`InpMinMarginLevelPercent` (default 200) watches live
+`ACCOUNT_MARGIN_LEVEL` - the exact number the broker's own stop-out
+logic compares against its own threshold (this account's real stop-outs
+fired between 14% and 29%) - and blocks ANY new leg, either side,
+bootstrap or DCA, the moment margin level drops below the configured
+safety buffer.** Existing legs are never touched, no loss is ever
+booked - this only ever refuses to add more risk once the account is
+already meaningfully stressed, account-wide, regardless of which
+basket caused it.
+
+**Tested against the known 2026-08-24-27 stress window (100% real
+ticks) - a genuine, verified improvement:** net profit and equity
+drawdown came out essentially unchanged (equity DD still peaked ~75% -
+this doesn't rescue exposure already open before the guard could act),
+but **the account's minimum margin level during the whole window
+improved from 31.62% to 73.87%** - more than double, and comfortably
+clear of the observed real stop-out range (14-29%), where the uncapped
+run was heading uncomfortably close. Compiled clean (v36, 0 errors/0
+warnings), verified with compiled defaults alone - reproduced the
+number to the cent.
+
 ## 2026-08-31: v35 - stop-out cooldown, a real new failure mode found
 ## live and fixed via MT5's own stop-out flag
 

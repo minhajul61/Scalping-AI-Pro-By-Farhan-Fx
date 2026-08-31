@@ -2230,3 +2230,39 @@ Farhan Fx` Python project's `learnings.md`.)
   without error or measurable performance cost. Its actual effectiveness
   against a real repeat of this scenario remains unverified by backtest
   - stated to the user plainly, not claimed as proven.
+
+- **2026-08-31 (v36, live margin-level circuit breaker - the most
+  direct fix yet, and this one IS verified):** explicit demand after
+  v35's honest limitation - stop tuning indirect exposure proxies
+  (lot count, basket volume) and fix the actual thing that causes a
+  margin call. Correct framing: every fix so far (per-leg cap, total
+  volume cap, emergency exit, stop-out cooldown) limits exposure as a
+  *proxy* for margin safety, tuned for one specific account size/
+  leverage/broker and blind to the real number that determines a
+  stop-out. Added `InpMinMarginLevelPercent` (default 200): watches
+  live `ACCOUNT_MARGIN_LEVEL` (Equity/Margin*100 - literally the same
+  metric the broker's own stop-out compares against its own threshold;
+  this account's real stop-outs fired between 14% and 29%) and blocks
+  any new leg, either side, bootstrap or DCA, once margin level drops
+  below the buffer. `AccountInfoDouble(ACCOUNT_MARGIN) <= 0` guards
+  against MT5 reporting margin level as 0 with no open exposure (which
+  must not read as "critically low").
+
+  **Tested against the known 2026-08-24-27 stress window (100% real
+  ticks) - off vs on200:**
+  ```
+                net$        PF    eqDD%    minMargin%
+  off        12,256.03    1.29    74.78%      31.62%
+  on (200)   12,237.11    1.29    74.83%      73.87%
+  ```
+  Net profit and equity drawdown essentially unchanged (this doesn't
+  rescue exposure already open before the guard could act on it - it's
+  a forward-looking control, not retroactive) - **but minimum margin
+  level during the whole window improved from 31.62% to 73.87%, more
+  than double, and comfortably clear of the observed real 14-29%
+  stop-out range**, where the unguarded run was heading uncomfortably
+  close. Compiled clean, verified with compiled defaults alone -
+  reproduced the number to the cent. This is the first of this
+  session's post-v29 safety additions with a clean, real, backtest-
+  verified before/after on the actual risk metric it targets, not just
+  an exposure proxy or an honestly-inconclusive test.

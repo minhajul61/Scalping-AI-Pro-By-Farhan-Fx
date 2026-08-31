@@ -70,7 +70,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v34"
+#define EA_BUILD_VERSION "v35"
 
 #include <Trade\Trade.mqh>
 
@@ -177,6 +177,22 @@ input double   InpEmergencyExitTargetUSD  = 0.50; // Emergency Exit Target ($) -
 // profit slightly improved). 60 is too loose (barely better than
 // uncapped). Set to 40, the middle of the verified-correct plateau.
 input double   InpMaxTotalBasketVolume = 40; // Max Total Basket Volume (lots, 0 = unlimited - stops adding NEW legs past this, existing legs untouched, no loss ever booked)
+// 2026-08-31, explicit finding from a real live event (252424, same
+// day): MT5's own margin stop-out does NOT necessarily close a whole
+// basket at once - it closes legs one at a time (largest/most-losing
+// first) until margin recovers, then stops. That real event closed
+// 27.24 of 37.47 open lots, leaving 10.23 lots still open - which read
+// as "under the 40-lot cap, room available" and let the EA immediately
+// add ANOTHER 10.24-lot leg into the same still-adverse move, walking
+// straight into a second stop-out minutes later that wiped the rest of
+// the account. The volume cap alone has no memory of "this side just
+// got stopped out" - it only sees current volume, which a partial
+// stop-out can put right back under the cap. This cooldown gives that
+// memory: once ANY leg on a side closes with DEAL_REASON_SO (the
+// broker's own stop-out flag, not a string-matched comment), that
+// whole side pauses - no bootstrap, no DCA-add - for this many hours,
+// instead of immediately re-engaging into whatever just hurt it.
+input int      InpStopOutCooldownHours = 24;  // Pause A Side After Its Own Stop-Out (hours, 0 = off)
 input bool     InpUseServerSideTP       = true;   // Attach Real TP To Each Leg (fires on the broker's server, less slippage than the EA closing legs one-by-one)
 
 input group "=== DCA / Martingale ==="
@@ -887,6 +903,10 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
    if(DailyLossLimitHit())
       return; // today's loss limit hit - OnTick() also force-closes both baskets, see there
 
+   if(HadRecentStopOut(side))
+      return; // this side was force-closed by the broker's own margin stop-out recently - pause it
+              // (both bootstrap and DCA-adds) instead of immediately re-engaging into whatever hurt it
+
    if(b.legCount == 0)
      {
       // Don't even start a basket fighting a strong higher-timeframe trend -
@@ -1234,6 +1254,72 @@ void PositionWatermark()
      }
    ObjectSetInteger(0, name, OBJPROP_XDISTANCE, wx);
    ObjectSetInteger(0, name, OBJPROP_YDISTANCE, wy);
+  }
+
+//+------------------------------------------------------------------+
+//| Stop-out cooldown - see the 2026-08-31 explicit-request comment   |
+//| above InpStopOutCooldownHours for the real live incident this     |
+//| was built for.                                                    |
+//+------------------------------------------------------------------+
+// Scans closed deals for this symbol+magic within the cooldown window
+// for one whose DEAL_REASON is DEAL_REASON_SO (the broker's own stop-
+// out flag - not a string match on the comment, which is broker/locale
+// dependent and was only used for this file's own logging/diagnosis,
+// never as a detection mechanism until now). A DEAL_TYPE_BUY closing
+// deal means a SELL position was stopped out, and vice versa - same
+// inverted mapping ManageBasketEntries()/ScanBasket() already use.
+// Cached, not re-scanned every call: this is checked from
+// ManageBasketEntries() on every tick, and a full HistorySelect() +
+// HistoryDealsTotal() loop over a whole day's deals (an active DCA
+// basket can produce thousands) on every single tick would be wasteful
+// - the underlying answer only changes at most once every few seconds
+// (right after an actual stop-out), so a short cache is free accuracy-
+// wise and saves real CPU.
+datetime g_lastStopOutScan = 0;
+bool     g_stopOutCooldownBuy = false;
+bool     g_stopOutCooldownSell = false;
+#define STOP_OUT_SCAN_INTERVAL_SEC 10
+
+void RefreshStopOutCooldowns()
+  {
+   if(TimeCurrent() - g_lastStopOutScan < STOP_OUT_SCAN_INTERVAL_SEC)
+      return;
+   g_lastStopOutScan = TimeCurrent();
+   g_stopOutCooldownBuy = false;
+   g_stopOutCooldownSell = false;
+   if(InpStopOutCooldownHours <= 0)
+      return;
+   datetime from = TimeCurrent() - InpStopOutCooldownHours * 3600;
+   if(!HistorySelect(from, TimeCurrent()))
+      return;
+   int total = HistoryDealsTotal();
+   for(int i = total - 1; i >= 0; i--)
+     {
+      ulong ticket = HistoryDealGetTicket(i);
+      if(ticket == 0)
+         continue;
+      if(HistoryDealGetString(ticket, DEAL_SYMBOL) != _Symbol)
+         continue;
+      if(HistoryDealGetInteger(ticket, DEAL_MAGIC) != (long)InpMagicNumber)
+         continue;
+      if((ENUM_DEAL_REASON)HistoryDealGetInteger(ticket, DEAL_REASON) != DEAL_REASON_SO)
+         continue;
+      ENUM_DEAL_TYPE dealType = (ENUM_DEAL_TYPE)HistoryDealGetInteger(ticket, DEAL_TYPE);
+      if(dealType == DEAL_TYPE_BUY)
+         g_stopOutCooldownSell = true;  // a buy deal closes a sell position
+      else if(dealType == DEAL_TYPE_SELL)
+         g_stopOutCooldownBuy = true;   // a sell deal closes a buy position
+      if(g_stopOutCooldownBuy && g_stopOutCooldownSell)
+         break; // both sides already confirmed, no need to keep scanning
+     }
+  }
+
+bool HadRecentStopOut(ENUM_BASKET_SIDE side)
+  {
+   if(InpStopOutCooldownHours <= 0)
+      return false;
+   RefreshStopOutCooldowns();
+   return (side == SIDE_BUY) ? g_stopOutCooldownBuy : g_stopOutCooldownSell;
   }
 
 //+------------------------------------------------------------------+
@@ -1736,7 +1822,9 @@ void UpdateDashboard()
    // Height 122->107: shrunk by one row (lh=15) after the License row
    // was removed below (2026-08-27, license input+display deleted
    // entirely - see the file's git history if this is ever revisited).
-   DbCard("FilterCard", x - 4, InpDashboardY + 383, 328, 107, C'16,20,28', C'50,60,75');
+   // Height 107->122: one more row added below (2026-08-31, stop-out
+   // cooldown status line).
+   DbCard("FilterCard", x - 4, InpDashboardY + 383, 328, 122, C'16,20,28', C'50,60,75');
 
    // Icon (created once in CreateDashboard()) sits at (x-6, y-6), 64x47px -
    // text starts to its right, then drops back to the full-width left
@@ -1866,6 +1954,16 @@ void UpdateDashboard()
    y += lh;
    bool hedgingOk = ((ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE) == ACCOUNT_MARGIN_MODE_RETAIL_HEDGING);
    DbLabel("Hedging", lx, y, PadRight("Hedging", lblW) + (hedgingOk ? "OK" : "FAIL"), hedgingOk ? clrLime : clrRed, 8);
+   y += lh;
+   bool buyStopOutCooldown  = HadRecentStopOut(SIDE_BUY);
+   bool sellStopOutCooldown = HadRecentStopOut(SIDE_SELL);
+   string soText = (InpStopOutCooldownHours <= 0) ? "off"
+                   : (buyStopOutCooldown && sellStopOutCooldown) ? "BUY+SELL paused"
+                   : buyStopOutCooldown  ? "BUY paused"
+                   : sellStopOutCooldown ? "SELL paused"
+                   : "clear";
+   DbLabel("StopOutCooldown", lx, y, PadRight("SO Cooldown", lblW) + soText,
+           (buyStopOutCooldown || sellStopOutCooldown) ? clrOrange : clrSilver, 8);
    y += lh;
 
    y += 10;

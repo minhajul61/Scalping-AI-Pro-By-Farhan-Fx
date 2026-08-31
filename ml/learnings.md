@@ -2167,3 +2167,66 @@ Farhan Fx` Python project's `learnings.md`.)
   `InpTradingStartMinute=30` (server time) = IST 07:00 under that
   assumption. Compiled clean, smoke-tested. If the real broker offset
   differs, only these two inputs need correcting once known.
+
+- **2026-08-31 (v35, stop-out cooldown - a real new failure mode found
+  live, fixed via MT5's own DEAL_REASON_SO flag):** account 252424 hit
+  0 again, real data provided (`ReportHistory-252424.html`, fresh
+  export). Root-caused via the same deals-table + running-volume
+  reconstruction as every prior incident this project - and found a
+  genuinely new mechanism, not a repeat of 2026-08-26/28: **MT5's own
+  margin stop-out does not necessarily close a whole basket at once -
+  it closes legs one at a time (largest/most-losing first) until margin
+  recovers, then stops.** The real event: SELL basket grew to 37.47
+  lots (correctly capped under the 40-lot `InpMaxTotalBasketVolume`),
+  a stop-out at 06:03:04 closed only 27.24 of those 37.47 lots
+  (balance $20,717.89 -> $9,530.06), leaving **10.23 lots still open**
+  - which read as "well under the 40-lot cap, room available," so the
+  EA immediately opened another 10.24-lot leg into the same still-
+  rising price. A second stop-out at 06:06:12-06:06:45 then closed
+  everything, wiping the account to a negative balance (-$20.16,
+  compensated by the broker's demo-account floor to -$0.63). The
+  volume cap has no memory that a side was *just* stopped out - it
+  only sees current live volume, and a partial stop-out can put that
+  right back under the cap, inviting an immediate re-escalation into
+  the same adverse move.
+
+  **Fixed with `InpStopOutCooldownHours` (default 24):** once any leg
+  on a side closes with `DEAL_REASON_SO` - the broker's own official
+  stop-out flag on the deal, not a string match on the comment (which
+  is broker/locale-dependent and was previously only used for this
+  file's own diagnosis, never as a detection mechanism) - that whole
+  side pauses (no bootstrap, no DCA-add) for the configured hours,
+  instead of immediately walking back into whatever just hurt it.
+  Added `HadRecentStopOut()`/`RefreshStopOutCooldowns()`, cached with a
+  10-second refresh interval since scanning the day's full deal history
+  on every tick (thousands of deals during an active DCA basket) would
+  have been real, needless CPU cost for a state that only changes right
+  after an actual stop-out.
+
+  **Verification hit a real, honest limit - reported as such, not
+  glossed over:** could not reproduce the exact 2026-08-31 scenario in
+  backtest. The Exness login's cached history for 2026.08.28 onward
+  stops mid-day (872 bars for a nominal 3-day window; the Tester's own
+  "end of test" tag appears on positions that should have kept trading)
+  - the simulation ends right after the *first* stop-out, before any
+  possible re-escalation, so off-vs-on necessarily produced identical
+  results. The CXM live login (which has the real 2026-07-01 and
+  2026-08-24-27 data used elsewhere in this file) had **0 bars** for
+  2026.08.29-31 - not cached at all, likely because that account only
+  accumulates real tick history while the user is actively connected to
+  it themselves, not during this session's brief scripted logins. Also
+  re-confirmed, unrelated to this feature: the full-August (2026.08.01-
+  27) baseline itself came back materially different this run
+  (net -$15,803.72 vs. the +$50,940.97 recorded a few days earlier,
+  same exact inputs) - the local tick cache keeps evolving over time
+  (documented once before at 12%->84%->96% real-tick-quality growth),
+  which means **any two backtest runs on this Exness data more than a
+  few days apart should not be treated as comparable**, only same-
+  session, same-batch runs can be trusted at the percentage-point level.
+
+  Shipped anyway: the logic is sound, uses MT5's own official stop-out
+  flag (not a guess or a string match), directly targets the exact
+  confirmed real mechanism, and is smoke-tested to compile clean and run
+  without error or measurable performance cost. Its actual effectiveness
+  against a real repeat of this scenario remains unverified by backtest
+  - stated to the user plainly, not claimed as proven.

@@ -3,6 +3,41 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-08-31: v35 - stop-out cooldown, a real new failure mode found
+## live and fixed via MT5's own stop-out flag
+
+Account 252424 hit 0 again; real data provided, root-caused the same
+way as every prior incident (deals-table + running-volume
+reconstruction). A genuinely new mechanism this time: **MT5's own
+margin stop-out doesn't necessarily close a whole basket at once - it
+closes legs one at a time until margin recovers, then stops.** The real
+event: SELL basket grew to 37.47 lots (correctly capped under the
+40-lot `InpMaxTotalBasketVolume`); a stop-out closed only 27.24 of
+those lots, leaving 10.23 still open - which read as "room available
+under the cap," so the EA immediately opened another 10.24-lot leg into
+the same still-rising price. A second stop-out minutes later wiped the
+rest, taking the account negative.
+
+**Fixed with `InpStopOutCooldownHours` (default 24)**: once any leg on
+a side closes with `DEAL_REASON_SO` (MT5's own official stop-out flag,
+not a string match), that whole side pauses for the configured hours
+instead of immediately re-engaging. Cached with a 10-second refresh so
+it doesn't scan the full day's deal history on every tick.
+
+**Honest verification limit**: could not reproduce the exact scenario
+in backtest - the Exness login's history for 2026.08.28+ ends mid-day,
+before any possible re-escalation could occur; the CXM live login (the
+account this actually happened on) had 0 cached bars for 2026.08.29-31.
+Also confirmed, separately: the full-August baseline itself came back
+materially different this run than a few days earlier with identical
+inputs (net -$15,803.72 vs. +$50,940.97) - the local tick cache keeps
+evolving, so cross-session numeric comparisons beyond a few days should
+not be trusted at the percentage-point level. Shipped anyway - the
+logic is sound and directly targets the confirmed real mechanism using
+the broker's own flag, smoke-tested clean, but its effectiveness against
+a real repeat is not backtest-proven. Compiled clean (v35, 0 errors/0
+warnings).
+
 ## 2026-08-29 (later still): v34 - trading start time now precise to the
 ## minute, set for 3h30m after the weekly market open (IST 07:00)
 

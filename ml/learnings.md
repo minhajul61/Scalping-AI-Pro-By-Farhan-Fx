@@ -2266,3 +2266,33 @@ Farhan Fx` Python project's `learnings.md`.)
   session's post-v29 safety additions with a clean, real, backtest-
   verified before/after on the actual risk metric it targets, not just
   an exposure proxy or an honestly-inconclusive test.
+
+- **2026-08-31 (v36 on real July data - same data-cutoff artifact as
+  before, and one real, honest limit of the margin guard found):**
+  re-ran the real 2026-07-01 event (CXM live login, 100% real ticks)
+  with v36. Hit the exact same known limitation documented in the
+  earlier July entries: the available tick history ends abruptly at
+  14:04:00, and the Tester force-closes every still-open leg "at end
+  of test" using the last available price - not a natural stop-out,
+  an artifact of the data window. Net -$23,579.07 includes several
+  legs (17, 5.12, 1.28, 0.32, 0.08, 0.02 lots) closed this way, so the
+  number itself should not be read as a clean measurement.
+
+  **One real thing WAS visible before the cutoff, though: a genuine
+  broker stop-out (`so -114.45%`) still fired at 14:04:00, with the
+  margin guard active the whole time.** Legs 9-12 (2.56, 5.12, 10.24,
+  17 lots) all opened within about 4 minutes (13:57-14:01) as price
+  climbed roughly $3998->$4002 - fast enough that total exposure grew
+  from a few lots to 30+ lots before margin level had cratered far
+  enough for `InpMinMarginLevelPercent=200` to visibly bind and block
+  the next leg. **Honest limitation to record: the margin guard checks
+  before each new leg, but martingale legs also grow exponentially in
+  size - a short burst of a handful of legs can still blow through a
+  lot of margin headroom before the guard gets a chance to say no, if
+  the underlying move is fast and large enough.** It measurably helped
+  on the 2026-08-24-27 window (31.62% -> 73.87% minimum margin level,
+  no stop-out avoided but comfortably safer) but is not a guarantee
+  against every fast-escalation shape, particularly ones this
+  compressed in time. Reported to the user honestly, including that
+  the headline July number is itself unreliable due to the data
+  artifact, not just the guard's real limitation.

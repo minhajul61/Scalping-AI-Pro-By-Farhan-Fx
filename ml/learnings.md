@@ -2383,3 +2383,35 @@ Farhan Fx` Python project's `learnings.md`.)
   numbers to the user instead of silently redoing something already
   shown to make things worse - waiting on their explicit decision given
   the evidence.
+
+- **2026-08-31 (candle-close DCA + `InpMaxLegsPerBasket=3`, explicitly
+  confirmed despite the caution above - tested honestly, a genuine
+  trade-off, not simply bad this time):** combined
+  (`InpMaxLegsPerBar=1` + `InpMaxLegsPerBasket=3`) on both the full
+  August window and the 2026-08-24-27 stress window, then isolated each
+  change alone to see which was doing what:
+  ```
+                          net$        eqDD%    minMargin%
+  month, baseline      57,298.87      71.81       137.39
+  month, combined      -30,064.42    100.16        37.85
+  month, cycle3 only   -30,644.03    101.41        33.94
+  month, candle only   -30,811.95    101.49        62.28
+  stress, baseline      12,235.93     47.65       204.20
+  stress, combined       3,096.83     12.94     11,641.07
+  stress, cycle3 only    4,563.57     14.98      9,779.18
+  stress, candle only    6,729.15     10.88        637.18
+  ```
+  **Both changes, alone or combined, land on the same pattern: a real,
+  dramatic improvement on the acute stress days (equity drawdown
+  47.65%->11-15%, margin hundreds to thousands of percent) but a full
+  month of realistic trading turns from +$57,299 to roughly -$30,000
+  regardless of which one or both are active.** Confirms (a third
+  independent way, after the cooldown-time and per-bar-limit tests)
+  that anything slowing this design's DCA cadence trades acute-tail
+  safety for ordinary-day profitability, consistently. Unlike the
+  earlier per-bar-limit test (uniformly catastrophic everywhere), this
+  is a genuine, real trade-off some users might reasonably want - full
+  numbers given to the user rather than a verdict, since choosing
+  "much safer worst-case, loses money most months" over "profitable
+  most months, real tail risk" is a legitimate strategic choice that
+  isn't this project's call to make unilaterally.

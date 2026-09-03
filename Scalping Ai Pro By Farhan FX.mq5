@@ -70,7 +70,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v36"
+#define EA_BUILD_VERSION "v37"
 
 #include <Trade\Trade.mqh>
 
@@ -125,10 +125,19 @@ input double   InpCycleTargetGrowth     = 0.5;    // Target Growth Per Cycle (0.
 // 2026-08-24, explicit request: once a basket is genuinely underwater,
 // its target should scale with HOW underwater it is, not just how many
 // legs it's taken - "$5000 floating loss -> minimum $1000 profit before
-// releasing" (a 20% ratio). See GetProfitTarget() - this becomes the
-// dominant term once a basket is deep; the per-leg growth above still
-// sets the (much smaller) target for early/shallow legs.
-input double   InpTargetPercentOfFloatingLoss = 20.0; // Min Target As % Of Current Floating Loss (0 = off, use per-leg growth only)
+// releasing" (a 20% ratio). See GetProfitTarget() - this was the
+// dominant term once a basket got deep, on top of the per-leg growth
+// above which still sets the (much smaller) target for early/shallow
+// legs.
+// 2026-08-31, explicit request: revert to the plain, fixed/per-leg-
+// growing target most retail martingale/grid EAs actually use - no
+// scaling by how deep the basket is. Set to 0 (off) - the
+// floating-loss term in GetProfitTarget() is now fully disabled, only
+// the InpBasketProfitTargetUSD + InpCycleTargetGrowth baseline above
+// applies. Kept as a real input (not deleted) since it's exactly what
+// implements the earlier request if it's ever wanted back - one
+// number, not a code change.
+input double   InpTargetPercentOfFloatingLoss = 0; // Min Target As % Of Current Floating Loss (0 = off, use per-leg growth only)
 // 2026-08-28, explicit request after the real 252424 stop-out (see
 // ml/learnings.md): "with this much volume, didn't price come down even
 // once - build a system that gets out easily, without a loss, once

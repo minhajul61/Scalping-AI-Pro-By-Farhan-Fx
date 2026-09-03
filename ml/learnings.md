@@ -2356,3 +2356,30 @@ Farhan Fx` Python project's `learnings.md`.)
   $30k account with today's caps could survive cleanly.** Reported to
   the user plainly rather than letting the earlier $30k number stand
   unqualified.
+
+- **2026-08-31 (v37, TP simplified to plain fixed/per-leg-growing
+  target, matching typical retail martingale EA convention):** explicit
+  request - "set the TP the way other bots of this kind do it" -
+  repeated verbatim after a clarifying question rather than picked
+  apart, so implemented as the well-known standard: `InpTargetPercentOf
+  FloatingLoss` default changed 20.0->0, disabling the "$5000 floating
+  loss -> $1000 minimum profit" scaling added 2026-08-24 (itself an
+  explicit request at the time) and reverting `GetProfitTarget()` to
+  just the flat/per-leg-growing baseline. Input kept, not deleted -
+  setting it back above 0 restores the old behavior exactly.
+
+  Tested on the known 2026-08-24-27 stress window: **close to neutral**
+  (net $12,254.63->$12,235.93, equity DD 47.63%->47.65%, margin
+  204.29%->204.20%). The 20%-of-floating-loss term rarely mattered on
+  its own by this point in the project - `InpEmergencyExitVolumeLots`'s
+  $0.50 override (2026-08-29) already takes precedence once a basket is
+  large enough for the floating-loss term to have been meaningfully
+  bigger than the baseline. Compiled clean.
+
+  Same message's second request - wait for the M1 candle to close
+  before every DCA leg - was **not** implemented: this is the same
+  mechanism already tested as `InpMaxLegsPerBar=1` (2026-08-29) and
+  found to backfire badly (100-203% equity drawdown). Restated the real
+  numbers to the user instead of silently redoing something already
+  shown to make things worse - waiting on their explicit decision given
+  the evidence.

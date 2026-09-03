@@ -3,6 +3,40 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-08-31 (later still): v37 - TP simplified back to a plain, fixed/
+## per-leg-growing target, matching how most retail martingale EAs do it
+
+Explicit request: "set the TP the way other bots of this kind do it" -
+after being asked to clarify, the user repeated the same request rather
+than picking between the offered options, so this was implemented as
+the standard, well-known retail-martingale-EA convention: a fixed (or
+mildly per-leg-growing) target off the basket's current average entry,
+with no scaling by how deep the basket is underwater.
+
+**`InpTargetPercentOfFloatingLoss` default changed 20.0 -> 0** - this
+disables the "$5000 floating loss -> minimum $1000 profit" term added
+2026-08-24 (also an explicit request at the time), reverting
+`GetProfitTarget()` to just the `InpBasketProfitTargetUSD` +
+`InpCycleTargetGrowth` baseline. The input itself was **not deleted** -
+setting it back above 0 restores the earlier behavior exactly, no code
+change needed either way.
+
+**Tested on the known 2026-08-24-27 stress window - the change was
+close to neutral:** net $12,254.63 -> $12,235.93, equity drawdown
+47.63% -> 47.65%, margin level 204.29% -> 204.20% - all effectively
+unchanged. The 20%-of-floating-loss term rarely got to matter on its
+own in practice, since `InpEmergencyExitVolumeLots`'s $0.50 override
+(added 2026-08-29) already takes precedence once a basket is large
+enough for the floating-loss term to have been meaningfully bigger
+than the baseline anyway. Compiled clean (v37, 0 errors/0 warnings).
+
+*(A second request in the same message - waiting for the M1 candle to
+close before every DCA leg - was NOT implemented: this is the same
+mechanism already tested as `InpMaxLegsPerBar=1` on 2026-08-29 and
+found to backfire badly (100-203% equity drawdown, most variants net-
+negative) - restated to the user with the real numbers rather than
+silently re-doing something already shown to make things worse.)*
+
 ## 2026-08-31 (later): v36 - live margin-level circuit breaker, the most
 ## direct fix yet for margin-call risk, real and verified
 

@@ -2459,3 +2459,57 @@ Farhan Fx` Python project's `learnings.md`.)
   documented for every other lever this project has swept - these
   winners are very likely curve-fit to this specific month, not a
   robust edge, and a different month could reorder them entirely.
+
+- **2026-09-04 (v38, ATR-adaptive DCA distance - real research-backed
+  technique, one genuine mid-range win found, same fragility pattern
+  confirmed a fourth time):** explicit request: "research real DCA/grid
+  EA techniques on the internet, test all of them." Web research
+  confirmed ATR-adaptive grid spacing as a named, standard technique
+  distinct from the flat-widening test already tried and failed
+  (2026-08-24: 1.8/2.5/3.0 all worse than 1.2) - sources: [4xpip.com,
+  protecting against martingale drawdowns with smart EA
+  settings](https://4xpip.com/protecting-against-martingale-drawdowns-with-smart-ea-settings),
+  [4xpip.com, best practices in volatile
+  markets](https://4xpip.com/best-practices-for-protecting-against-martingale-drawdowns-in-volatile-markets).
+  Implemented `InpUseAdaptiveDcaDistance` / `InpAdaptiveDcaAtrMult`:
+  effective distance = base x max(1, currentATR/baselineATR x mult) -
+  reuses the same ATR-ratio math as `IsAtrSpiking()` (refactored into a
+  shared `GetAtrRatio()`), only ever widens, never tightens below the
+  base.
+
+  **Swept multiplier 1.0/1.5/2.0/3.0 on both windows:**
+  ```
+  window   mult    net$         eqDD%    minMargin%
+  month    off   57,306.30      71.81       137.41
+  month    1.0  -31,293.60     102.31       118.53
+  month    1.5   33,901.27      35.03       295.97   <- genuine win
+  month    2.0  -35,459.82     112.33       171.67
+  month    3.0  -34,467.63     111.41       202.41
+  stress   off   12,236.31      47.65       204.20
+  stress   1.0   10,061.82      18.92       301.31
+  stress   1.5    7,062.38      35.54       241.49
+  stress   2.0    4,729.45      34.13       263.72
+  stress   3.0    3,022.09       3.12     5,096.30
+  ```
+  **`InpAdaptiveDcaAtrMult=1.5` is a real, both-windows improvement on
+  risk** (month equity drawdown 71.81%->35.03%, roughly halved; stress
+  47.65%->35.54%) **at a real, honest profit cost** (month
+  $57,306->$33,901, stress $12,236->$7,062) - not free, but a genuine
+  trade-off rather than a wash or a total loss.
+
+  **The same knife-edge fragility as every other lever this project has
+  swept, confirmed a fourth independent time:** on the full month, 1.0/
+  2.0/3.0 are all catastrophic (102-112% drawdown) while 1.5 sitting
+  between them works well - not a smooth curve. On the stress window
+  alone the pattern is well-behaved and monotonic (risk falls steadily
+  as multiplier rises) - the full-month catastrophe at 1.0/2.0/3.0 is
+  being driven by some OTHER day(s) in the month this project has not
+  specifically diagnosed, a reminder that the Aug 24-27 stress window is
+  a useful but incomplete proxy for "the worst days in a month."
+  Reported to the user as a real candidate with the fragility stated
+  plainly, not as a solved problem - after leg cap, volume cap, margin
+  guard, cooldown time, per-bar limit, and cycle length all showing this
+  same pattern, it is now the dominant, load-bearing finding of this
+  entire tuning effort: **this design's parameter space is inherently
+  fragile, and any single backtest-derived "best value" should be
+  treated as provisional, not as a validated edge.**

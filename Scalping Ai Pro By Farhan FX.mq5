@@ -70,7 +70,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v37"
+#define EA_BUILD_VERSION "v38"
 
 #include <Trade\Trade.mqh>
 
@@ -226,7 +226,22 @@ input group "=== Margin Protection ==="
 input double   InpMinMarginLevelPercent = 200.0; // Block New Legs Below This Margin Level % (0 = off)
 
 input group "=== DCA / Martingale ==="
-input double   InpDcaDistancePrice  = 1.2;        // DCA Distance ($)
+input double   InpDcaDistancePrice  = 1.2;        // DCA Distance ($) - base value; scaled up live if InpUseAdaptiveDcaDistance is on
+// 2026-09-03, explicit request ("research real DCA/grid EA techniques,
+// test everything") - real sources confirm ATR-adaptive grid spacing as
+// a standard, named technique distinct from the flat wider-distance
+// test that already failed this project (2026-08-24 sweep: 1.8/2.5/3.0
+// all worse than 1.2): "the ATR setting allows the EA to track live
+// market volatility and automatically widen the distance between order
+// layers during high-speed market movements to prevent rapid lot
+// accumulation" (4xpip.com). The difference from the earlier failed
+// test: this only widens WHEN the market is actually moving fast
+// (reusing the same ATR-ratio math as IsAtrSpiking()), leaving normal/
+// calm-market DCA at the tight base distance that already works well -
+// the flat test widened it everywhere, all the time, which is what
+// made it worse.
+input bool     InpUseAdaptiveDcaDistance = false; // Widen DCA Distance During High Volatility (ATR-ratio based, off = flat InpDcaDistancePrice always)
+input double   InpAdaptiveDcaAtrMult     = 1.0;   // Adaptive DCA Distance Multiplier (effective distance = base x max(1, currentATR/baselineATR x this))
 input double   InpLotMultiplier     = 2.0;        // Lot Multiplier
 input int      InpMinSecondsBetweenLegs = 5;      // Min Seconds Between Legs (safety net vs a cascade - 0 disables)
 // 2026-08-28, explicit request after root-causing the 58% equity
@@ -957,11 +972,12 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
 
+   double dcaDist = GetEffectiveDcaDistance();
    bool adverse;
    if(side == SIDE_BUY)
-      adverse = (bid <= b.lastLegEntry - InpDcaDistancePrice);
+      adverse = (bid <= b.lastLegEntry - dcaDist);
    else
-      adverse = (ask >= b.lastLegEntry + InpDcaDistancePrice);
+      adverse = (ask >= b.lastLegEntry + dcaDist);
 
    // Temporary diagnostic (2026-08-18) - a live demo cascade wasn't explained
    // by the millisecond-tie-break fix alone (gaps were >= the cooldown, but
@@ -970,7 +986,7 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
    // instead of guessed at again.
    if(adverse)
       PrintFormat("GoldDualBasketDCA: DCA-DIAG %s adverse=true bid=%.3f ask=%.3f lastLegEntry=%.3f dcaDistanceInput=%.3f legCount=%d lastLegTime=%s",
-                  (side == SIDE_BUY ? "BUY" : "SELL"), bid, ask, b.lastLegEntry, InpDcaDistancePrice, b.legCount,
+                  (side == SIDE_BUY ? "BUY" : "SELL"), bid, ask, b.lastLegEntry, dcaDist, b.legCount,
                   TimeToString(b.lastLegTime, TIME_SECONDS));
 
    if(adverse) // no leg-count cap - see file header, this is a confirmed final decision
@@ -1379,24 +1395,53 @@ bool MarginLevelTooLow()
 //+------------------------------------------------------------------+
 //| DCA filters                                                       |
 //+------------------------------------------------------------------+
-bool IsAtrSpiking()
+// ATR-ratio (current 14-period ATR / InpAtrBaselineBars-bar average),
+// reused by both IsAtrSpiking() and GetEffectiveDcaDistance() below so
+// "spiking" and "adaptive distance" always agree on what "the market is
+// moving fast right now" means. Returns 1.0 (neutral, not spiking) on
+// any data failure - never lets a bad read silently tighten distance.
+double GetAtrRatio()
   {
    double atrSeries[];
    ArraySetAsSeries(atrSeries, true);
    int n = InpAtrBaselineBars + 1;
    if(CopyBuffer(g_atrHandle, 0, 1, n, atrSeries) < n)
-      return false;
-
+      return 1.0;
    double current = atrSeries[0];
    double sum = 0;
    for(int i = 1; i < n; i++)
       sum += atrSeries[i];
    double baseline = sum / (n - 1);
-
    if(baseline <= 0)
-      return false;
+      return 1.0;
+   return current / baseline;
+  }
 
-   return(current > baseline * InpMaxAtrRatio);
+// The base DCA distance, widened only while the market is genuinely
+// moving fast (ATR ratio above 1) - see InpUseAdaptiveDcaDistance's
+// comment for the real-research citation and why this differs from the
+// flat wider-distance test already tried and found worse. Never
+// returns LESS than the base distance - this only ever widens, never
+// tightens, so it can't make a calm market more aggressive than the
+// already-tuned base value.
+double GetEffectiveDcaDistance()
+  {
+   if(!InpUseAdaptiveDcaDistance)
+      return InpDcaDistancePrice;
+   double ratio = MathMax(1.0, GetAtrRatio() * InpAdaptiveDcaAtrMult);
+   return InpDcaDistancePrice * ratio;
+  }
+
+bool IsAtrSpiking()
+  {
+   // Refactored 2026-09-03 to share GetAtrRatio() with
+   // GetEffectiveDcaDistance() instead of duplicating the same
+   // CopyBuffer/baseline math - a 0.0 return only happens on the same
+   // data-failure path GetAtrRatio() already treats as "no spike".
+   double ratio = GetAtrRatio();
+   if(ratio <= 0)
+      return false;
+   return(ratio > InpMaxAtrRatio);
   }
 
 // Trend on one timeframe via MA + ATR-scaled strength gate: last closed
@@ -1955,7 +2000,7 @@ void UpdateDashboard()
    y += lh;
    double buyToTarget = GetProfitTarget(g_buyBasket) - g_buyBasket.floatingPL;
    double buyToDca = (g_buyBasket.legCount > 0)
-                      ? (SymbolInfoDouble(_Symbol, SYMBOL_BID) - (g_buyBasket.lastLegEntry - InpDcaDistancePrice)) : 0;
+                      ? (SymbolInfoDouble(_Symbol, SYMBOL_BID) - (g_buyBasket.lastLegEntry - GetEffectiveDcaDistance())) : 0;
    DbLabel("BuyToTarget", lx, y, PadRight("To Target", lblW) + "$" + DoubleToString(buyToTarget, 2), clrSilver, 8);
    y += lh;
    DbLabel("BuyToDca", lx, y, PadRight("To DCA", lblW) + "$" + DoubleToString(buyToDca, 2), clrSilver, 8);
@@ -1976,7 +2021,7 @@ void UpdateDashboard()
    y += lh;
    double sellToTarget = GetProfitTarget(g_sellBasket) - g_sellBasket.floatingPL;
    double sellToDca = (g_sellBasket.legCount > 0)
-                       ? ((g_sellBasket.lastLegEntry + InpDcaDistancePrice) - SymbolInfoDouble(_Symbol, SYMBOL_ASK)) : 0;
+                       ? ((g_sellBasket.lastLegEntry + GetEffectiveDcaDistance()) - SymbolInfoDouble(_Symbol, SYMBOL_ASK)) : 0;
    DbLabel("SellToTarget", lx, y, PadRight("To Target", lblW) + "$" + DoubleToString(sellToTarget, 2), clrSilver, 8);
    y += lh;
    DbLabel("SellToDca", lx, y, PadRight("To DCA", lblW) + "$" + DoubleToString(sellToDca, 2), clrSilver, 8);

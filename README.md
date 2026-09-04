@@ -3,6 +3,33 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-09-04: v38 - ATR-adaptive DCA distance, research-backed,
+## a genuine risk/profit trade-off found (with the usual fragility caveat)
+
+Explicit request: research real grid/martingale EA techniques online,
+test everything found. Confirmed ATR-adaptive grid spacing as a
+standard, named technique (sources: [4xpip.com](https://4xpip.com/protecting-against-martingale-drawdowns-with-smart-ea-settings),
+[4xpip.com](https://4xpip.com/best-practices-for-protecting-against-martingale-drawdowns-in-volatile-markets)) -
+different from the flat wider-distance test already tried and failed
+(2026-08-24). New `InpUseAdaptiveDcaDistance`/`InpAdaptiveDcaAtrMult`
+widens DCA distance only while the ATR ratio (shared with
+`IsAtrSpiking()`) shows the market genuinely moving fast - never
+tightens below the base distance.
+
+**Swept multiplier 1.0/1.5/2.0/3.0 on the full month and the known
+2026-08-24-27 stress window. `1.5` is a real win on both: equity
+drawdown roughly halved (month 71.81%->35.03%, stress
+47.65%->35.54%) for a real, honest profit cost (month
+$57,306->$33,901, stress $12,236->$7,062).** But 1.0/2.0/3.0 are
+all catastrophic on the full month (102-112% drawdown) while 1.5
+sits fine between them - the same knife-edge pattern already found
+for every other lever this project has swept (leg cap, volume cap,
+margin guard, cooldown time, per-bar limit, cycle length). Full
+writeup in `ml/learnings.md`. Compiled clean (v38, 0 errors/0
+warnings), not yet set as the default - reported to the user as a
+real candidate with the fragility stated plainly.
+
+
 ## 2026-08-31 (later still): v37 - TP simplified back to a plain, fixed/
 ## per-leg-growing target, matching how most retail martingale EAs do it
 

@@ -2415,3 +2415,47 @@ Farhan Fx` Python project's `learnings.md`.)
   "much safer worst-case, loses money most months" over "profitable
   most months, real tail risk" is a legitimate strategic choice that
   isn't this project's call to make unilaterally.
+
+- **2026-09-03 (full candle-close x cycle-length grid, explicit request:
+  "find the best setting, low DD AND monthly $50,000+"):** swept
+  `InpMaxLegsPerBar` {0,1} x `InpMaxLegsPerBasket` {3,5,7,10,15,20,25,30}
+  = 16 configs on the full August window ($30,000 deposit, v37
+  defaults), then re-ran the 5 profitable ones against the
+  2026-08-24-27 stress window.
+
+  **Full month - only 5 of 16 were profitable at all:**
+  ```
+  candle cycle      net$      PF   balDD%   eqDD%   minMargin%
+  off    15     57,298.87   1.35    11.58   71.81      137.39
+  off    20     57,226.60   1.34    11.59   71.87      136.98
+  off    25     56,948.35   1.34    11.60   71.95      136.44
+  off    30     56,901.00   1.34    11.60   71.96      136.38
+  on      5     23,104.08   1.35    13.66   48.58    2,460.71
+  (the other 11: -$30,064 to -$32,270, 100-106% drawdown)
+  ```
+  **Stress window, those 5:**
+  ```
+  off 15   12,236.31  eqDD 47.65%  margin   204.20%
+  off 20   12,378.05  eqDD 47.49%  margin   204.21%
+  off 25   12,356.99  eqDD 47.51%  margin   204.09%
+  off 30   12,339.38  eqDD 47.53%  margin   204.04%
+  on  5     2,852.84  eqDD  9.78%  margin 9,196.15%
+  ```
+
+  **Verdict given to the user: the two goals are mutually exclusive
+  within everything tested.** Only candle-close OFF with cycle >= 15
+  clears $50k/month, and all four such configs are statistically
+  identical (~$57k, ~71.8% month / ~47.5% stress equity drawdown) -
+  meaning the already-shipped default (off / cycle 15) is effectively
+  optimal; cycle 20 edges it by 0.16pp of stress drawdown and $142 of
+  profit, inside noise. The one genuinely low-risk config (on / cycle 5:
+  9.78% stress drawdown, 9,196% margin level) earns $23,104/month -
+  under half the target. No setting does both.
+
+  **Strong caveat stated plainly: this surface is knife-edge, not a
+  smooth optimum.** off/10 = -$31,839 but off/15 = +$57,299; on/3 =
+  -$30,064, on/5 = +$23,104, on/7 = -$32,270. Adjacent settings flip
+  between catastrophic and good, which is the same fragility signature
+  documented for every other lever this project has swept - these
+  winners are very likely curve-fit to this specific month, not a
+  robust edge, and a different month could reorder them entirely.

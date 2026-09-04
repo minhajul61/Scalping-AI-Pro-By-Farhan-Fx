@@ -2513,3 +2513,23 @@ Farhan Fx` Python project's `learnings.md`.)
   entire tuning effort: **this design's parameter space is inherently
   fragile, and any single backtest-derived "best value" should be
   treated as provisional, not as a validated edge.**
+
+- **2026-09-04 (later, v39, ATR-adaptive DCA distance shipped as the new
+  default, verified on the compiled binary):** user reviewed the v38
+  table above and confirmed ("ha koro" - "yes, do it") setting
+  `InpUseAdaptiveDcaDistance=true` / `InpAdaptiveDcaAtrMult=1.5` as the
+  new default (was `false` / `1.0`). Recompiled clean (v39, 0 errors/0
+  warnings), copied the fresh `.ex5`/`.mq5` into the live test terminal's
+  `MQL5\Experts\` (root + `Advisors\`), then re-ran the 2026-08-24-27
+  stress window with **no `[TesterInputs]` override for either input** -
+  the compiled binary's own defaults applied, confirmed via the report's
+  own echoed `Inputs:` block (`InpUseAdaptiveDcaDistance=true`,
+  `InpAdaptiveDcaAtrMult=1.5`). Result matched the swept row above to
+  the cent: net $7,062.38, equity drawdown 35.54%, balance drawdown
+  10.67%, PF 1.26, 8,492 trades - the "verify the shipped binary, not
+  just the source" discipline held.
+
+  This does not change the fragility caveat above in any way - it is
+  still a provisional, likely-curve-fit setting on limited data, not a
+  validated robust edge. The user made an informed decision to ship it
+  anyway, having seen the full trade-off table first.

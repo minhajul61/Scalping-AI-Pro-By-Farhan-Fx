@@ -70,7 +70,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v38"
+#define EA_BUILD_VERSION "v39"
 
 #include <Trade\Trade.mqh>
 
@@ -240,8 +240,14 @@ input double   InpDcaDistancePrice  = 1.2;        // DCA Distance ($) - base val
 // calm-market DCA at the tight base distance that already works well -
 // the flat test widened it everywhere, all the time, which is what
 // made it worse.
-input bool     InpUseAdaptiveDcaDistance = false; // Widen DCA Distance During High Volatility (ATR-ratio based, off = flat InpDcaDistancePrice always)
-input double   InpAdaptiveDcaAtrMult     = 1.0;   // Adaptive DCA Distance Multiplier (effective distance = base x max(1, currentATR/baselineATR x this))
+// 2026-09-04, explicit confirmation after seeing the swept numbers:
+// set as the new default. Real trade-off, not a free win - see the
+// comment above and ml/learnings.md for the honest before/after
+// (equity drawdown roughly halved, profit correspondingly lower)
+// and the fragility caveat (1.0/2.0/3.0 were all catastrophic on
+// the full month - only 1.5 tested well).
+input bool     InpUseAdaptiveDcaDistance = true; // Widen DCA Distance During High Volatility (ATR-ratio based, off = flat InpDcaDistancePrice always)
+input double   InpAdaptiveDcaAtrMult     = 1.5;   // Adaptive DCA Distance Multiplier (effective distance = base x max(1, currentATR/baselineATR x this))
 input double   InpLotMultiplier     = 2.0;        // Lot Multiplier
 input int      InpMinSecondsBetweenLegs = 5;      // Min Seconds Between Legs (safety net vs a cascade - 0 disables)
 // 2026-08-28, explicit request after root-causing the 58% equity

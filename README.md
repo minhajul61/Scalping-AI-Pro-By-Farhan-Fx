@@ -3,6 +3,21 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-09-04 (later): v39 - ATR-adaptive DCA distance (1.5x) is now
+## the shipped default, verified on the compiled binary
+
+User confirmed ("ha koro") after seeing the v38 numbers below: set
+`InpUseAdaptiveDcaDistance=true` / `InpAdaptiveDcaAtrMult=1.5` as the
+new default (was `false`/`1.0`). Recompiled clean (v39, 0 errors/0
+warnings) and re-ran the 2026-08-24-27 stress window through the
+*compiled binary's own defaults* (no `[TesterInputs]` override for
+either input, report's own echoed `Inputs:` confirms both came from
+the binary) - reproduced the swept numbers to the cent: **net
+$7,062.38, equity drawdown 35.54%, balance drawdown 10.67%, PF 1.26,
+8,492 trades.** The fragility caveat below still applies in full -
+this is a provisional, likely-curve-fit setting, not a validated
+robust edge - the user made an informed call to ship it anyway.
+
 ## 2026-09-04: v38 - ATR-adaptive DCA distance, research-backed,
 ## a genuine risk/profit trade-off found (with the usual fragility caveat)
 
@@ -26,8 +41,7 @@ sits fine between them - the same knife-edge pattern already found
 for every other lever this project has swept (leg cap, volume cap,
 margin guard, cooldown time, per-bar limit, cycle length). Full
 writeup in `ml/learnings.md`. Compiled clean (v38, 0 errors/0
-warnings), not yet set as the default - reported to the user as a
-real candidate with the fragility stated plainly.
+warnings). **Superseded by v39 above - now the shipped default.**
 
 
 ## 2026-08-31 (later still): v37 - TP simplified back to a plain, fixed/

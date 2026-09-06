@@ -3,6 +3,28 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-09-07: v42 - InpOnlyTradeWithTrend (a stricter "only trade the
+## trend direction" gate) - caught and fixed a real bug before trusting
+## any result, then found the lowest drawdown of the whole project
+
+Explicit request: "sudhu trend-e trade koruk" (only trade in the trend
+direction) - stricter than the existing trend filter, which only blocks
+the counter-trend side and still lets both sides trade during a flat
+read. New `InpOnlyTradeWithTrend`: a side may only open a leg (bootstrap
+or DCA-add) if the trend explicitly favors it; flat blocks both sides.
+
+**First test run gave 0 trades everywhere - a real bug, caught before
+reporting any number:** the trend indicator handles were only created
+in `OnInit()` when `InpUseTrendFilter` was on, so `InpOnlyTradeWithTrend`
+alone (the whole point of the input) left them uninitialized and the new
+gate silently blocked every entry forever. Fixed, recompiled clean (v42,
+0 errors/0 warnings), re-tested - real results in `ml/learnings.md`:
+both multi-TF and single-TF variants flip the current baseline's
+catastrophic loss into solid profit on both test windows, and multi-TF
+confluence produced **7.60% equity drawdown on the stress window - the
+lowest found anywhere in this project.** Same reproducibility caveat as
+every 2026-09-07 result applies; not enabled by default.
+
 ## 2026-09-06/07: v40 - carryover-cycle lot sizing + candle-close DCA
 ## gating (both off by default) - AND a serious backtest-reproducibility
 ## problem found while verifying them

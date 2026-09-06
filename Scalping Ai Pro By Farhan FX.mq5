@@ -70,7 +70,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v41"
+#define EA_BUILD_VERSION "v42"
 
 #include <Trade\Trade.mqh>
 
@@ -313,6 +313,18 @@ input bool             InpUseMultiTFTrend   = true;      // Require Multiple Tim
 input ENUM_TIMEFRAMES  InpTrendTF2          = PERIOD_H4; // Second Trend Timeframe
 input ENUM_TIMEFRAMES  InpTrendTF3          = PERIOD_D1; // Third Trend Timeframe
 
+// 2026-09-07, explicit request: "sudhu trend-e trade koruk" (only trade
+// in the trend direction) - stricter than InpUseTrendFilter/
+// IsAgainstTrend above, which only blocks the counter-trend side and
+// still lets BOTH sides bootstrap/DCA-add during a flat/no-trend read.
+// When this is on, a side may only open a new leg (bootstrap or DCA-add)
+// if the higher-timeframe trend explicitly favors it - flat/no-trend
+// blocks BOTH sides too, not just neither. Forces the trend computation
+// on even if InpUseTrendFilter itself is left off (see GetTrend()), so
+// this input alone is enough to activate it - no need to also enable
+// InpUseTrendFilter.
+input bool     InpOnlyTradeWithTrend = false; // Only Trade The Side The Trend Favors (flat trend blocks both sides)
+
 input group "=== News Filter ==="
 input bool     InpUseNewsFilter       = true;   // Use News Filter (auto calendar - live/demo only)
 input string   InpNewsCurrency        = "USD";  // News Currency
@@ -508,7 +520,14 @@ int OnInit()
       return(INIT_FAILED);
      }
 
-   if(InpUseTrendFilter)
+   // InpOnlyTradeWithTrend forces the same handles on even if
+   // InpUseTrendFilter itself is left off - see GetTrend()'s matching
+   // check. Without this, InpOnlyTradeWithTrend alone would leave these
+   // handles at INVALID_HANDLE, GetTrendOnTF() would always return 0
+   // (flat), and the "only trade with trend" gate would silently block
+   // EVERY entry forever - exactly the 2026-09-07 bug this comment is
+   // here to stop from recurring.
+   if(InpUseTrendFilter || InpOnlyTradeWithTrend)
      {
       g_trendMAHandle = iMA(_Symbol, InpTrendTF, InpTrendMAPeriod, 0, MODE_SMA, PRICE_CLOSE);
       if(g_trendMAHandle == INVALID_HANDLE)
@@ -1013,6 +1032,8 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
       // not just the DCA-adds after it.
       if(InpUseTrendFilter && IsAgainstTrend(side))
          return;
+      if(InpOnlyTradeWithTrend && !IsWithTrend(side))
+         return; // stricter mode - flat/no-trend blocks bootstrap on BOTH sides too
       OpenLeg(side, 0, 0);
       RefreshBaskets(); // pick up the leg just opened before computing its TP
       ApplyBasketTP(side);
@@ -1056,6 +1077,8 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
          return; // "news proxy" - don't average into a volatility spike
       if(InpUseTrendFilter && IsAgainstTrend(side))
          return; // don't keep averaging into a strong opposing higher-timeframe trend
+      if(InpOnlyTradeWithTrend && !IsWithTrend(side))
+         return; // stricter mode - flat/no-trend blocks DCA-adds on BOTH sides too
 
       // Cycling: once a full cycle is used up, the next leg restarts lot
       // sizing from InpInitialLot instead of continuing to compound the
@@ -1592,7 +1615,10 @@ int GetTrendOnTF(int maHandle, int atrHandle, ENUM_TIMEFRAMES tf)
 // at the cost of blocking (calling flat/0) more often.
 int GetTrend()
   {
-   if(!InpUseTrendFilter)
+   // InpOnlyTradeWithTrend forces this computation on by itself - a user
+   // enabling it shouldn't also have to remember to flip InpUseTrendFilter
+   // for it to do anything.
+   if(!InpUseTrendFilter && !InpOnlyTradeWithTrend)
       return 0;
 
    int t1 = GetTrendOnTF(g_trendMAHandle, g_trendAtrHandle, InpTrendTF);
@@ -1615,6 +1641,20 @@ bool IsAgainstTrend(ENUM_BASKET_SIDE side)
    if(side == SIDE_BUY)
       return(trend == -1);
    return(trend == 1);
+  }
+
+// Stricter than IsAgainstTrend() above - that one only flags the side
+// actively opposing a confirmed trend, so BOTH sides still pass during a
+// flat/no-trend read (trend == 0). This one requires the trend to
+// explicitly favor this exact side; flat blocks both sides, matching
+// explicit request ("sudhu trend-e trade koruk" - only trade in the
+// trend direction, not both directions during chop).
+bool IsWithTrend(ENUM_BASKET_SIDE side)
+  {
+   int trend = GetTrend();
+   if(side == SIDE_BUY)
+      return(trend == 1);
+   return(trend == -1);
   }
 
 // Uses MT5's built-in economic calendar (no external service needed - the

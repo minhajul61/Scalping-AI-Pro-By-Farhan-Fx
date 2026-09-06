@@ -2649,3 +2649,52 @@ Farhan Fx` Python project's `learnings.md`.)
   behaving smoothly. Same skepticism as the v40 entry applies in full -
   this is one day's data snapshot, not a validated result. Neither input
   is enabled by default.
+
+- **2026-09-07 (v42, InpOnlyTradeWithTrend - a genuinely different kind
+  of trend gate, plus a real bug caught before any result was trusted):**
+  explicit request: "sudhu trend-e trade koruk" (only trade in the trend
+  direction) - stricter than the existing `InpUseTrendFilter`/
+  `IsAgainstTrend()`, which only blocks the side actively fighting a
+  confirmed trend and still lets BOTH sides bootstrap/DCA-add during a
+  flat/no-trend read. Added `InpOnlyTradeWithTrend` + a new
+  `IsWithTrend(side)`: a side may only open a new leg if the trend
+  explicitly favors it - flat blocks both sides too. Wired into the same
+  two gate points as the existing trend filter (bootstrap + DCA-add).
+
+  **First compile/test run gave 0 trades on every window, both with and
+  without multi-TF confluence - caught before reporting anything, not
+  shipped as a "result".** Root cause: `GetTrend()` was patched so
+  `InpOnlyTradeWithTrend` alone activates the trend computation without
+  also needing `InpUseTrendFilter`, but the indicator HANDLE creation in
+  `OnInit()` was still gated by `InpUseTrendFilter` alone - with that
+  input false (as in this test), `g_trendMAHandle`/`g_trendAtrHandle`
+  stayed `INVALID_HANDLE`, so `GetTrendOnTF()` always returned 0 (flat),
+  and the new strict gate silently blocked every single entry forever.
+  Fixed by gating handle creation on `InpUseTrendFilter || InpOnlyTradeWithTrend`
+  instead. Recompiled clean (v42, 0 errors/0 warnings) and re-ran -
+  real, non-zero results below.
+
+  **Swept both multi-TF (H1+H4+D1 must all agree) and single-TF (H1
+  only) variants, same 2026-09-07 data snapshot as the tables above:**
+  ```
+  window   trend-mode        net$        eqDD%    PF     trades
+  month    baseline (off)  -30,815.83    101.23   0.80   35,240
+  month    multi-TF only    +7,809.00     28.77   1.24   11,404
+  month    single-TF only  +14,897.46     26.64   1.29   17,667
+  stress   baseline (off)  -34,884.12    112.28   0.25    3,052
+  stress   multi-TF only    +1,550.58      7.60   1.25    1,927  <- lowest eqDD of the whole project
+  stress   single-TF only   +2,737.98     23.15   1.25    3,217
+  ```
+  Both variants flip baseline's catastrophic loss into solid profit on
+  both windows, same direction as the carryover-cycle and
+  bootstrap-inclusive-candle-close findings above. Multi-TF confluence
+  gives the single lowest equity drawdown found in this entire project
+  (7.60% on the stress window) at some profit cost versus single-TF;
+  single-TF trades more often and earns more, at roughly 3x the
+  drawdown. Same reproducibility caveat as every other 2026-09-07 result
+  applies in full - not enabled by default, reported as a promising
+  candidate needing the same skepticism as everything else in this file,
+  and this feature specifically already had one real bug caught by the
+  isolation-test discipline before any number was trusted - a reminder
+  that the discipline itself is what's paying off here, not the raw
+  numbers.

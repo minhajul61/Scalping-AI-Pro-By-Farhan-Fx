@@ -70,7 +70,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v40"
+#define EA_BUILD_VERSION "v41"
 
 #include <Trade\Trade.mqh>
 
@@ -279,15 +279,17 @@ input int      InpCarryoverBaseLegs   = 4;        // Base Legs Per Cycle (flat d
 input double   InpCarryoverStartLot   = 0.16;     // Carryover Leg Starting Lot (this cycle's extra/last leg, cycle 1)
 input double   InpCarryoverGrowthMult = 2.0;      // Carryover Leg Growth Multiplier (doubles the carryover leg every full cycle by default)
 
-// 2026-09-06, explicit request: instead of checking/acting on the adverse-
-// move DCA trigger every tick, wait for the current M1 candle to close and
-// only evaluate/act once per new bar - fewer, later DCA-adds (reacts to
-// where price settled at candle close instead of the first intrabar touch),
-// previously tested ad hoc as a real trade-off (fewer legs, but sometimes
-// worse average entry) - never shipped as a permanent toggle until now.
-// Bootstrap (the very first leg of an empty basket) is NOT gated by this -
-// only DCA-adds wait, per explicit request.
-input bool     InpDcaOnCandleCloseOnly = false;   // DCA-Add Only Once Per New M1 Candle (bootstrap unaffected)
+// 2026-09-06, explicit request: instead of checking/acting on entries
+// every tick, wait for the current M1 candle to close and only
+// evaluate/act once per new bar - fewer, later entries (reacts to where
+// price settled at candle close instead of the first intrabar touch).
+// The DCA-add side of this was previously tested ad hoc as a real
+// trade-off (fewer legs, but sometimes worse average entry) - never
+// shipped as a permanent toggle until now. 2026-09-07, explicit request:
+// extended to also gate the bootstrap (first leg of an empty basket) -
+// originally bootstrap was left ungated, now both wait for the same
+// per-side once-per-bar check.
+input bool     InpTradeOnCandleCloseOnly = false;   // Bootstrap + DCA-Add Only Once Per New M1 Candle
 
 input group "=== Filters ==="
 input bool             InpUseAtrSpikeFilter = true;      // Use ATR Spike Filter
@@ -399,11 +401,11 @@ struct SBasket
 
 SBasket g_buyBasket, g_sellBasket;
 
-// InpDcaOnCandleCloseOnly bookkeeping - the last M1 bar-open time each side
-// was already evaluated for a DCA-add, so a side gets exactly one
-// check-and-maybe-act per new bar instead of every tick. Indexed 0=buy,
-// 1=sell.
-datetime g_lastDcaCandleCheck[2] = {0, 0};
+// InpTradeOnCandleCloseOnly bookkeeping - the last M1 bar-open time each
+// side was already evaluated for an entry (bootstrap or DCA-add), so a
+// side gets exactly one check-and-maybe-act per new bar instead of every
+// tick. Indexed 0=buy, 1=sell.
+datetime g_lastCandleCheck[2] = {0, 0};
 
 int g_atrHandle      = INVALID_HANDLE;
 int g_trendMAHandle  = INVALID_HANDLE;
@@ -994,6 +996,16 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
       return; // account-wide margin is already stressed - refuse ANY new leg, either side, until
               // it recovers (existing legs untouched, no loss booked) - see InpMinMarginLevelPercent
 
+   if(InpTradeOnCandleCloseOnly)
+     {
+      datetime curBar = iTime(_Symbol, PERIOD_M1, 0);
+      int sideIdx = (side == SIDE_BUY) ? 0 : 1;
+      if(curBar <= g_lastCandleCheck[sideIdx])
+         return; // already evaluated this M1 bar for this side - wait for the next one to open
+      g_lastCandleCheck[sideIdx] = curBar; // mark checked whether or not a leg ends up opening below
+              // (covers both the bootstrap branch and the DCA-add branch further down)
+     }
+
    if(b.legCount == 0)
      {
       // Don't even start a basket fighting a strong higher-timeframe trend -
@@ -1009,15 +1021,6 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
 
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
-
-   if(InpDcaOnCandleCloseOnly)
-     {
-      datetime curBar = iTime(_Symbol, PERIOD_M1, 0);
-      int sideIdx = (side == SIDE_BUY) ? 0 : 1;
-      if(curBar <= g_lastDcaCandleCheck[sideIdx])
-         return; // already evaluated this M1 bar for a DCA-add - wait for the next one to open
-      g_lastDcaCandleCheck[sideIdx] = curBar; // mark checked whether or not a leg ends up opening below
-     }
 
    double dcaDist = GetEffectiveDcaDistance();
    bool adverse;

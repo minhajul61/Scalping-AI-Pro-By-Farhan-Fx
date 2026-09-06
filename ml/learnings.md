@@ -2613,3 +2613,39 @@ Farhan Fx` Python project's `learnings.md`.)
   promising-looking candidate that needs the same skepticism as every
   other finding in this file, not a solved problem. Neither new input
   has been turned on by default.
+
+- **2026-09-07 (v41, InpTradeOnCandleCloseOnly extended to also gate
+  bootstrap, per explicit follow-up request):** the v40 candle-close gate
+  only covered DCA-adds, bootstrap stayed ungated, per the original
+  explicit answer. Follow-up request extended it to cover bootstrap too
+  - renamed `InpDcaOnCandleCloseOnly` to `InpTradeOnCandleCloseOnly` and
+  moved the once-per-M1-bar gate earlier in `ManageBasketEntries()`, above
+  the bootstrap branch, so both bootstrap and DCA-adds now share the same
+  per-side "already checked this bar" gate. Compiled clean (v41, 0
+  errors/0 warnings) after fixing one stray brace left by the splice.
+
+  **Swept again on the same 2026-09-07 data snapshot as the v40 table
+  above (comparisons below are only valid against that same table, not
+  across sessions - see the reproducibility finding above):**
+  ```
+  window   config                          net$        eqDD%    PF
+  month    candle-close, DCA-only (v40)  -35,767.86    112.12   0.64
+  month    candle-close, +bootstrap (v41) +17,485.57     37.12   1.36  <- flips positive
+  stress   candle-close, DCA-only (v40)  -31,173.48    103.72   0.10
+  stress   candle-close, +bootstrap (v41)  +2,535.84     55.04   1.18  <- flips positive
+  month    carryover + candle-close(v40) -30,507.99    101.30   0.55
+  month    carryover + candle-close(v41) -30,723.05    101.93   0.49
+  stress   carryover + candle-close(v40)  +1,438.93     15.19   1.18
+  stress   carryover + candle-close(v41)    +687.01     10.55   1.12  <- lowest eqDD yet
+  ```
+  Gating bootstrap too is what makes candle-close mode work on its own -
+  DCA-only candle-close was a net negative (matches the tone of the
+  original ad-hoc test), but bootstrap+DCA candle-close alone is now the
+  second-best single lever found this week (carryover-cycle alone is
+  still the best on the month window). Combined with carryover, still
+  underperforms either lever alone, especially on the full month (still
+  negative, ~102% drawdown) - the interaction between the two new levers
+  is not additive, another instance of this design's parameter space not
+  behaving smoothly. Same skepticism as the v40 entry applies in full -
+  this is one day's data snapshot, not a validated result. Neither input
+  is enabled by default.

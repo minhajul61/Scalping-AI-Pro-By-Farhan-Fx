@@ -9,9 +9,19 @@ to know which one you're looking at.
 
 New opt-in inputs: `InpUseCarryoverCycle` (4 flat-doubling legs then a
 5th "carryover" leg that starts at `InpCarryoverStartLot` and doubles
-every cycle instead of resetting) and `InpDcaOnCandleCloseOnly` (DCA-adds
-wait for a new M1 bar instead of checking every tick; bootstrap
-unaffected). Both default `false`.
+every cycle instead of resetting) and `InpTradeOnCandleCloseOnly`
+(bootstrap + DCA-adds wait for a new M1 bar instead of checking every
+tick - renamed from `InpDcaOnCandleCloseOnly` in v41 once a follow-up
+request extended it to also gate bootstrap, originally left ungated).
+Both default `false`.
+
+**v41 update:** gating bootstrap too (not just DCA-adds) flips
+candle-close mode from a net negative to the second-best single lever
+found this week on its own (+$17,485.57/37.12% eqDD on the full month,
+vs the DCA-only version's -$35,767.86/112.12%) - see `ml/learnings.md`
+for the full before/after table. Combined with carryover-cycle it still
+underperforms either lever alone on the full month, same non-additive
+pattern as everything else in this file.
 
 **While isolation-testing v40 (both new inputs off, so it should behave
 exactly like v39), the identical 2026-08-24-27 stress window + identical

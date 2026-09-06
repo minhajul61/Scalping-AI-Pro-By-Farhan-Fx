@@ -2533,3 +2533,83 @@ Farhan Fx` Python project's `learnings.md`.)
   still a provisional, likely-curve-fit setting on limited data, not a
   validated robust edge. The user made an informed decision to ship it
   anyway, having seen the full trade-off table first.
+
+- **2026-09-06/07 (v40, N-leg reset + doubling "carryover" leg + candle-
+  close-only DCA-adds, both new/off-by-default - and a much bigger,
+  unplanned discovery about backtest reproducibility itself):** explicit
+  request: split the flat 15-leg lot-reset cycle into 4 flat-doubling legs
+  (0.01/0.02/0.04/0.08-style, same InpLotMultiplier=2.0) plus a 5th
+  "carryover" leg that does NOT reset - it starts at
+  `InpCarryoverStartLot` (0.16) and doubles again (`InpCarryoverGrowthMult`,
+  2.0) every time the 5-leg cycle repeats, capped by the existing
+  `InpMaxSingleLegLot`. Also added `InpDcaOnCandleCloseOnly` - gates
+  DCA-adds (not bootstrap) to at most one check-and-maybe-act per new M1
+  bar instead of every tick. Both `false` by default; compiled clean
+  (v40, 0 errors/0 warnings).
+
+  **Before trusting the sweep, an isolation test was run first (both new
+  inputs off) to make sure v40 didn't quietly change old behavior - and
+  it uncovered something much bigger.** The exact 2026-08-24-27 stress
+  window, exact same settings that were verified 2026-09-04 as net
+  $7,062.38 / 35.54% equity drawdown (the v39 default-flip verification,
+  see above), now returns **net -$34,884.12 / 115.04% equity drawdown -
+  a full sign flip** on a re-run three days later. Confirmed this is NOT
+  a v40 code bug: extracted the exact git-committed v39 `.ex5` (commit
+  2626c89, byte-identical, 222,148 bytes) and re-ran the identical config
+  against it directly - same -$34,884.12 result. Both the 2026-09-04 and
+  2026-09-07 runs report "100% real ticks", and the underlying tick
+  cache file (`Exness-MT5Trial17/ticks/XAUUSD/202608.tkc`) has an
+  unchanged Sep-3 modification date across both runs, ruling out a tick-
+  data rewrite. The one thing that DID change in between:
+  `bases/Exness-MT5Trial17/symbols/symbols-463741386.dat` (the cached
+  symbol specification - contract size/margin/tick value etc.) shows a
+  modification timestamp matching today's session, meaning it was
+  re-downloaded/refreshed since the 2026-09-04 run. This is the most
+  likely explanation found so far (not fully proven beyond that) -
+  something in the broker's own symbol spec for XAUUSD on this demo
+  login changed, and this design is sensitive enough to margin/contract
+  details that the identical price path now produces a completely
+  different outcome.
+
+  **This is a bigger deal than any single parameter finding in this
+  file: it means a backtest "verified to the cent" on one day is not
+  guaranteed to reproduce even a few days later, on the same historical
+  window, same binary, same settings, same reported tick quality.**
+  Every past "verified" number in this log (including the v39 default
+  currently live on the real account) should be read as "true for the
+  data/symbol-spec snapshot at the time it was measured," not as a
+  timeless fact about the strategy. This does not mean the numbers were
+  fabricated or the testing was sloppy - the isolation-test discipline
+  that has been standard all along is exactly what caught this - but it
+  is a real limitation of local-terminal backtesting on a live demo
+  server that this project has not had to reckon with quite this
+  starkly before.
+
+  **The carryover-cycle sweep itself, run entirely within today's single
+  (internally consistent) data snapshot - comparisons WITHIN this table
+  are valid, comparisons to any OLDER session's numbers are not:**
+  ```
+  window   config              net$          eqDD%     PF     trades
+  month    baseline          -30,815.83     101.23      0.80   35,240
+  month    candle-close-only -35,767.86     112.12      0.64   17,570
+  month    carryover-only    +27,416.46      42.52      1.33   36,085   <- big flip
+  month    both               -30,507.99    101.30      0.55   11,762
+  stress   baseline           -34,884.12    112.28      0.25    3,052
+  stress   candle-close-only  -31,173.48    103.72      0.10    1,453
+  stress   carryover-only     +5,316.75      31.40      1.42    7,573   <- big flip
+  stress   both               +1,438.93      15.19      1.18    3,737   <- lowest eqDD of all 8
+  ```
+  On TODAY's data, `InpUseCarryoverCycle=true` alone turns a catastrophic
+  >100%-drawdown loss into solid profit on both windows - a much larger
+  swing than any single lever tested before. `InpDcaOnCandleCloseOnly`
+  alone makes things worse both times. Combined, still profitable with
+  the single lowest equity drawdown of the whole set (15.19% on stress)
+  but noticeably less profit than carryover alone - a real trade-off.
+
+  **Given the reproducibility problem just found, this table cannot be
+  treated as more trustworthy than any earlier "verified" result - if
+  anything, less so, since it is the first sweep run after learning the
+  ground can shift under identical settings.** Reported to the user as a
+  promising-looking candidate that needs the same skepticism as every
+  other finding in this file, not a solved problem. Neither new input
+  has been turned on by default.

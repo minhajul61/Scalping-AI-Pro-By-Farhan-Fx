@@ -70,7 +70,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v39"
+#define EA_BUILD_VERSION "v40"
 
 #include <Trade\Trade.mqh>
 
@@ -263,6 +263,32 @@ input int      InpMinSecondsBetweenLegs = 5;      // Min Seconds Between Legs (s
 input int      InpMaxLegsPerBar     = 0;          // Max DCA Legs Per M1 Bar (0 = unlimited - tested, made things worse, left off)
 input double   InpMaxSingleLegLot   = 17;         // Max Single-Leg Lot Size (0 = unlimited - caps martingale growth without slowing the add cadence)
 
+// 2026-09-06, explicit request: instead of the flat "resets to InpInitialLot
+// every InpMaxLegsPerBasket legs" cycle above, an alternative lot-cycle
+// shape - N flat-doubling legs (InpInitialLot x InpLotMultiplier each time),
+// then one extra "carryover" leg whose size does NOT reset with the rest -
+// it starts at InpCarryoverStartLot and doubles again every time this
+// N+1-leg cycle repeats (so leg-count-within-basket keeps climbing even
+// though the first N legs of every cycle look identical). Off by default -
+// an opt-in candidate, not yet backtested; NextLotSize()'s existing
+// InpMaxSingleLegLot cap and monotonic-growth guarantee both still apply
+// to the carryover leg untouched, so it can't runaway past the same limit
+// every other leg already respects.
+input bool     InpUseCarryoverCycle   = false;    // Use N-Leg Reset + Doubling Carryover Leg (overrides the plain cycle above when on)
+input int      InpCarryoverBaseLegs   = 4;        // Base Legs Per Cycle (flat doubling sequence length before the carryover leg)
+input double   InpCarryoverStartLot   = 0.16;     // Carryover Leg Starting Lot (this cycle's extra/last leg, cycle 1)
+input double   InpCarryoverGrowthMult = 2.0;      // Carryover Leg Growth Multiplier (doubles the carryover leg every full cycle by default)
+
+// 2026-09-06, explicit request: instead of checking/acting on the adverse-
+// move DCA trigger every tick, wait for the current M1 candle to close and
+// only evaluate/act once per new bar - fewer, later DCA-adds (reacts to
+// where price settled at candle close instead of the first intrabar touch),
+// previously tested ad hoc as a real trade-off (fewer legs, but sometimes
+// worse average entry) - never shipped as a permanent toggle until now.
+// Bootstrap (the very first leg of an empty basket) is NOT gated by this -
+// only DCA-adds wait, per explicit request.
+input bool     InpDcaOnCandleCloseOnly = false;   // DCA-Add Only Once Per New M1 Candle (bootstrap unaffected)
+
 input group "=== Filters ==="
 input bool             InpUseAtrSpikeFilter = true;      // Use ATR Spike Filter
 input int              InpAtrPeriod         = 14;        // ATR Period
@@ -372,6 +398,12 @@ struct SBasket
   };
 
 SBasket g_buyBasket, g_sellBasket;
+
+// InpDcaOnCandleCloseOnly bookkeeping - the last M1 bar-open time each side
+// was already evaluated for a DCA-add, so a side gets exactly one
+// check-and-maybe-act per new bar instead of every tick. Indexed 0=buy,
+// 1=sell.
+datetime g_lastDcaCandleCheck[2] = {0, 0};
 
 int g_atrHandle      = INVALID_HANDLE;
 int g_trendMAHandle  = INVALID_HANDLE;
@@ -978,6 +1010,15 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
 
+   if(InpDcaOnCandleCloseOnly)
+     {
+      datetime curBar = iTime(_Symbol, PERIOD_M1, 0);
+      int sideIdx = (side == SIDE_BUY) ? 0 : 1;
+      if(curBar <= g_lastDcaCandleCheck[sideIdx])
+         return; // already evaluated this M1 bar for a DCA-add - wait for the next one to open
+      g_lastDcaCandleCheck[sideIdx] = curBar; // mark checked whether or not a leg ends up opening below
+     }
+
    double dcaDist = GetEffectiveDcaDistance();
    bool adverse;
    if(side == SIDE_BUY)
@@ -1013,13 +1054,48 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
       if(InpUseTrendFilter && IsAgainstTrend(side))
          return; // don't keep averaging into a strong opposing higher-timeframe trend
 
-      // Cycling: once a full cycle (InpMaxLegsPerBasket) is used up, the next
-      // leg restarts lot sizing from InpInitialLot instead of continuing to
-      // compound the multiplier indefinitely - keeps a basket that's been
-      // going against for a long time from ever needing an unaffordable lot
-      // size, while still letting it keep averaging (unconditionally, no
-      // pause) if price keeps moving, per explicit request.
-      int legIndexForSizing = b.legCount % InpMaxLegsPerBasket;
+      // Cycling: once a full cycle is used up, the next leg restarts lot
+      // sizing from InpInitialLot instead of continuing to compound the
+      // multiplier indefinitely - keeps a basket that's been going against
+      // for a long time from ever needing an unaffordable lot size, while
+      // still letting it keep averaging (unconditionally, no pause) if
+      // price keeps moving, per explicit request.
+      //
+      // 2026-09-06, explicit request: InpUseCarryoverCycle adds a second
+      // cycle shape on top of the plain one above - InpCarryoverBaseLegs
+      // flat-doubling legs (identical every cycle, same as the plain
+      // shape), then one extra "carryover" leg that does NOT reset - it
+      // starts at InpCarryoverStartLot and doubles again every time this
+      // N+1-leg cycle repeats. legIndexForSizing keeps its old meaning
+      // (0-based position within the base sequence) for the flat legs;
+      // the carryover leg is sized by NextCarryoverLotSize() instead and
+      // legIndexForSizing there is only used for the leg-N comment label.
+      int    legIndexForSizing;
+      double prospectiveLot;
+      double carryoverLotOverride = -1;
+
+      if(InpUseCarryoverCycle)
+        {
+         int cycleLen   = InpCarryoverBaseLegs + 1;
+         int posInCycle = b.legCount % cycleLen;
+         if(posInCycle < InpCarryoverBaseLegs)
+           {
+            legIndexForSizing = posInCycle;
+            prospectiveLot    = NextLotSize(legIndexForSizing, b.lastLegLots);
+           }
+         else
+           {
+            int outerCycleNum = b.legCount / cycleLen;
+            legIndexForSizing = posInCycle; // = InpCarryoverBaseLegs - just for the comment label
+            prospectiveLot    = NextCarryoverLotSize(outerCycleNum, b.lastLegLots);
+            carryoverLotOverride = prospectiveLot;
+           }
+        }
+      else
+        {
+         legIndexForSizing = b.legCount % InpMaxLegsPerBasket;
+         prospectiveLot    = NextLotSize(legIndexForSizing, b.lastLegLots);
+        }
 
       // 2026-08-29 bugfix: the total-volume cap MUST be checked against
       // what the NEXT leg would bring the total to, not just the volume
@@ -1035,11 +1111,10 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
       // prospective lot size first and blocks if THAT would breach the
       // cap - this leg's addition is what has to stay under the limit,
       // not just the state before it.
-      double prospectiveLot = NextLotSize(legIndexForSizing, b.lastLegLots);
       if(InpMaxTotalBasketVolume > 0 && (b.totalLots + prospectiveLot) > InpMaxTotalBasketVolume)
          return; // this leg would breach the total-volume cap - stop growing, existing legs keep waiting for target, no loss booked
 
-      OpenLeg(side, legIndexForSizing, b.lastLegLots);
+      OpenLeg(side, legIndexForSizing, b.lastLegLots, carryoverLotOverride);
       RefreshBaskets(); // pick up the new leg + updated avg entry before recomputing the shared TP
       ApplyBasketTP(side);
       return;
@@ -1074,9 +1149,38 @@ double NextLotSize(int legCount, double previousLegLots)
    return NormalizeDouble(lots, 2);
   }
 
-void OpenLeg(ENUM_BASKET_SIDE side, int legIndexForSizing, double previousLegLots)
+// InpUseCarryoverCycle's extra leg: same rounding/cap/monotonic-growth
+// rules as NextLotSize() above, just a different raw-lot formula (starts
+// at InpCarryoverStartLot, doubles - or InpCarryoverGrowthMult's-worth -
+// every full outer cycle instead of every single leg). Still respects
+// InpMaxSingleLegLot, so this leg can't runaway past the same cap every
+// other leg already obeys.
+double NextCarryoverLotSize(int outerCycleNum, double previousLegLots)
   {
-   double lots = NextLotSize(legIndexForSizing, previousLegLots);
+   double raw = InpCarryoverStartLot * MathPow(InpCarryoverGrowthMult, outerCycleNum);
+
+   if(InpMaxSingleLegLot > 0)
+      raw = MathMin(raw, InpMaxSingleLegLot);
+
+   double minLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   double maxLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
+   double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+
+   double lots = MathRound(raw / lotStep) * lotStep;
+   if(lots <= previousLegLots)
+      lots = previousLegLots + lotStep;
+
+   lots = MathMax(minLot, MathMin(maxLot, lots));
+   return NormalizeDouble(lots, 2);
+  }
+
+void OpenLeg(ENUM_BASKET_SIDE side, int legIndexForSizing, double previousLegLots, double overrideLot = -1)
+  {
+   // overrideLot > 0 means the caller already computed the exact lot size
+   // (used by the InpUseCarryoverCycle carryover leg, which has a
+   // different formula than the plain NextLotSize() cycle) - use it as-is
+   // instead of recomputing from legIndexForSizing.
+   double lots = (overrideLot > 0) ? overrideLot : NextLotSize(legIndexForSizing, previousLegLots);
    if(lots <= 0)
       return;
 

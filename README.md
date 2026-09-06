@@ -3,6 +3,31 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-09-06/07: v40 - carryover-cycle lot sizing + candle-close DCA
+## gating (both off by default) - AND a serious backtest-reproducibility
+## problem found while verifying them
+
+New opt-in inputs: `InpUseCarryoverCycle` (4 flat-doubling legs then a
+5th "carryover" leg that starts at `InpCarryoverStartLot` and doubles
+every cycle instead of resetting) and `InpDcaOnCandleCloseOnly` (DCA-adds
+wait for a new M1 bar instead of checking every tick; bootstrap
+unaffected). Both default `false`.
+
+**While isolation-testing v40 (both new inputs off, so it should behave
+exactly like v39), the identical 2026-08-24-27 stress window + identical
+settings that were verified 2026-09-04 as net $7,062.38/35.54% equity
+drawdown came back net -$34,884.12/115.04% drawdown three days later -
+confirmed NOT a v40 bug by re-running the exact git-committed v39
+`.ex5` directly (same result).** Tick data file unchanged, both runs
+report "100% real ticks" - the one thing that changed in between is the
+locally cached XAUUSD symbol specification for this login, refreshed
+sometime after 2026-09-04. Full detail and the carryover-cycle sweep
+table (a large, promising-looking win on today's data, needing the same
+skepticism as everything else given this discovery) in `ml/learnings.md`.
+**Practical upshot: no backtest result in this project, past or future,
+should be treated as a stable, timeless fact - only as true for the
+data/symbol-spec snapshot it was measured on.**
+
 ## 2026-09-04 (later): v39 - ATR-adaptive DCA distance (1.5x) is now
 ## the shipped default, verified on the compiled binary
 

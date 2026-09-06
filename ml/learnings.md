@@ -2725,3 +2725,43 @@ Farhan Fx` Python project's `learnings.md`.)
   all along, right next to what looks like the best combo yet. Same
   2026-09-07 data-snapshot caveat applies (see the v40 entry above) -
   encouraging, not proof. Nothing enabled by default.
+
+- **2026-09-07 (July cross-check of the multi-TF-trend + carryover-cycle
+  "best combo" - explicit request to verify robustness on a different
+  month; result: the excitement does NOT hold up, and the trend filter
+  specifically looks like a August-only fluke):**
+  ```
+  config                          net$         eqDD%     PF     trades
+  baseline (no filter, no carry) -40,475.36    134.34    0.05     624
+  multi-TF trend ALONE           -40,720.34    135.40    0.04     314   <- essentially = baseline, no help at all
+  multi-TF trend + carryover      +4,127.50     69.09    1.35   5,457   <- rescued by carryover, but eqDD still high
+  single-TF trend + carryover    +12,502.62     57.81    1.39  16,751
+  ```
+  **Multi-TF trend alone did essentially nothing on July** - both it and
+  the plain baseline lost catastrophically with near-identical drawdown
+  (134-135%) and near-zero profit factor. This directly contradicts the
+  August finding where multi-TF trend alone turned a similar catastrophic
+  baseline into +$7,809/28.77% eqDD - strong evidence that result was
+  specific to August's price action (plausibly one long, mostly one-
+  directional stretch where "only trade with trend" just means "run one
+  large unhedged directional basket," which is fine until that trend
+  reverses hard, as apparently happened in July), not a robust edge.
+
+  **The carryover-cycle lot-sizing change is the more consistently
+  positive lever of the two** - it rescued both the August stress/month
+  windows AND July from catastrophic loss into profit, though July's
+  rescued equity drawdown (69.09%/57.81%) is far higher than August's
+  (5.53%/6.57%) - nowhere near as safe as the August-only picture
+  suggested. The "5.53% drawdown, best combo in the project" framing
+  from the previous message does not survive this check and should not
+  be repeated without re-qualifying it as August-specific.
+
+  **Practical conclusion: neither lever should be treated as validated
+  from a two-window check, and the trend-filter component specifically
+  now looks more like noise than edge.** More months would need to agree
+  before treating any of this as more than "worth continuing to watch."
+  Nothing enabled by default; this is the second time this session a
+  result reported as promising did not survive a follow-up check (the
+  first being the reproducibility problem in the v40 entry) - a
+  reminder to keep leading with the caveat, not the win, when reporting
+  interim numbers.

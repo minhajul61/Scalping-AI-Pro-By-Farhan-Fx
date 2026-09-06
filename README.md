@@ -3,6 +3,21 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-09-07 (later): July cross-check - the "best combo" excitement
+## below does NOT hold up, trend-filter-alone looks like an August fluke
+
+Explicit request to verify the multi-TF-trend + carryover-cycle combo
+on July data. **Multi-TF trend alone did essentially nothing on July**
+(-$40,720/135.40% eqDD, PF 0.04 - statistically the same disaster as no
+filter at all, -$40,475/134.34%/PF 0.05) - directly contradicting the
+August result below. Carryover-cycle is the more consistently positive
+lever of the two (rescued July into profit too), but July's rescued
+equity drawdown (69.09%/57.81%) is far higher than August's
+(5.53%/6.57%) - nowhere near as safe as the August-only picture
+suggested. Full detail in `ml/learnings.md`. **Read the "best combo"
+section right below with this correction in mind - it does not survive
+a second month.**
+
 ## 2026-09-07: InpOnlyTradeWithTrend + InpUseCarryoverCycle combined -
 ## the best-looking result in the project so far, with a clear counter-
 ## example right next to it

@@ -70,7 +70,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v42"
+#define EA_BUILD_VERSION "v43"
 
 #include <Trade\Trade.mqh>
 
@@ -269,12 +269,19 @@ input double   InpMaxSingleLegLot   = 17;         // Max Single-Leg Lot Size (0 
 // then one extra "carryover" leg whose size does NOT reset with the rest -
 // it starts at InpCarryoverStartLot and doubles again every time this
 // N+1-leg cycle repeats (so leg-count-within-basket keeps climbing even
-// though the first N legs of every cycle look identical). Off by default -
-// an opt-in candidate, not yet backtested; NextLotSize()'s existing
-// InpMaxSingleLegLot cap and monotonic-growth guarantee both still apply
-// to the carryover leg untouched, so it can't runaway past the same limit
-// every other leg already respects.
-input bool     InpUseCarryoverCycle   = false;    // Use N-Leg Reset + Doubling Carryover Leg (overrides the plain cycle above when on)
+// though the first N legs of every cycle look identical). NextLotSize()'s
+// existing InpMaxSingleLegLot cap and monotonic-growth guarantee both
+// still apply to the carryover leg untouched, so it can't runaway past
+// the same limit every other leg already respects.
+// 2026-09-07, explicit request: set as the new default (true), after it
+// was the more consistently positive lever of everything tested that
+// day - rescued both the August windows AND a July cross-check from a
+// catastrophic baseline into profit (unlike InpOnlyTradeWithTrend, which
+// did not survive the July check and was removed entirely - see
+// ml/learnings.md's 2026-09-07 entries for the full before/after
+// numbers on both months, including the honest caveat that July's
+// rescued equity drawdown, 57-69%, is far higher than August's 5-7%).
+input bool     InpUseCarryoverCycle   = true;     // Use N-Leg Reset + Doubling Carryover Leg (overrides the plain cycle above when on)
 input int      InpCarryoverBaseLegs   = 4;        // Base Legs Per Cycle (flat doubling sequence length before the carryover leg)
 input double   InpCarryoverStartLot   = 0.16;     // Carryover Leg Starting Lot (this cycle's extra/last leg, cycle 1)
 input double   InpCarryoverGrowthMult = 2.0;      // Carryover Leg Growth Multiplier (doubles the carryover leg every full cycle by default)
@@ -296,34 +303,18 @@ input bool             InpUseAtrSpikeFilter = true;      // Use ATR Spike Filter
 input int              InpAtrPeriod         = 14;        // ATR Period
 input int              InpAtrBaselineBars   = 20;        // ATR Baseline Bars
 input double           InpMaxAtrRatio       = 1.5;       // Max ATR Ratio (spike threshold)
-// 2026-08-27: default flipped true->false - the 17-config sweep found
-// disabling the trend filter entirely gave BOTH the highest net profit
-// AND the lowest equity drawdown (58.03% vs. 75.09% with it on) on the
-// August 2026 window - counterintuitive (the filter exists to avoid
-// fighting a strong move) and only tested on one month so far; a
-// second month's data wasn't available at good tick quality to
-// cross-check it (see ml/learnings.md, 2026-08-27 entries). Still the
-// best real evidence available at the time this default was set.
-input bool             InpUseTrendFilter    = false;     // Use Trend Filter
-input ENUM_TIMEFRAMES  InpTrendTF           = PERIOD_H1; // Trend Timeframe
-input int              InpTrendMAPeriod     = 50;        // Trend MA Period
-input int              InpTrendAtrPeriod    = 14;        // Trend ATR Period
-input double           InpTrendStrengthATRMult = 0.5;    // Trend Strength (x ATR)
-input bool             InpUseMultiTFTrend   = true;      // Require Multiple Timeframes To Agree (2026-08-21: default on - "trend filter valo vabe kaj kore" - H1+H4+D1 must all agree, not just H1)
-input ENUM_TIMEFRAMES  InpTrendTF2          = PERIOD_H4; // Second Trend Timeframe
-input ENUM_TIMEFRAMES  InpTrendTF3          = PERIOD_D1; // Third Trend Timeframe
-
-// 2026-09-07, explicit request: "sudhu trend-e trade koruk" (only trade
-// in the trend direction) - stricter than InpUseTrendFilter/
-// IsAgainstTrend above, which only blocks the counter-trend side and
-// still lets BOTH sides bootstrap/DCA-add during a flat/no-trend read.
-// When this is on, a side may only open a new leg (bootstrap or DCA-add)
-// if the higher-timeframe trend explicitly favors it - flat/no-trend
-// blocks BOTH sides too, not just neither. Forces the trend computation
-// on even if InpUseTrendFilter itself is left off (see GetTrend()), so
-// this input alone is enough to activate it - no need to also enable
-// InpUseTrendFilter.
-input bool     InpOnlyTradeWithTrend = false; // Only Trade The Side The Trend Favors (flat trend blocks both sides)
+// 2026-09-07: the entire trend-filter subsystem (InpUseTrendFilter,
+// InpUseMultiTFTrend, and the stricter InpOnlyTradeWithTrend added
+// earlier the same day) was removed here, by explicit request, after a
+// July cross-check showed it doesn't hold up - multi-TF trend alone
+// looked like a strong August-only win (+$7,809/28.77% eqDD vs a
+// catastrophic baseline) but did essentially nothing on July
+// (-$40,720/135.40% eqDD, statistically identical to no filter at all,
+// -$40,475/134.34%). See ml/learnings.md's 2026-09-07 entries for the
+// full history before this removal, and git history for the removed
+// code (GetTrendOnTF/GetTrend/IsAgainstTrend/IsWithTrend and the trend
+// indicator handles) if a future idea wants to revisit trend-gating
+// with better evidence.
 
 input group "=== News Filter ==="
 input bool     InpUseNewsFilter       = true;   // Use News Filter (auto calendar - live/demo only)
@@ -420,12 +411,6 @@ SBasket g_buyBasket, g_sellBasket;
 datetime g_lastCandleCheck[2] = {0, 0};
 
 int g_atrHandle      = INVALID_HANDLE;
-int g_trendMAHandle  = INVALID_HANDLE;
-int g_trendAtrHandle = INVALID_HANDLE;
-int g_trendMAHandle2  = INVALID_HANDLE; // only used if InpUseMultiTFTrend
-int g_trendAtrHandle2 = INVALID_HANDLE;
-int g_trendMAHandle3  = INVALID_HANDLE;
-int g_trendAtrHandle3 = INVALID_HANDLE;
 
 int    g_dayStartDateCode = -1;
 double g_dayStartBalance  = 0.0;
@@ -520,44 +505,6 @@ int OnInit()
       return(INIT_FAILED);
      }
 
-   // InpOnlyTradeWithTrend forces the same handles on even if
-   // InpUseTrendFilter itself is left off - see GetTrend()'s matching
-   // check. Without this, InpOnlyTradeWithTrend alone would leave these
-   // handles at INVALID_HANDLE, GetTrendOnTF() would always return 0
-   // (flat), and the "only trade with trend" gate would silently block
-   // EVERY entry forever - exactly the 2026-09-07 bug this comment is
-   // here to stop from recurring.
-   if(InpUseTrendFilter || InpOnlyTradeWithTrend)
-     {
-      g_trendMAHandle = iMA(_Symbol, InpTrendTF, InpTrendMAPeriod, 0, MODE_SMA, PRICE_CLOSE);
-      if(g_trendMAHandle == INVALID_HANDLE)
-        {
-         Print("GoldDualBasketDCA: trend MA handle creation failed.");
-         return(INIT_FAILED);
-        }
-
-      g_trendAtrHandle = iATR(_Symbol, InpTrendTF, InpTrendAtrPeriod);
-      if(g_trendAtrHandle == INVALID_HANDLE)
-        {
-         Print("GoldDualBasketDCA: trend ATR handle creation failed.");
-         return(INIT_FAILED);
-        }
-
-      if(InpUseMultiTFTrend)
-        {
-         g_trendMAHandle2  = iMA(_Symbol, InpTrendTF2, InpTrendMAPeriod, 0, MODE_SMA, PRICE_CLOSE);
-         g_trendAtrHandle2 = iATR(_Symbol, InpTrendTF2, InpTrendAtrPeriod);
-         g_trendMAHandle3  = iMA(_Symbol, InpTrendTF3, InpTrendMAPeriod, 0, MODE_SMA, PRICE_CLOSE);
-         g_trendAtrHandle3 = iATR(_Symbol, InpTrendTF3, InpTrendAtrPeriod);
-         if(g_trendMAHandle2 == INVALID_HANDLE || g_trendAtrHandle2 == INVALID_HANDLE ||
-            g_trendMAHandle3 == INVALID_HANDLE || g_trendAtrHandle3 == INVALID_HANDLE)
-           {
-            Print("GoldDualBasketDCA: multi-timeframe trend handle creation failed.");
-            return(INIT_FAILED);
-           }
-        }
-     }
-
    UpdateDayTracking();
 
    // Diagnostic only (does not affect trading) - confirms whether the
@@ -597,18 +544,6 @@ void OnDeinit(const int reason)
   {
    if(g_atrHandle != INVALID_HANDLE)
       IndicatorRelease(g_atrHandle);
-   if(g_trendMAHandle != INVALID_HANDLE)
-      IndicatorRelease(g_trendMAHandle);
-   if(g_trendAtrHandle != INVALID_HANDLE)
-      IndicatorRelease(g_trendAtrHandle);
-   if(g_trendMAHandle2 != INVALID_HANDLE)
-      IndicatorRelease(g_trendMAHandle2);
-   if(g_trendAtrHandle2 != INVALID_HANDLE)
-      IndicatorRelease(g_trendAtrHandle2);
-   if(g_trendMAHandle3 != INVALID_HANDLE)
-      IndicatorRelease(g_trendMAHandle3);
-   if(g_trendAtrHandle3 != INVALID_HANDLE)
-      IndicatorRelease(g_trendAtrHandle3);
    EventKillTimer();
    ObjectsDeleteAll(0, DB_PREFIX);
    ChartRedraw();
@@ -1027,13 +962,6 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
 
    if(b.legCount == 0)
      {
-      // Don't even start a basket fighting a strong higher-timeframe trend -
-      // the doomed bootstrap entry itself is what runs a basket into trouble,
-      // not just the DCA-adds after it.
-      if(InpUseTrendFilter && IsAgainstTrend(side))
-         return;
-      if(InpOnlyTradeWithTrend && !IsWithTrend(side))
-         return; // stricter mode - flat/no-trend blocks bootstrap on BOTH sides too
       OpenLeg(side, 0, 0);
       RefreshBaskets(); // pick up the leg just opened before computing its TP
       ApplyBasketTP(side);
@@ -1075,10 +1003,6 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
          return; // this bar already used its quota - the next leg waits for the bar to close, per explicit request
       if(InpUseAtrSpikeFilter && IsAtrSpiking())
          return; // "news proxy" - don't average into a volatility spike
-      if(InpUseTrendFilter && IsAgainstTrend(side))
-         return; // don't keep averaging into a strong opposing higher-timeframe trend
-      if(InpOnlyTradeWithTrend && !IsWithTrend(side))
-         return; // stricter mode - flat/no-trend blocks DCA-adds on BOTH sides too
 
       // Cycling: once a full cycle is used up, the next leg restarts lot
       // sizing from InpInitialLot instead of continuing to compound the
@@ -1580,82 +1504,13 @@ bool IsAtrSpiking()
    return(ratio > InpMaxAtrRatio);
   }
 
-// Trend on one timeframe via MA + ATR-scaled strength gate: last closed
-// candle must sit at least InpTrendStrengthATRMult ATRs away from the MA to
-// count as trending (1=up, -1=down); anything closer is treated as noise/
-// no-trend (0). A raw close-vs-MA check flips sign on ordinary chop, which
-// would block far more entries than intended - the ATR margin only catches
-// genuinely sustained, strong moves, which is what actually ran baskets to
-// their hard-SL in earlier testing.
-int GetTrendOnTF(int maHandle, int atrHandle, ENUM_TIMEFRAMES tf)
-  {
-   if(maHandle == INVALID_HANDLE || atrHandle == INVALID_HANDLE)
-      return 0;
-
-   double maBuf[1], atrBuf[1];
-   if(CopyBuffer(maHandle, 0, 1, 1, maBuf) <= 0)
-      return 0;
-   if(CopyBuffer(atrHandle, 0, 1, 1, atrBuf) <= 0 || atrBuf[0] <= 0)
-      return 0;
-
-   double closePrice = iClose(_Symbol, tf, 1);
-   double margin = atrBuf[0] * InpTrendStrengthATRMult;
-
-   if(closePrice > maBuf[0] + margin)
-      return 1;
-   if(closePrice < maBuf[0] - margin)
-      return -1;
-   return 0;
-  }
-
-// InpUseMultiTFTrend requires InpTrendTF + InpTrendTF2 + InpTrendTF3 to all
-// agree before calling it a real trend - a single-timeframe read can call
-// "trending" on a move that's just noise one level up/down; requiring
-// confluence across three timeframes is a stricter, more reliable signal,
-// at the cost of blocking (calling flat/0) more often.
-int GetTrend()
-  {
-   // InpOnlyTradeWithTrend forces this computation on by itself - a user
-   // enabling it shouldn't also have to remember to flip InpUseTrendFilter
-   // for it to do anything.
-   if(!InpUseTrendFilter && !InpOnlyTradeWithTrend)
-      return 0;
-
-   int t1 = GetTrendOnTF(g_trendMAHandle, g_trendAtrHandle, InpTrendTF);
-   if(!InpUseMultiTFTrend)
-      return t1;
-
-   int t2 = GetTrendOnTF(g_trendMAHandle2, g_trendAtrHandle2, InpTrendTF2);
-   int t3 = GetTrendOnTF(g_trendMAHandle3, g_trendAtrHandle3, InpTrendTF3);
-
-   if(t1 == 1 && t2 == 1 && t3 == 1)
-      return 1;
-   if(t1 == -1 && t2 == -1 && t3 == -1)
-      return -1;
-   return 0;
-  }
-
-bool IsAgainstTrend(ENUM_BASKET_SIDE side)
-  {
-   int trend = GetTrend();
-   if(side == SIDE_BUY)
-      return(trend == -1);
-   return(trend == 1);
-  }
-
-// Stricter than IsAgainstTrend() above - that one only flags the side
-// actively opposing a confirmed trend, so BOTH sides still pass during a
-// flat/no-trend read (trend == 0). This one requires the trend to
-// explicitly favor this exact side; flat blocks both sides, matching
-// explicit request ("sudhu trend-e trade koruk" - only trade in the
-// trend direction, not both directions during chop).
-bool IsWithTrend(ENUM_BASKET_SIDE side)
-  {
-   int trend = GetTrend();
-   if(side == SIDE_BUY)
-      return(trend == 1);
-   return(trend == -1);
-  }
+// 2026-09-07: GetTrendOnTF()/GetTrend()/IsAgainstTrend()/IsWithTrend()
+// removed here by explicit request, after a July cross-check showed the
+// whole trend-filter idea doesn't hold up (see the input-block comment
+// near the old InpUseTrendFilter declaration, and ml/learnings.md's
+// 2026-09-07 entries, for the full before/after numbers). Recoverable
+// from git history if a future idea wants to revisit trend-gating with
+// better evidence.
 
 // Uses MT5's built-in economic calendar (no external service needed - the
 // terminal syncs it automatically while connected, live/demo only). Blocks
@@ -2194,10 +2049,6 @@ void UpdateDashboard()
    bool atrSpiking = InpUseAtrSpikeFilter && IsAtrSpiking();
    DbLabel("AtrSpike", lx, y, PadRight("ATR Spike", lblW) + (InpUseAtrSpikeFilter ? (atrSpiking ? "YES (blocking)" : "no") : "off"),
            atrSpiking ? clrOrange : clrSilver, 8);
-   y += lh;
-   int trend = GetTrend();
-   string trendText = (trend == 1) ? "UP" : (trend == -1) ? "DOWN" : "flat/off";
-   DbLabel("Trend", lx, y, PadRight("HTF Trend", lblW) + trendText, clrSilver, 8);
    y += lh;
    bool newsBlackout = IsNewsBlackout();
    bool newsFilterOn = (InpUseNewsFilter || InpUseManualNewsWindow);

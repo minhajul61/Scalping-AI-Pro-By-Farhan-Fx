@@ -2765,3 +2765,43 @@ Farhan Fx` Python project's `learnings.md`.)
   first being the reproducibility problem in the v40 entry) - a
   reminder to keep leading with the caveat, not the win, when reporting
   interim numbers.
+
+- **2026-09-07 (v43, FINAL for this session - trend-filter subsystem
+  removed entirely, InpUseCarryoverCycle set as the new default, verified
+  on the shipped binary - with one important new caveat found during
+  verification):** explicit request: remove the trend settings (given the
+  July cross-check above showed the whole idea didn't hold up) and make
+  carryover-cycle the new default. Removed `InpUseTrendFilter`,
+  `InpTrendTF`/`InpTrendMAPeriod`/`InpTrendAtrPeriod`/
+  `InpTrendStrengthATRMult`, `InpUseMultiTFTrend`/`InpTrendTF2`/
+  `InpTrendTF3`, `InpOnlyTradeWithTrend`, and all supporting code
+  (`GetTrendOnTF`/`GetTrend`/`IsAgainstTrend`/`IsWithTrend`, the trend
+  indicator handles + their OnInit creation/OnDeinit release, both gate
+  call sites in `ManageBasketEntries()`, the dashboard's "HTF Trend"
+  label) - fully recoverable from git history if a future idea wants to
+  revisit trend-gating with better evidence. Set
+  `InpUseCarryoverCycle = true` as the new default. Compiled clean (v43,
+  0 errors/0 warnings, binary size dropped 223,874 -> 215,204 bytes with
+  the trend code gone).
+
+  **Verified on the shipped binary (no `[TesterInputs]` override for
+  `InpUseCarryoverCycle`, report's own echoed `Inputs:` confirms `true`
+  came from the compiled default) - month/stress reproduced the earlier
+  carryover-only numbers to the cent** (net $27,416.46/42.52% eqDD month,
+  $5,316.75/31.40% eqDD stress) - confirming the removal didn't disturb
+  carryover's own behavior.
+
+  **New data point found while verifying: carryover-cycle ALONE (no
+  trend filter mixed in, since it no longer exists) on July gives net
+  +$29,430.03 - but 96.17% equity drawdown.** This is markedly worse than
+  the trend+carryover combo's July numbers from earlier the same day
+  (69.09%/57.81% eqDD) - removing the trend filter made July's risk
+  profile meaningfully worse, even though the month still ends
+  profitable. **This should be read plainly: on a July-like month, the
+  live account would see equity drawdown near total wipeout territory
+  (96%) before recovering to a profit by month's end.** Reported to the
+  user as-is, not softened, alongside completing the explicit request -
+  the carryover-cycle default flip proceeded because the user's decision
+  was already made with the July cross-check numbers in hand, but this
+  specific new number (96.17%, not previously seen) is important enough
+  to flag on its own rather than only in this log.

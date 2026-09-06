@@ -3,6 +3,26 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-09-07 (final for the session): v43 - trend-filter subsystem
+## removed, carryover-cycle is now the shipped default - with an
+## important new drawdown number found during verification
+
+Explicit request, following the July cross-check below: remove the
+entire trend-filter subsystem (`InpUseTrendFilter`, `InpUseMultiTFTrend`,
+`InpOnlyTradeWithTrend` and all supporting code - fully recoverable from
+git history) since it didn't survive a second month, and set
+`InpUseCarryoverCycle = true` as the new default. Compiled clean (v43, 0
+errors/0 warnings) and verified on the shipped binary - month/stress
+reproduced the earlier carryover-only numbers to the cent.
+
+**Important new number found while verifying: carryover-cycle ALONE on
+July gives net +$29,430.03 but 96.17% equity drawdown** - noticeably
+worse than the trend+carryover combo's July numbers from earlier
+(69.09%/57.81%). Removing the trend filter made July's risk profile
+worse, even though the month still ends profitable. Read this plainly:
+on a July-like month, expect equity drawdown near total-wipeout
+territory before it recovers. Full detail in `ml/learnings.md`.
+
 ## 2026-09-07 (later): July cross-check - the "best combo" excitement
 ## below does NOT hold up, trend-filter-alone looks like an August fluke
 

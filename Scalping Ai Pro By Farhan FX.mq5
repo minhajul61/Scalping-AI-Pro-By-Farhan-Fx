@@ -70,7 +70,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v43"
+#define EA_BUILD_VERSION "v44"
 
 #include <Trade\Trade.mqh>
 
@@ -154,76 +154,22 @@ input double   InpTargetPercentOfFloatingLoss = 0; // Min Target As % Of Current
 // never demands more, only ever offers an earlier, easier exit.
 input double   InpEmergencyExitVolumeLots = 20.0; // Emergency Exit: Total Basket Volume Threshold (lots, 0 = off)
 input double   InpEmergencyExitTargetUSD  = 0.50; // Emergency Exit Target ($) - small but still > 0, never books an actual loss
-// 2026-08-29, explicit request ("find some way, no matter what, without
-// booking a loss") after both the lot cap and the emergency-exit target
-// were shown (backtest + real live) to be unable to stop a genuinely
-// one-directional, no-pullback move - because both still wait for a
-// favorable tick, and the worst excursions found this project simply
-// never give one. This is different in kind: it doesn't wait for
-// anything or try to exit early - it just STOPS ADDING MORE RISK once
-// total basket volume is already large, so a runaway move can no
-// longer compound the exposure further no matter how long it keeps
-// going. The basket does not close, no loss is booked - it just stops
-// growing and waits (however long that takes) for its target, same as
-// always. This turns an open-ended, unbounded worst case into a
-// bounded one: past the cap, further adverse price movement costs a
-// known, fixed rate ($ per point x capped volume) instead of an
-// ever-accelerating one.
-// 2026-08-29: swept 15/20/25/30/35/40/50/60 on both the full August
-// window and the known 2026-08-24-27 stress window - first pass found
-// a genuine plateau at 25-35, but that was against a BUGGY version of
-// this check (see the bugfix note at the call site below): it compared
-// the cap against volume BEFORE the next leg, letting one large
-// (per-leg-capped, e.g. 17-lot) leg jump straight past the cap in a
-// single addition. Confirmed on real 2026-07-01 CXM data - "cap 30,
-// buggy" gave the IDENTICAL result to no cap at all. Fixed to check
-// what the NEXT leg would bring the total to, then re-swept: 15-35 are
-// now all WORSE than uncapped on the stress window (100-115% equity
-// drawdown) - too tight, same "stuck longer" fragility as everywhere
-// else in this project. The real plateau is 38-50 (all identical:
-// stress-window equity drawdown 110.08% -> 79.08%, margin
-// 0.29% -> 23.24%; full-month equity drawdown 40.62% -> 30.27%, net
-// profit slightly improved). 60 is too loose (barely better than
-// uncapped). Set to 40, the middle of the verified-correct plateau.
-input double   InpMaxTotalBasketVolume = 40; // Max Total Basket Volume (lots, 0 = unlimited - stops adding NEW legs past this, existing legs untouched, no loss ever booked)
-// 2026-08-31, explicit finding from a real live event (252424, same
-// day): MT5's own margin stop-out does NOT necessarily close a whole
-// basket at once - it closes legs one at a time (largest/most-losing
-// first) until margin recovers, then stops. That real event closed
-// 27.24 of 37.47 open lots, leaving 10.23 lots still open - which read
-// as "under the 40-lot cap, room available" and let the EA immediately
-// add ANOTHER 10.24-lot leg into the same still-adverse move, walking
-// straight into a second stop-out minutes later that wiped the rest of
-// the account. The volume cap alone has no memory of "this side just
-// got stopped out" - it only sees current volume, which a partial
-// stop-out can put right back under the cap. This cooldown gives that
-// memory: once ANY leg on a side closes with DEAL_REASON_SO (the
-// broker's own stop-out flag, not a string-matched comment), that
-// whole side pauses - no bootstrap, no DCA-add - for this many hours,
-// instead of immediately re-engaging into whatever just hurt it.
-input int      InpStopOutCooldownHours = 24;  // Pause A Side After Its Own Stop-Out (hours, 0 = off)
 input bool     InpUseServerSideTP       = true;   // Attach Real TP To Each Leg (fires on the broker's server, less slippage than the EA closing legs one-by-one)
 
-input group "=== Margin Protection ==="
-// 2026-08-31, explicit demand: every fix so far (per-leg lot cap, total
-// basket volume cap, emergency exit target, stop-out cooldown) works by
-// LIMITING EXPOSURE, an indirect proxy for margin safety - none of them
-// look at the actual number that determines whether the broker forces a
-// stop-out: live margin level. A cap tuned for one account size/balance
-// (this project's 40-lot default was found on a ~$15-25k account) does
-// not automatically stay safe on a different balance, leverage, or
-// broker's own stop-out threshold. This is the direct fix: watch
-// ACCOUNT_MARGIN_LEVEL itself (Equity/Margin x 100, the exact metric
-// the broker's own stop-out compares against a threshold typically in
-// the 20-50% range - this account's real stop-outs fired between 14%
-// and 29%) and stop opening ANY new leg, on EITHER side, bootstrap or
-// DCA, the moment margin level drops below a wide safety buffer above
-// that zone. 200% default = roughly 7-14x the real observed stop-out
-// range - existing legs are never touched, no loss is ever booked, this
-// only ever refuses to add MORE risk once the account is already
-// meaningfully margin-stressed, regardless of which basket or side
-// caused it.
-input double   InpMinMarginLevelPercent = 200.0; // Block New Legs Below This Margin Level % (0 = off)
+// 2026-09-07: three account-level circuit breakers removed here by
+// explicit request - InpMaxTotalBasketVolume (stopped adding legs past
+// a total lot cap), InpStopOutCooldownHours (paused a side for 24h
+// after the broker's own margin stop-out closed a leg on it), and
+// InpMinMarginLevelPercent (the "=== Margin Protection ===" group -
+// refused new legs below a live margin-level buffer). All three were
+// added earlier this project specifically in response to real live
+// account blowups (see git history / ml/learnings.md's 2026-08-29,
+// 2026-08-31 and earlier 2026-09 entries for the incidents that
+// motivated each one) - removing them means those same failure modes
+// (an uncapped runaway basket, immediate re-escalation right after a
+// partial stop-out, and adding risk while margin is already stressed)
+// are no longer guarded against at all. Recoverable from git history if
+// a future decision wants any of them back.
 
 input group "=== DCA / Martingale ==="
 input double   InpDcaDistancePrice  = 1.2;        // DCA Distance ($) - base value; scaled up live if InpUseAdaptiveDcaDistance is on
@@ -942,14 +888,6 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
    if(DailyLossLimitHit())
       return; // today's loss limit hit - OnTick() also force-closes both baskets, see there
 
-   if(HadRecentStopOut(side))
-      return; // this side was force-closed by the broker's own margin stop-out recently - pause it
-              // (both bootstrap and DCA-adds) instead of immediately re-engaging into whatever hurt it
-
-   if(MarginLevelTooLow())
-      return; // account-wide margin is already stressed - refuse ANY new leg, either side, until
-              // it recovers (existing legs untouched, no loss booked) - see InpMinMarginLevelPercent
-
    if(InpTradeOnCandleCloseOnly)
      {
       datetime curBar = iTime(_Symbol, PERIOD_M1, 0);
@@ -1046,23 +984,6 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
          legIndexForSizing = b.legCount % InpMaxLegsPerBasket;
          prospectiveLot    = NextLotSize(legIndexForSizing, b.lastLegLots);
         }
-
-      // 2026-08-29 bugfix: the total-volume cap MUST be checked against
-      // what the NEXT leg would bring the total to, not just the volume
-      // already open - checking b.totalLots alone let a single large
-      // (per-leg-capped, e.g. 17-lot) leg jump straight past the total
-      // cap in one shot, since the pre-leg volume could still be under
-      // the threshold right up until that one leg pushed it far over.
-      // Confirmed on real 2026-07-01 CXM data: with the cap "active" but
-      // checked the old way, the exact same -$23,828.73 result occurred
-      // as with no cap at all - leg 12 (17 lots) fired at a pre-leg
-      // total of 19.2, jumping straight to 36.2, blowing through a
-      // supposed 30-lot cap entirely unchecked. Now computes the
-      // prospective lot size first and blocks if THAT would breach the
-      // cap - this leg's addition is what has to stay under the limit,
-      // not just the state before it.
-      if(InpMaxTotalBasketVolume > 0 && (b.totalLots + prospectiveLot) > InpMaxTotalBasketVolume)
-         return; // this leg would breach the total-volume cap - stop growing, existing legs keep waiting for target, no loss booked
 
       OpenLeg(side, legIndexForSizing, b.lastLegLots, carryoverLotOverride);
       RefreshBaskets(); // pick up the new leg + updated avg entry before recomputing the shared TP
@@ -1367,94 +1288,17 @@ void PositionWatermark()
   }
 
 //+------------------------------------------------------------------+
-//| Stop-out cooldown - see the 2026-08-31 explicit-request comment   |
-//| above InpStopOutCooldownHours for the real live incident this     |
-//| was built for.                                                    |
-//+------------------------------------------------------------------+
-// Scans closed deals for this symbol+magic within the cooldown window
-// for one whose DEAL_REASON is DEAL_REASON_SO (the broker's own stop-
-// out flag - not a string match on the comment, which is broker/locale
-// dependent and was only used for this file's own logging/diagnosis,
-// never as a detection mechanism until now). A DEAL_TYPE_BUY closing
-// deal means a SELL position was stopped out, and vice versa - same
-// inverted mapping ManageBasketEntries()/ScanBasket() already use.
-// Cached, not re-scanned every call: this is checked from
-// ManageBasketEntries() on every tick, and a full HistorySelect() +
-// HistoryDealsTotal() loop over a whole day's deals (an active DCA
-// basket can produce thousands) on every single tick would be wasteful
-// - the underlying answer only changes at most once every few seconds
-// (right after an actual stop-out), so a short cache is free accuracy-
-// wise and saves real CPU.
-datetime g_lastStopOutScan = 0;
-bool     g_stopOutCooldownBuy = false;
-bool     g_stopOutCooldownSell = false;
-#define STOP_OUT_SCAN_INTERVAL_SEC 10
-
-void RefreshStopOutCooldowns()
-  {
-   if(TimeCurrent() - g_lastStopOutScan < STOP_OUT_SCAN_INTERVAL_SEC)
-      return;
-   g_lastStopOutScan = TimeCurrent();
-   g_stopOutCooldownBuy = false;
-   g_stopOutCooldownSell = false;
-   if(InpStopOutCooldownHours <= 0)
-      return;
-   datetime from = TimeCurrent() - InpStopOutCooldownHours * 3600;
-   if(!HistorySelect(from, TimeCurrent()))
-      return;
-   int total = HistoryDealsTotal();
-   for(int i = total - 1; i >= 0; i--)
-     {
-      ulong ticket = HistoryDealGetTicket(i);
-      if(ticket == 0)
-         continue;
-      if(HistoryDealGetString(ticket, DEAL_SYMBOL) != _Symbol)
-         continue;
-      if(HistoryDealGetInteger(ticket, DEAL_MAGIC) != (long)InpMagicNumber)
-         continue;
-      if((ENUM_DEAL_REASON)HistoryDealGetInteger(ticket, DEAL_REASON) != DEAL_REASON_SO)
-         continue;
-      ENUM_DEAL_TYPE dealType = (ENUM_DEAL_TYPE)HistoryDealGetInteger(ticket, DEAL_TYPE);
-      if(dealType == DEAL_TYPE_BUY)
-         g_stopOutCooldownSell = true;  // a buy deal closes a sell position
-      else if(dealType == DEAL_TYPE_SELL)
-         g_stopOutCooldownBuy = true;   // a sell deal closes a buy position
-      if(g_stopOutCooldownBuy && g_stopOutCooldownSell)
-         break; // both sides already confirmed, no need to keep scanning
-     }
-  }
-
-bool HadRecentStopOut(ENUM_BASKET_SIDE side)
-  {
-   if(InpStopOutCooldownHours <= 0)
-      return false;
-   RefreshStopOutCooldowns();
-   return (side == SIDE_BUY) ? g_stopOutCooldownBuy : g_stopOutCooldownSell;
-  }
-
-//+------------------------------------------------------------------+
-//| Margin protection - see InpMinMarginLevelPercent's comment for    |
-//| the full 2026-08-31 explicit-request context.                     |
-//+------------------------------------------------------------------+
-// ACCOUNT_MARGIN_LEVEL is exactly Equity/Margin*100 - the same number
-// the broker's own stop-out logic compares against its own threshold.
-// With zero open positions MT5 reports margin level as 0 (nothing to
-// divide by) - that must NOT read as "critically low," so this only
-// engages once real margin is actually in use.
-bool MarginLevelTooLow()
-  {
-   if(InpMinMarginLevelPercent <= 0)
-      return false;
-   double marginUsed  = AccountInfoDouble(ACCOUNT_MARGIN);
-   double marginLevel = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
-   if(marginUsed <= 0)
-      return false; // no open exposure at all - nothing to be stressed about
-   return(marginLevel < InpMinMarginLevelPercent);
-  }
-
-//+------------------------------------------------------------------+
 //| DCA filters                                                       |
 //+------------------------------------------------------------------+
+// 2026-09-07: the stop-out-cooldown (RefreshStopOutCooldowns/
+// HadRecentStopOut, built after a real 2026-08-31 live incident where a
+// partial stop-out immediately re-triggered a second one) and margin-
+// level guard (MarginLevelTooLow, built after the same incident to
+// watch ACCOUNT_MARGIN_LEVEL directly) were removed here by explicit
+// request, alongside InpMaxTotalBasketVolume above. Recoverable from
+// git history if a future decision wants any of them back - see
+// ml/learnings.md's 2026-08-29/2026-08-31/2026-09 entries for the real
+// incidents that motivated each one.
 // ATR-ratio (current 14-period ATR / InpAtrBaselineBars-bar average),
 // reused by both IsAtrSpiking() and GetEffectiveDcaDistance() below so
 // "spiking" and "adaptive distance" always agree on what "the market is
@@ -2057,25 +1901,6 @@ void UpdateDashboard()
    y += lh;
    bool hedgingOk = ((ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE) == ACCOUNT_MARGIN_MODE_RETAIL_HEDGING);
    DbLabel("Hedging", lx, y, PadRight("Hedging", lblW) + (hedgingOk ? "OK" : "FAIL"), hedgingOk ? clrLime : clrRed, 8);
-   y += lh;
-   bool buyStopOutCooldown  = HadRecentStopOut(SIDE_BUY);
-   bool sellStopOutCooldown = HadRecentStopOut(SIDE_SELL);
-   string soText = (InpStopOutCooldownHours <= 0) ? "off"
-                   : (buyStopOutCooldown && sellStopOutCooldown) ? "BUY+SELL paused"
-                   : buyStopOutCooldown  ? "BUY paused"
-                   : sellStopOutCooldown ? "SELL paused"
-                   : "clear";
-   DbLabel("StopOutCooldown", lx, y, PadRight("SO Cooldown", lblW) + soText,
-           (buyStopOutCooldown || sellStopOutCooldown) ? clrOrange : clrSilver, 8);
-   y += lh;
-   bool marginTooLow = MarginLevelTooLow();
-   double liveMarginLevel = AccountInfoDouble(ACCOUNT_MARGIN_LEVEL);
-   string marginText = (InpMinMarginLevelPercent <= 0) ? "off"
-                        : (AccountInfoDouble(ACCOUNT_MARGIN) <= 0) ? "no exposure"
-                        : DoubleToString(liveMarginLevel, 0) + "% / " + DoubleToString(InpMinMarginLevelPercent, 0) + "%"
-                          + (marginTooLow ? " (blocking)" : "");
-   DbLabel("MarginGuard", lx, y, PadRight("Margin Guard", lblW) + marginText,
-           marginTooLow ? clrRed : clrSilver, 8);
    y += lh;
 
    y += 10;

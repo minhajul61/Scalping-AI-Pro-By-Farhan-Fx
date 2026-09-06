@@ -3,6 +3,32 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-09-07 (later still, FINAL for the session): v44 - three
+## account-level circuit breakers removed by explicit request, with a
+## measured cost
+
+Removed `InpMaxTotalBasketVolume` (40-lot total-volume cap),
+`InpStopOutCooldownHours` (24h pause after a broker stop-out), and
+`InpMinMarginLevelPercent` (200% margin-level guard) - all three were
+built earlier in this project specifically in response to real live
+account blowups. Compiled clean (v44, 0 errors/0 warnings).
+
+**Verified cost, not just the request completed:** August month/stress
+came back identical to v43 (those guards never actually triggered
+there). **July is where it shows: equity drawdown went from 96.17%
+(guards present) to 105.08% (guards removed) - over 100%, meaning
+equity went negative at some point - and margin level bottomed out at
+0.08%, essentially the exact real-broker stop-out territory these
+guards existed to avoid.** Net profit barely moved ($29,430 -> $29,479)
+- removing the guards bought almost no extra profit and gave back real
+margin-call-adjacent risk on the project's own worst-case reference
+month. Full detail in `ml/learnings.md`.
+
+**Current live state, stacked together: unlimited total basket volume,
+no stop-out memory (immediate re-escalation into a partial stop-out is
+possible again, the exact 2026-08-31 failure mode), no margin-level
+check, no trend filter, and no per-leg stop-loss - ever.**
+
 ## 2026-09-07 (final for the session): v43 - trend-filter subsystem
 ## removed, carryover-cycle is now the shipped default - with an
 ## important new drawdown number found during verification

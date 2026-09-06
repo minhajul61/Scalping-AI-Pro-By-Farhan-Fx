@@ -2805,3 +2805,40 @@ Farhan Fx` Python project's `learnings.md`.)
   was already made with the July cross-check numbers in hand, but this
   specific new number (96.17%, not previously seen) is important enough
   to flag on its own rather than only in this log.
+
+- **2026-09-07 (v44, FINAL for this session - three account-level
+  circuit breakers removed by explicit request, with a concrete,
+  measured cost found during verification):** explicit request: remove
+  `InpMaxTotalBasketVolume` (the 40-lot total-volume cap),
+  `InpStopOutCooldownHours` (the 24h pause after a broker stop-out),
+  and `InpMinMarginLevelPercent` (the 200% margin-level guard, the
+  entire "=== Margin Protection ===" group) - all three built earlier
+  this project specifically in response to real live account blowups
+  (2026-08-29 and 2026-08-31 incidents, see those dates' entries above).
+  Removed the inputs, the two gate checks in `ManageBasketEntries()`,
+  `RefreshStopOutCooldowns()`/`HadRecentStopOut()`/`MarginLevelTooLow()`
+  and their globals, and the dashboard's "SO Cooldown"/"Margin Guard"
+  rows. Compiled clean (v44, 0 errors/0 warnings, binary shrank further
+  to 211,364 bytes).
+
+  **Verified on the shipped binary - month/stress reproduced identically
+  to v43** (these two windows never actually hit the 40-lot cap or the
+  200% margin floor, so removing them changed nothing there). **July is
+  where the real cost shows up:** equity drawdown went from 96.17%
+  (v43, guards present) to **105.08%** (v44, guards removed) - over
+  100%, meaning equity went negative at some point during the month -
+  and the backtest's own minimum margin level bottomed out at **0.08%**,
+  essentially the exact real-broker stop-out territory these guards
+  were built to keep the account away from. Net profit barely changed
+  ($29,430.03 -> $29,479.33) - the guards were never costing meaningful
+  profit; removing them bought almost nothing and gave back real
+  margin-call-adjacent risk on the one month that was already the
+  project's worst-case reference point.
+
+  **This is now the live default state of the EA: unlimited total
+  basket volume, no stop-out memory (a partial stop-out can be
+  immediately re-escalated into, the exact 2026-08-31 failure mode),
+  and no margin-level check before adding risk - on top of already
+  having no trend filter and no per-leg stop-loss.** Reported to the
+  user plainly, with the 0.08% margin-level number specifically
+  highlighted, alongside completing the explicit request as given.

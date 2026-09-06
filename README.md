@@ -3,6 +3,21 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-09-07: InpOnlyTradeWithTrend + InpUseCarryoverCycle combined -
+## the best-looking result in the project so far, with a clear counter-
+## example right next to it
+
+Multi-TF trend (H1+H4+D1 all agree) + carryover-cycle together: 5.53%
+equity drawdown on the full month, 6.57% on the stress window, PF
+1.40/1.51, both profitable - the first combo found that looks good on
+BOTH test windows AND on both drawdown and profit factor at once, not a
+trade-off. Single-TF trend + carryover is the opposite lesson right next
+to it: helps hugely on the stress window (23.15%->6.54%) but hurts on
+the full month (26.64%->51.52%, worse than single-TF alone) - same
+non-monotonic fragility as everything else here. Full table in
+`ml/learnings.md`. Same 2026-09-07 data-snapshot caveat applies; nothing
+enabled by default yet.
+
 ## 2026-09-07: v42 - InpOnlyTradeWithTrend (a stricter "only trade the
 ## trend direction" gate) - caught and fixed a real bug before trusting
 ## any result, then found the lowest drawdown of the whole project

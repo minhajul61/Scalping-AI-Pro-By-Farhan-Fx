@@ -2698,3 +2698,30 @@ Farhan Fx` Python project's `learnings.md`.)
   isolation-test discipline before any number was trusted - a reminder
   that the discipline itself is what's paying off here, not the raw
   numbers.
+
+- **2026-09-07 (combining InpOnlyTradeWithTrend + InpUseCarryoverCycle,
+  explicit request - the best-looking combo found in this project so
+  far, with one clear counter-example keeping it honest):**
+  ```
+  window   trend-mode + carryover        net$        eqDD%    PF     trades
+  month    multi-TF  alone             +7,809.00     28.77   1.24   11,404
+  month    multi-TF  + carryover       +6,535.36      5.53   1.40   10,618  <- DD collapses, PF improves
+  month    single-TF alone            +14,897.46     26.64   1.29   17,667
+  month    single-TF + carryover      +12,294.13     51.52   1.39   16,210  <- DD nearly doubles instead
+  stress   multi-TF  alone             +1,550.58      7.60   1.25    1,927
+  stress   multi-TF  + carryover       +1,289.95      6.57   1.51    1,771  <- both improve slightly
+  stress   single-TF alone             +2,737.98     23.15   1.25    3,217
+  stress   single-TF + carryover       +1,969.65      6.54   1.47    2,989  <- DD collapses here too
+  ```
+  **Multi-TF trend + carryover-cycle is the single most consistent good
+  result found in this entire project: profitable AND lowest-drawdown-
+  class AND best-PF-class on BOTH test windows at once** (5.53%/6.57%
+  equity drawdown, PF 1.40/1.51) - most other "wins" this week only
+  looked good on one window, or traded a lot of profit for the DD
+  improvement. Single-TF + carryover is the opposite lesson: it helps
+  hugely on the stress window (23.15%->6.54%) but HURTS on the full
+  month (26.64%->51.52%, worse than single-TF alone) - the same
+  non-monotonic, window-dependent fragility this file has documented
+  all along, right next to what looks like the best combo yet. Same
+  2026-09-07 data-snapshot caveat applies (see the v40 entry above) -
+  encouraging, not proof. Nothing enabled by default.

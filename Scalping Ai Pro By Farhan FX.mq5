@@ -70,7 +70,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v47"
+#define EA_BUILD_VERSION "v49"
 
 #include <Trade\Trade.mqh>
 
@@ -105,6 +105,17 @@ enum ENUM_ACCOUNT_TYPE
    ACCOUNT_TYPE_USC = 1  // Cent (USC)
   };
 
+// 2026-09-11: a "one side at a time" test mode (ENUM_TRADE_SIDE/
+// InpTradeSide - either side could bootstrap, just never both open
+// together) was built, backtested, and compared against the always-
+// dual-simultaneous default on the continuous 3-month test: net
+// $45,382.70 vs $88,681.57, equity drawdown almost unchanged (21.70%
+// vs 22.34% - the worst-case swing barely improved) while profit
+// roughly halved. Explicit decision after seeing that result: always
+// trade both sides simultaneously - deleted the toggle and the mode
+// entirely (not left as a disabled option) - see ml/learnings.md for
+// the full comparison.
+
 input group "=== Account & Basic Settings ==="
 input ulong    InpMagicNumber        = 20270115;  // Magic Number
 input long     InpExpectedLogin      = 0;         // Account Login (0 = skip check - client sets their own)
@@ -112,21 +123,28 @@ input ENUM_BROKER_PRESET InpBrokerPreset = BROKER_CUSTOM;   // Broker Preset (au
 input ENUM_ACCOUNT_TYPE  InpAccountType  = ACCOUNT_TYPE_USD; // Account Type (scales Max Spread for cent accounts)
 input int      InpMaxSpreadPoints    = 300;       // Max Spread (points) - used when Broker Preset = Custom
 
+// 2026-09-11, explicit request: base lot, DCA distance, the adaptive
+// multiplier, and lot multiplier made visible again (input, not const)
+// so the user can choose them directly - these are the ones a user
+// would reasonably want to size per their own account/risk appetite.
+input group "=== Basket & DCA (user-adjustable) ==="
+input double   InpInitialLot            = 0.01;   // Initial Lot Size (base lot - how big the very first leg of each basket is)
+input double   InpDcaDistancePrice  = 1.2;        // DCA Distance ($) - base value; scaled up live since InpUseAdaptiveDcaDistance is on
+input bool     InpUseAdaptiveDcaDistance = true; // Widen DCA Distance During High Volatility (ATR-ratio based) - 2026-09-04 default, see ml/learnings.md for the sweep and fragility caveat
+input double   InpAdaptiveDcaAtrMult     = 1.5;   // Adaptive DCA Distance Multiplier (effective distance = base x max(1, currentATR/baselineATR x this))
+input double   InpLotMultiplier     = 2.0;        // Lot Multiplier
+
 // 2026-09-11, explicit request ("kaj er setting chara sob hide kore
 // final koro" - hide everything except the settings that actually need
 // touching, finalize it): every trading-logic parameter below this
-// point (basket/profit-target, DCA/martingale, carryover-cycle,
-// candle-close mode, ATR spike filter) has now been researched,
-// backtested, and swept exhaustively this session - see ml/learnings.md
-// for the full history behind each value. These are no longer `input`
-// (so they no longer clutter the Inputs dialog a client sees when
-// attaching the EA) - they're fixed constants at their final, verified
-// values. Only account/broker specifics, risk limits, filters a user
-// might legitimately want to toggle per-account, and display
-// preferences remain as real inputs below. To change any of these
-// again, edit the value here directly and recompile - same as changing
-// any other piece of finalized logic.
-const double   InpInitialLot            = 0.01;   // Initial Lot Size
+// point (profit-target, carryover-cycle, ATR spike filter) has now been
+// researched, backtested, and swept exhaustively this session - see
+// ml/learnings.md for the full history behind each value. These are no
+// longer `input` (so they no longer clutter the Inputs dialog a client
+// sees when attaching the EA) - they're fixed constants at their final,
+// verified values. To change any of these again, edit the value here
+// directly and recompile - same as changing any other piece of
+// finalized logic.
 const double   InpBasketProfitTargetUSD = 1.0;    // Take Profit ($) - flat, same for every leg, never grows or gets overridden (2026-09-10 reset to the standard martingale-EA convention - see ml/learnings.md)
 const bool     InpUseServerSideTP       = true;   // Attach Real TP To Each Leg (fires on the broker's server, less slippage than the EA closing legs one-by-one)
 
@@ -137,10 +155,6 @@ const bool     InpUseServerSideTP       = true;   // Attach Real TP To Each Leg 
 // history / ml/learnings.md's 2026-08-29, 2026-08-31 and 2026-09
 // entries). Recoverable from git history if ever wanted back.
 
-const double   InpDcaDistancePrice  = 1.2;        // DCA Distance ($) - base value; scaled up live since InpUseAdaptiveDcaDistance is on
-const bool     InpUseAdaptiveDcaDistance = true; // Widen DCA Distance During High Volatility (ATR-ratio based) - 2026-09-04 default, see ml/learnings.md for the sweep and fragility caveat
-const double   InpAdaptiveDcaAtrMult     = 1.5;   // Adaptive DCA Distance Multiplier (effective distance = base x max(1, currentATR/baselineATR x this))
-const double   InpLotMultiplier     = 2.0;        // Lot Multiplier
 const int      InpMinSecondsBetweenLegs = 5;      // Min Seconds Between Legs (safety net vs a cascade)
 // 2026-09-11: InpMaxLegsPerBar deleted entirely (not just hidden) -
 // tested capped at every value tried and made things worse every time

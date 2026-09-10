@@ -3123,3 +3123,31 @@ Farhan Fx` Python project's `learnings.md`.)
   2026-09-10/11 InpMaxSingleLegLot=0 tests above), so a hairline
   floating-point difference at the cap boundary is expected noise, not
   a bug.
+
+- **2026-09-11 (v48/v49, "one side at a time" mode tested then
+  explicitly rejected - always-dual confirmed as the final decision):**
+  explicit request to test whether trading exclusively one side at a
+  time (either BUY or SELL, just never both open together - clarified
+  mid-request this was NOT a fixed-direction request) would reduce
+  drawdown enough to be worth the trade-off. Built `ENUM_TRADE_SIDE`/
+  `InpTradeSide` (v48), compared on the continuous 3-month test:
+  ```
+  mode              net$        eqDD%    balDD%   PF     Sharpe   trades
+  both at once     88,681.57    22.34    21.43   1.30    3.89    124,316
+  one at a time    45,382.70    21.70    10.33   1.35    3.48     62,623
+  ```
+  **Equity drawdown - the worst-case swing, the real "how bad can it
+  get" number - barely moved (22.34% -> 21.70%), while profit roughly
+  halved.** Balance drawdown and margin health both improved
+  meaningfully (less realized-loss and margin pressure from not
+  carrying both sides' exposure at once), but the metric that matters
+  most for surviving a bad stretch didn't materially improve. **Explicit
+  decision after seeing this: always trade both sides simultaneously -
+  the mode was deleted entirely (v49), not left as a disabled option**,
+  matching this session's established pattern of removing what didn't
+  win rather than leaving it as unused clutter.
+
+  **Verified: v49 (always-dual, mode deleted) reproduces the "both at
+  once" number to the cent** - net $88,681.57, equity drawdown 22.34%,
+  PF 1.30, Sharpe 3.89, 124,316 trades - exact match, confirming the
+  deletion is a clean, behavior-preserving removal of the rejected mode.

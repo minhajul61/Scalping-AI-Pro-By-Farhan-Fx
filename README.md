@@ -3,6 +3,21 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-09-11 (v48/v49): "one side at a time" tested, always-dual
+## confirmed as final
+
+Tested trading exclusively one side at a time (either side could
+bootstrap, just never both open together) against the current
+always-both-sides-simultaneously design on the continuous 3-month
+test: net $45,382.70 vs $88,681.57, but equity drawdown barely moved
+(21.70% vs 22.34%) - the worst-case swing didn't materially improve
+even though profit roughly halved. Explicit decision: always trade
+both sides - the mode was deleted entirely (v49), not left as a
+disabled option. `InpInitialLot`/`InpDcaDistancePrice`/
+`InpUseAdaptiveDcaDistance`/`InpAdaptiveDcaAtrMult`/`InpLotMultiplier`
+also made visible (`input`) again in v48 per explicit request - a user
+can size these directly. Full comparison table in `ml/learnings.md`.
+
 ## 2026-09-11: v47 - input panel cleaned up (deleted/hidden/kept-visible
 ## three-way split)
 

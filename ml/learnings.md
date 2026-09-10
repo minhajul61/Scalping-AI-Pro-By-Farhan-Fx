@@ -2918,3 +2918,28 @@ Farhan Fx` Python project's `learnings.md`.)
   session. Net effect leans positive given how much July improved
   relative to how much August gave back, but still just two months of
   evidence, same caveat as everything else here.
+
+- **2026-09-10 (continuous last-2-month test, explicit request - the
+  first time this project has run July+August as ONE continuous
+  backtest instead of two separate resets):** verified on the shipped
+  v45 binary (no `[TesterInputs]` override for `InpUseCarryoverCycle`/
+  `InpCarryoverBaseLegs`/`InpMaxSingleLegLot`, report's own echoed
+  `Inputs:` confirms `true`/3/17.0 came from the compiled defaults),
+  2026.07.01-2026.08.27, $30,000 starting deposit, one uninterrupted run.
+
+  **Result: net $50,847.33, equity drawdown 36.56%, balance drawdown
+  13.49%, PF 1.30, Sharpe 3.24, 71,475 trades.** Roughly matches the sum
+  of the two separate-month results (July $27,072.58 + August
+  $22,789.36 ~= $49,861.94, close to the $50,847.33 continuous figure -
+  small difference from basket state carrying across the month
+  boundary). **The equity drawdown (36.56%) is notably LOWER than
+  August's own standalone worst case (68.40%)** - because equity
+  drawdown is measured against the run's own peak, and July's profit
+  had already built a cushion before August's pullback happened. This
+  is a more realistic proxy for what a live, continuously-running
+  account actually experiences than resetting to a fresh $30k every
+  month (which is what every other test in this file has done) - later
+  drawdowns get measured against an already-grown balance, not a bare
+  reset. Still just one two-month sample; same caveat as everything
+  else in this file about needing more data before calling anything
+  validated.

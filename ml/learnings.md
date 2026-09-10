@@ -2943,3 +2943,12 @@ Farhan Fx` Python project's `learnings.md`.)
   reset. Still just one two-month sample; same caveat as everything
   else in this file about needing more data before calling anything
   validated.
+
+- **2026-09-10 (June month test, explicit request, shipped v45
+  binary):** 2026.06.01-06.30, $30,000 deposit, compiled defaults (100%
+  real ticks). Net $37,978.73, balance drawdown 21.46%, equity drawdown
+  41.29%, PF 1.31, Sharpe 4.90, 50,965 trades. **Third consecutive
+  profitable month with the v45 defaults** (June/July/August all
+  positive: $37,978.73/$27,072.58/$22,789.36) - the most consistent
+  multi-month result this project has produced so far. Still only three
+  months; same standing caveat applies.

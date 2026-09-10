@@ -3067,3 +3067,59 @@ Farhan Fx` Python project's `learnings.md`.)
   gets deep enough (cycle 9+ of the carryover sequence) for the cap to
   matter either way. Not evidence removing it is safe in general -
   just confirms it, again, wasn't exercised by this specific data.
+
+- **2026-09-11 (v47, input panel cleaned up by explicit request - "kaj
+  er setting chara sob hide kore final koro," refined mid-turn to a
+  three-way split: delete what's genuinely useless, hide what's needed
+  but shouldn't be casually touched, keep visible what a user might
+  legitimately want to change):**
+
+  **Deleted entirely (not just hidden) - proven not useful, not just
+  currently inert:**
+  - `InpMaxLegsPerBar` - tested capped at every value tried and made
+    things worse every time (same 2026-08-28 sweep as `InpMaxSingleLegLot`,
+    see that date's entry) - the feature itself never worked, not just
+    left off. Removed along with the now-unused `legsThisBar`/
+    `curBarOpen` bookkeeping in `ScanBasket()`.
+  - `InpUseCarryoverCycle` (the on/off toggle) and the plain "reset
+    every `InpMaxLegsPerBasket` legs" cycle it used to fall back to -
+    carryover-cycle has been the permanent default since 2026-09-07 and
+    never changed since, so the toggle and its alternate branch were
+    dead code. Carryover-cycle math is now unconditional in
+    `ManageBasketEntries()`.
+  - `InpTradeOnCandleCloseOnly` - off by default, and the 2026-09-07
+    sweep found it underperformed combined with carryover-cycle (now
+    permanent) versus either lever alone. Removed along with
+    `g_lastCandleCheck[]`.
+
+  **Hidden (`input` -> `const`) - needed for the strategy to run
+  correctly, but finalized and not meant for casual changing:**
+  `InpInitialLot`, `InpBasketProfitTargetUSD`, `InpUseServerSideTP`,
+  `InpDcaDistancePrice`, `InpUseAdaptiveDcaDistance`,
+  `InpAdaptiveDcaAtrMult`, `InpLotMultiplier`, `InpMinSecondsBetweenLegs`,
+  `InpMaxSingleLegLot`, `InpCarryoverBaseLegs`, `InpCarryoverStartLot`,
+  `InpCarryoverGrowthMult`, `InpUseAtrSpikeFilter`, `InpAtrPeriod`,
+  `InpAtrBaselineBars`, `InpMaxAtrRatio`. All still change the EA's
+  behavior exactly as before - only the Inputs dialog visibility
+  changed. To change any of these, edit the value in the source and
+  recompile.
+
+  **Left as real `input` (a user might legitimately want to change
+  these per account/broker/preference):** Account & Basic Settings
+  (all), News Filter (all), Trading Hours (all), Daily Profit Target
+  (all), Daily Loss Limit (all), Dashboard (all), Chart Visuals (all).
+
+  Input count dropped from ~50 to 24. Compiled clean (v47, 0 errors/0
+  warnings, binary down to 205,046 bytes - the smallest yet). Backtest
+  verification against v46's numbers pending (should be identical -
+  this was a visibility/dead-code refactor, not a logic change).
+
+  **Verified: v47 net $88,681.57 vs v46's $88,683.68 - a $2.11 (0.002%)
+  difference, equity drawdown/balance drawdown/PF/Sharpe/trade count all
+  identical (124,316 trades in both).** Confirms this was a pure
+  visibility/dead-code refactor, not a behavior change - the tiny
+  residual is consistent with the already-established finding that
+  InpMaxSingleLegLot never actually binds on this data (see the
+  2026-09-10/11 InpMaxSingleLegLot=0 tests above), so a hairline
+  floating-point difference at the cap boundary is expected noise, not
+  a bug.

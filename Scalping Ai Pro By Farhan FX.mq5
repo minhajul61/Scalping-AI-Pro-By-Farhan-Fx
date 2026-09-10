@@ -70,7 +70,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v46"
+#define EA_BUILD_VERSION "v47"
 
 #include <Trade\Trade.mqh>
 
@@ -112,144 +112,73 @@ input ENUM_BROKER_PRESET InpBrokerPreset = BROKER_CUSTOM;   // Broker Preset (au
 input ENUM_ACCOUNT_TYPE  InpAccountType  = ACCOUNT_TYPE_USD; // Account Type (scales Max Spread for cent accounts)
 input int      InpMaxSpreadPoints    = 300;       // Max Spread (points) - used when Broker Preset = Custom
 
-input group "=== Basket & Profit Target ==="
-input double   InpInitialLot            = 0.01;   // Initial Lot Size
-// 2026-09-10, explicit request: reset the profit-target system back to
-// how most standard/retail martingale-grid EAs actually do it, after
-// web research confirmed the three common conventions - a flat $
-// ("currency unit") target, a fixed points/pips distance from the
-// basket's average entry, or a percentage-of-price target (sources:
-// pineify.app/mql5/mql5-martingale-ea, pineify.app/mql5/
-// mql5-martingale-grid-ea, mql5.com/en/blogs/post/775292). Picked the
-// simplest and most common of the three: one flat dollar target, never
-// growing with leg count, never overridden by floating loss or basket
-// volume - see GetProfitTarget(), now just returns this value directly.
-// Removes InpCycleTargetGrowth, InpTargetPercentOfFloatingLoss,
-// InpEmergencyExitVolumeLots, and InpEmergencyExitTargetUSD entirely
-// (all recoverable from git history) - this was genuinely a full reset,
-// not a re-tune of the existing formula.
-input double   InpBasketProfitTargetUSD = 1.0;    // Take Profit ($) - flat, same for every leg, never grows or gets overridden
-// 2026-08-27: default raised 7->15 - the 17-config sweep (see
-// ml/learnings.md) found 7 was one of the worst cycle lengths tested
-// (blew the account net-negative on the August window); 15 was the
-// tested baseline that survived, and 20/25 were only marginally
-// different from it.
-input int      InpMaxLegsPerBasket      = 15;     // Legs Per Sizing Cycle (lot size resets every N legs - keeps any single leg from hitting the broker's own max-lot cap; the basket itself has no total-leg cap - see the file header)
-input bool     InpUseServerSideTP       = true;   // Attach Real TP To Each Leg (fires on the broker's server, less slippage than the EA closing legs one-by-one)
+// 2026-09-11, explicit request ("kaj er setting chara sob hide kore
+// final koro" - hide everything except the settings that actually need
+// touching, finalize it): every trading-logic parameter below this
+// point (basket/profit-target, DCA/martingale, carryover-cycle,
+// candle-close mode, ATR spike filter) has now been researched,
+// backtested, and swept exhaustively this session - see ml/learnings.md
+// for the full history behind each value. These are no longer `input`
+// (so they no longer clutter the Inputs dialog a client sees when
+// attaching the EA) - they're fixed constants at their final, verified
+// values. Only account/broker specifics, risk limits, filters a user
+// might legitimately want to toggle per-account, and display
+// preferences remain as real inputs below. To change any of these
+// again, edit the value here directly and recompile - same as changing
+// any other piece of finalized logic.
+const double   InpInitialLot            = 0.01;   // Initial Lot Size
+const double   InpBasketProfitTargetUSD = 1.0;    // Take Profit ($) - flat, same for every leg, never grows or gets overridden (2026-09-10 reset to the standard martingale-EA convention - see ml/learnings.md)
+const bool     InpUseServerSideTP       = true;   // Attach Real TP To Each Leg (fires on the broker's server, less slippage than the EA closing legs one-by-one)
 
-// 2026-09-07: three account-level circuit breakers removed here by
-// explicit request - InpMaxTotalBasketVolume (stopped adding legs past
-// a total lot cap), InpStopOutCooldownHours (paused a side for 24h
-// after the broker's own margin stop-out closed a leg on it), and
-// InpMinMarginLevelPercent (the "=== Margin Protection ===" group -
-// refused new legs below a live margin-level buffer). All three were
-// added earlier this project specifically in response to real live
-// account blowups (see git history / ml/learnings.md's 2026-08-29,
-// 2026-08-31 and earlier 2026-09 entries for the incidents that
-// motivated each one) - removing them means those same failure modes
-// (an uncapped runaway basket, immediate re-escalation right after a
-// partial stop-out, and adding risk while margin is already stressed)
-// are no longer guarded against at all. Recoverable from git history if
-// a future decision wants any of them back.
+// 2026-09-07: three account-level circuit breakers removed entirely by
+// explicit request - InpMaxTotalBasketVolume, InpStopOutCooldownHours,
+// InpMinMarginLevelPercent. All three were added earlier this project
+// specifically in response to real live account blowups (see git
+// history / ml/learnings.md's 2026-08-29, 2026-08-31 and 2026-09
+// entries). Recoverable from git history if ever wanted back.
 
-input group "=== DCA / Martingale ==="
-input double   InpDcaDistancePrice  = 1.2;        // DCA Distance ($) - base value; scaled up live if InpUseAdaptiveDcaDistance is on
-// 2026-09-03, explicit request ("research real DCA/grid EA techniques,
-// test everything") - real sources confirm ATR-adaptive grid spacing as
-// a standard, named technique distinct from the flat wider-distance
-// test that already failed this project (2026-08-24 sweep: 1.8/2.5/3.0
-// all worse than 1.2): "the ATR setting allows the EA to track live
-// market volatility and automatically widen the distance between order
-// layers during high-speed market movements to prevent rapid lot
-// accumulation" (4xpip.com). The difference from the earlier failed
-// test: this only widens WHEN the market is actually moving fast
-// (reusing the same ATR-ratio math as IsAtrSpiking()), leaving normal/
-// calm-market DCA at the tight base distance that already works well -
-// the flat test widened it everywhere, all the time, which is what
-// made it worse.
-// 2026-09-04, explicit confirmation after seeing the swept numbers:
-// set as the new default. Real trade-off, not a free win - see the
-// comment above and ml/learnings.md for the honest before/after
-// (equity drawdown roughly halved, profit correspondingly lower)
-// and the fragility caveat (1.0/2.0/3.0 were all catastrophic on
-// the full month - only 1.5 tested well).
-input bool     InpUseAdaptiveDcaDistance = true; // Widen DCA Distance During High Volatility (ATR-ratio based, off = flat InpDcaDistancePrice always)
-input double   InpAdaptiveDcaAtrMult     = 1.5;   // Adaptive DCA Distance Multiplier (effective distance = base x max(1, currentATR/baselineATR x this))
-input double   InpLotMultiplier     = 2.0;        // Lot Multiplier
-input int      InpMinSecondsBetweenLegs = 5;      // Min Seconds Between Legs (safety net vs a cascade - 0 disables)
-// 2026-08-28, explicit request after root-causing the 58% equity
-// drawdown (a 2.5-minute spike that fired 9 back-to-back doublings, see
-// ml/learnings.md): two independent, more targeted safety nets than
-// InpMinSecondsBetweenLegs, tested against the same window. Result:
-// InpMaxLegsPerBar backfired badly at every value tried (same
-// mechanism as slowing InpMinSecondsBetweenLegs down - both throttle
-// the fast re-averaging this design depends on to recover quickly) -
-// stays off (0) by default. InpMaxSingleLegLot=17 genuinely improved
-// BOTH net profit and equity drawdown together (58.03% -> 42.73%) -
-// set as the new default.
-input int      InpMaxLegsPerBar     = 0;          // Max DCA Legs Per M1 Bar (0 = unlimited - tested, made things worse, left off)
-input double   InpMaxSingleLegLot   = 17;         // Max Single-Leg Lot Size (0 = unlimited - caps martingale growth without slowing the add cadence)
+const double   InpDcaDistancePrice  = 1.2;        // DCA Distance ($) - base value; scaled up live since InpUseAdaptiveDcaDistance is on
+const bool     InpUseAdaptiveDcaDistance = true; // Widen DCA Distance During High Volatility (ATR-ratio based) - 2026-09-04 default, see ml/learnings.md for the sweep and fragility caveat
+const double   InpAdaptiveDcaAtrMult     = 1.5;   // Adaptive DCA Distance Multiplier (effective distance = base x max(1, currentATR/baselineATR x this))
+const double   InpLotMultiplier     = 2.0;        // Lot Multiplier
+const int      InpMinSecondsBetweenLegs = 5;      // Min Seconds Between Legs (safety net vs a cascade)
+// 2026-09-11: InpMaxLegsPerBar deleted entirely (not just hidden) -
+// tested capped at every value tried and made things worse every time
+// (same mechanism as slowing InpMinSecondsBetweenLegs down - both
+// throttle the fast re-averaging this design depends on), so the
+// feature itself was never actually useful, not just currently off.
+const double   InpMaxSingleLegLot   = 17;         // Max Single-Leg Lot Size (0 = unlimited - caps martingale growth without slowing the add cadence; 2026-08-28 default)
 
-// 2026-09-06, explicit request: instead of the flat "resets to InpInitialLot
-// every InpMaxLegsPerBasket legs" cycle above, an alternative lot-cycle
-// shape - N flat-doubling legs (InpInitialLot x InpLotMultiplier each time),
-// then one extra "carryover" leg whose size does NOT reset with the rest -
-// it starts at InpCarryoverStartLot and doubles again every time this
-// N+1-leg cycle repeats (so leg-count-within-basket keeps climbing even
-// though the first N legs of every cycle look identical). NextLotSize()'s
-// existing InpMaxSingleLegLot cap and monotonic-growth guarantee both
-// still apply to the carryover leg untouched, so it can't runaway past
-// the same limit every other leg already respects.
-// 2026-09-07, explicit request: set as the new default (true), after it
-// was the more consistently positive lever of everything tested that
-// day - rescued both the August windows AND a July cross-check from a
-// catastrophic baseline into profit (unlike InpOnlyTradeWithTrend, which
-// did not survive the July check and was removed entirely - see
-// ml/learnings.md's 2026-09-07 entries for the full before/after
-// numbers on both months, including the honest caveat that July's
-// rescued equity drawdown, 57-69%, is far higher than August's 5-7%).
-// 2026-09-10, explicit correction with an exact worked example (base
-// 0.1/0.2/0.4 fixed forever, growing leg 0.8, then 0.16/0.32/0.64/
-// 1.28/2.56/5.12/...): InpCarryoverBaseLegs is 3, not 4 - the growing
-// leg is the 4th leg of every cycle, not a 5th leg on top of a 4-leg
-// base. Cycle 1's growing leg is just the plain martingale sequence
-// continuing one more step (0.8); the independent InpCarryoverStartLot-
-// based doubling series only starts from cycle 2 onward (see the
-// outerCycleNum-1 shift at the call site).
-input bool     InpUseCarryoverCycle   = true;     // Use N-Leg Reset + Doubling Carryover Leg (overrides the plain cycle above when on)
-input int      InpCarryoverBaseLegs   = 3;        // Base Legs Per Cycle (flat doubling sequence length before the carryover leg)
-input double   InpCarryoverStartLot   = 0.16;     // Carryover Leg Starting Lot (from cycle 2 onward - cycle 1's growing leg continues the base doubling instead)
-input double   InpCarryoverGrowthMult = 2.0;      // Carryover Leg Growth Multiplier (doubles the carryover leg every cycle from cycle 2 onward)
+// 2026-09-06/07/10/11, carryover-cycle lot sizing - N flat-doubling legs
+// then a growing 4th leg that doesn't reset (see NextCarryoverLotSize()
+// and the call site in ManageBasketEntries() for the exact formula,
+// corrected 2026-09-10 to match an exact worked example: base
+// 0.01/0.02/0.04 fixed forever, growing leg 0.08 in cycle 1, then
+// 0.16/0.32/0.64/1.28/... from cycle 2 onward). Set as the default
+// 2026-09-07 after it was the more consistently positive lever of
+// everything tested that day - full before/after numbers, including
+// the honest fragility caveats, in ml/learnings.md. 2026-09-11: the
+// on/off toggle and the older plain "reset every InpMaxLegsPerBasket
+// legs" cycle it used to fall back to were both deleted entirely - this
+// is now the only lot-sizing cycle shape, unconditionally.
+const int      InpCarryoverBaseLegs   = 3;        // Base Legs Per Cycle (flat doubling sequence length before the carryover leg)
+const double   InpCarryoverStartLot   = 0.16;     // Carryover Leg Starting Lot (from cycle 2 onward - cycle 1's growing leg continues the base doubling instead)
+const double   InpCarryoverGrowthMult = 2.0;      // Carryover Leg Growth Multiplier (doubles the carryover leg every cycle from cycle 2 onward)
 
-// 2026-09-06, explicit request: instead of checking/acting on entries
-// every tick, wait for the current M1 candle to close and only
-// evaluate/act once per new bar - fewer, later entries (reacts to where
-// price settled at candle close instead of the first intrabar touch).
-// The DCA-add side of this was previously tested ad hoc as a real
-// trade-off (fewer legs, but sometimes worse average entry) - never
-// shipped as a permanent toggle until now. 2026-09-07, explicit request:
-// extended to also gate the bootstrap (first leg of an empty basket) -
-// originally bootstrap was left ungated, now both wait for the same
-// per-side once-per-bar check.
-input bool     InpTradeOnCandleCloseOnly = false;   // Bootstrap + DCA-Add Only Once Per New M1 Candle
+// 2026-09-11: InpTradeOnCandleCloseOnly deleted entirely (not just
+// hidden) - it was off by default, and the 2026-09-07 sweep found it
+// underperformed on its own combined with carryover-cycle (which is now
+// the permanent, only lot-sizing shape) versus either lever alone - see
+// ml/learnings.md. Never part of the winning configuration.
 
-input group "=== Filters ==="
-input bool             InpUseAtrSpikeFilter = true;      // Use ATR Spike Filter
-input int              InpAtrPeriod         = 14;        // ATR Period
-input int              InpAtrBaselineBars   = 20;        // ATR Baseline Bars
-input double           InpMaxAtrRatio       = 1.5;       // Max ATR Ratio (spike threshold)
-// 2026-09-07: the entire trend-filter subsystem (InpUseTrendFilter,
-// InpUseMultiTFTrend, and the stricter InpOnlyTradeWithTrend added
-// earlier the same day) was removed here, by explicit request, after a
-// July cross-check showed it doesn't hold up - multi-TF trend alone
-// looked like a strong August-only win (+$7,809/28.77% eqDD vs a
-// catastrophic baseline) but did essentially nothing on July
-// (-$40,720/135.40% eqDD, statistically identical to no filter at all,
-// -$40,475/134.34%). See ml/learnings.md's 2026-09-07 entries for the
-// full history before this removal, and git history for the removed
-// code (GetTrendOnTF/GetTrend/IsAgainstTrend/IsWithTrend and the trend
-// indicator handles) if a future idea wants to revisit trend-gating
-// with better evidence.
+const bool             InpUseAtrSpikeFilter = true;      // Use ATR Spike Filter
+const int              InpAtrPeriod         = 14;        // ATR Period
+const int              InpAtrBaselineBars   = 20;        // ATR Baseline Bars
+const double           InpMaxAtrRatio       = 1.5;       // Max ATR Ratio (spike threshold)
+// 2026-09-07: the entire trend-filter subsystem was removed entirely
+// (not just hidden) by explicit request, after a July cross-check
+// showed it didn't hold up - see ml/learnings.md's 2026-09-07 entries
+// and git history if a future idea wants to revisit trend-gating.
 
 input group "=== News Filter ==="
 input bool     InpUseNewsFilter       = true;   // Use News Filter (auto calendar - live/demo only)
@@ -330,20 +259,9 @@ struct SBasket
                               // them apart, which let the wrong leg's price get used as the DCA
                               // distance reference and let legs cascade far faster than intended -
                               // real incident, 2026-08-18, see ml/learnings.md)
-   int      legsThisBar;     // 2026-08-28: how many of this basket's legs opened within the
-                              // current M1 bar - feeds InpMaxLegsPerBar, a targeted brake on
-                              // the multi-doublings-within-one-bar pattern behind the
-                              // 2026-08-26 58% equity drawdown, without slowing normal
-                              // spread-out DCA (see ml/learnings.md).
   };
 
 SBasket g_buyBasket, g_sellBasket;
-
-// InpTradeOnCandleCloseOnly bookkeeping - the last M1 bar-open time each
-// side was already evaluated for an entry (bootstrap or DCA-add), so a
-// side gets exactly one check-and-maybe-act per new bar instead of every
-// tick. Indexed 0=buy, 1=sell.
-datetime g_lastCandleCheck[2] = {0, 0};
 
 int g_atrHandle      = INVALID_HANDLE;
 
@@ -577,7 +495,6 @@ void ResetBasket(SBasket &b)
    b.lastLegLots      = 0;
    b.lastLegTime      = 0;
    b.lastLegTimeMsc   = 0;
-   b.legsThisBar      = 0;
   }
 
 void ScanBasket(ENUM_BASKET_SIDE side, SBasket &b)
@@ -585,7 +502,6 @@ void ScanBasket(ENUM_BASKET_SIDE side, SBasket &b)
    ResetBasket(b);
    long wantType = (side == SIDE_BUY) ? POSITION_TYPE_BUY : POSITION_TYPE_SELL;
    double sumPriceLots = 0;
-   datetime curBarOpen = iTime(_Symbol, PERIOD_M1, 0);
 
    for(int i = PositionsTotal() - 1; i >= 0; i--)
      {
@@ -611,8 +527,6 @@ void ScanBasket(ENUM_BASKET_SIDE side, SBasket &b)
       b.totalLots  += lots;
       b.floatingPL += profit;
       sumPriceLots += entry * lots;
-      if(t >= curBarOpen)
-         b.legsThisBar++;
 
       // Millisecond precision, not just POSITION_TIME (1-second resolution) -
       // two legs opening within the same second (this EA can do that; a
@@ -829,16 +743,6 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
    if(DailyLossLimitHit())
       return; // today's loss limit hit - OnTick() also force-closes both baskets, see there
 
-   if(InpTradeOnCandleCloseOnly)
-     {
-      datetime curBar = iTime(_Symbol, PERIOD_M1, 0);
-      int sideIdx = (side == SIDE_BUY) ? 0 : 1;
-      if(curBar <= g_lastCandleCheck[sideIdx])
-         return; // already evaluated this M1 bar for this side - wait for the next one to open
-      g_lastCandleCheck[sideIdx] = curBar; // mark checked whether or not a leg ends up opening below
-              // (covers both the bootstrap branch and the DCA-add branch further down)
-     }
-
    if(b.legCount == 0)
      {
       OpenLeg(side, 0, 0);
@@ -878,8 +782,6 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
       // few seconds again even if it existed).
       if(InpMinSecondsBetweenLegs > 0 && (TimeCurrent() - b.lastLegTime) < InpMinSecondsBetweenLegs)
          return;
-      if(InpMaxLegsPerBar > 0 && b.legsThisBar >= InpMaxLegsPerBar)
-         return; // this bar already used its quota - the next leg waits for the bar to close, per explicit request
       if(InpUseAtrSpikeFilter && IsAtrSpiking())
          return; // "news proxy" - don't average into a volatility spike
 
@@ -890,52 +792,39 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
       // still letting it keep averaging (unconditionally, no pause) if
       // price keeps moving, per explicit request.
       //
-      // 2026-09-06, explicit request: InpUseCarryoverCycle adds a second
-      // cycle shape on top of the plain one above - InpCarryoverBaseLegs
-      // flat-doubling legs (identical every cycle, same as the plain
-      // shape), then one extra "carryover" leg that does NOT reset - it
-      // starts at InpCarryoverStartLot and doubles again every time this
-      // N+1-leg cycle repeats. legIndexForSizing keeps its old meaning
-      // (0-based position within the base sequence) for the flat legs;
-      // the carryover leg is sized by NextCarryoverLotSize() instead and
-      // legIndexForSizing there is only used for the leg-N comment label.
+      // 2026-09-06/07/10/11, carryover-cycle lot sizing (the proven,
+      // permanent default - the older plain "reset every InpMaxLegsPerBasket
+      // legs" cycle was deleted 2026-09-11 since it could never run once
+      // carryover became the fixed default): InpCarryoverBaseLegs
+      // flat-doubling legs (0.01/0.02/0.04-style), then one extra
+      // "carryover" leg that does NOT reset - cycle 1's carryover leg is
+      // just the plain martingale sequence continuing one more step
+      // (via NextLotSize), and from cycle 2 onward an independent series
+      // starting at InpCarryoverStartLot takes over, doubling every cycle
+      // after that (hence outerCycleNum-1 so cycle 2 maps to exponent 0).
+      // legIndexForSizing is the 0-based position within the base
+      // sequence for the flat legs, and just the leg-N comment label for
+      // the carryover leg (sized by NextCarryoverLotSize() instead).
+      int cycleLen   = InpCarryoverBaseLegs + 1;
+      int posInCycle = b.legCount % cycleLen;
       int    legIndexForSizing;
       double prospectiveLot;
       double carryoverLotOverride = -1;
 
-      if(InpUseCarryoverCycle)
+      if(posInCycle < InpCarryoverBaseLegs)
         {
-         int cycleLen   = InpCarryoverBaseLegs + 1;
-         int posInCycle = b.legCount % cycleLen;
-         if(posInCycle < InpCarryoverBaseLegs)
-           {
-            legIndexForSizing = posInCycle;
-            prospectiveLot    = NextLotSize(legIndexForSizing, b.lastLegLots);
-           }
-         else
-           {
-            // 2026-09-10, explicit correction with an exact worked example
-            // (0.1/0.2/0.4 fixed every cycle, growing leg 0.8/0.16/0.32/
-            // 0.64/1.28/...): cycle 1's growing leg is just the plain
-            // martingale sequence continuing one more step (0.4 x mult =
-            // 0.8, via NextLotSize - no carryover math involved yet).
-            // Only from cycle 2 onward does the INDEPENDENT carryover
-            // series kick in, starting fresh at InpCarryoverStartLot and
-            // doubling every cycle after that - hence outerCycleNum-1 so
-            // cycle 2 maps to carryover exponent 0.
-            int outerCycleNum = b.legCount / cycleLen;
-            legIndexForSizing = posInCycle; // = InpCarryoverBaseLegs - just for the comment label
-            if(outerCycleNum == 0)
-               prospectiveLot = NextLotSize(posInCycle, b.lastLegLots);
-            else
-               prospectiveLot = NextCarryoverLotSize(outerCycleNum - 1, b.lastLegLots);
-            carryoverLotOverride = prospectiveLot;
-           }
+         legIndexForSizing = posInCycle;
+         prospectiveLot    = NextLotSize(legIndexForSizing, b.lastLegLots);
         }
       else
         {
-         legIndexForSizing = b.legCount % InpMaxLegsPerBasket;
-         prospectiveLot    = NextLotSize(legIndexForSizing, b.lastLegLots);
+         int outerCycleNum = b.legCount / cycleLen;
+         legIndexForSizing = posInCycle; // = InpCarryoverBaseLegs - just for the comment label
+         if(outerCycleNum == 0)
+            prospectiveLot = NextLotSize(posInCycle, b.lastLegLots);
+         else
+            prospectiveLot = NextCarryoverLotSize(outerCycleNum - 1, b.lastLegLots);
+         carryoverLotOverride = prospectiveLot;
         }
 
       OpenLeg(side, legIndexForSizing, b.lastLegLots, carryoverLotOverride);

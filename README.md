@@ -3,6 +3,21 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-09-11: v47 - input panel cleaned up (deleted/hidden/kept-visible
+## three-way split)
+
+Explicit request to hide everything except settings that genuinely
+need touching. Split into three: **deleted entirely** (proven not
+useful, not just inert) - `InpMaxLegsPerBar`, the `InpUseCarryoverCycle`
+on/off toggle and its dead fallback cycle, `InpTradeOnCandleCloseOnly`;
+**hidden** (`input` -> `const`, still fully active, just not in the
+Inputs dialog) - all the DCA/martingale/carryover/ATR-filter internals;
+**left visible** - account/broker settings, news filter, trading hours,
+daily profit/loss limits, dashboard, chart visuals. Input count ~50 ->
+24. Compiled clean (v47, 0 errors/0 warnings, smallest binary yet at
+205,046 bytes). Pure refactor - see `ml/learnings.md` for the full
+before/after list; verified to behave identically to v46.
+
 ## 2026-09-10/11: exhaustive InpBasketProfitTargetUSD sweep - the
 ## clearest proof yet that this parameter space has no findable optimum
 

@@ -2989,3 +2989,20 @@ Farhan Fx` Python project's `learnings.md`.)
   Compiled clean (v46, 0 errors/0 warnings, binary down to 209,798
   bytes). Backtest comparison against v45's growing-target numbers
   pending.
+
+  **Verified with the continuous 3-month test (2026.06.01-08.27) used
+  throughout this session - flat target vs the old growing target:**
+  ```
+  version              net$        eqDD%    PF     Sharpe   trades
+  v45 (growing target) 89,867.30   22.19    1.30   3.94     123,927
+  v46 (flat target)    88,683.68   22.34    1.30   3.89     124,316
+  ```
+  **Nearly identical.** The per-leg growth (3.33%/leg) and floating-loss
+  overrides were adding real complexity without buying much real
+  performance on this data - most baskets close within a handful of
+  legs given the $1 target and adaptive DCA distance, so the growth
+  premium rarely had a chance to compound meaningfully before a basket
+  closed. The simpler, standard flat-target version performs
+  essentially the same. Confirms this reset was a genuine simplification,
+  not a downgrade - same usual caveat about small-sample/data-snapshot
+  reproducibility applies.

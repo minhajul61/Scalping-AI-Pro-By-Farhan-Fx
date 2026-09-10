@@ -2842,3 +2842,43 @@ Farhan Fx` Python project's `learnings.md`.)
   having no trend filter and no per-leg stop-loss.** Reported to the
   user plainly, with the 0.08% margin-level number specifically
   highlighted, alongside completing the explicit request as given.
+
+- **2026-09-10 (v45, carryover-cycle formula corrected with an exact
+  worked example):** user gave the precise intended sequence - base
+  legs fixed at 0.01/0.02/0.04 every cycle, 4th ("growing") leg = 0.08
+  in cycle 1 (just the plain martingale sequence continuing one more
+  step), then 0.16/0.32/0.64/1.28/2.56/5.12/... from cycle 2 onward (an
+  independent doubling series). This did NOT match the v40-v44
+  implementation, which used `InpCarryoverBaseLegs=4` (a 5-leg cycle:
+  4 flat base legs + a genuinely separate 5th carryover leg starting at
+  0.16 from cycle 1) - a different shape than intended. Fixed:
+  `InpCarryoverBaseLegs` default changed 4 -> 3, and the carryover
+  branch now special-cases the first cycle (`outerCycleNum==0`) to use
+  the plain `NextLotSize()` continuation instead of
+  `NextCarryoverLotSize()`, with the independent carryover series
+  shifted to start counting from cycle 2 (`outerCycleNum - 1`).
+  `InpCarryoverStartLot=0.16`/`InpCarryoverGrowthMult=2.0` were already
+  correct and unchanged. Compiled clean (v45, 0 errors/0 warnings).
+
+  **20-cycle table computed and shown to the user (base legs
+  0.01/0.02/0.04 always, growing leg below), with `InpMaxSingleLegLot=17`
+  applied - the growing leg hits the cap at cycle 9 and stays there:**
+  ```
+  cycle  growing-leg(raw)   growing-leg(capped)
+  1      0.08               0.08
+  2      0.16               0.16
+  3      0.32               0.32
+  4      0.64               0.64
+  5      1.28               1.28
+  6      2.56               2.56
+  7      5.12               5.12
+  8      10.24              10.24
+  9      20.48              17.00  <- cap engaged, stays here forever after
+  ...
+  20     41943.04           17.00
+  ```
+  Running total across 20 full cycles (80 legs) on one side alone: **225.80
+  lots**, per side - with `InpMaxTotalBasketVolume` removed in v44, nothing
+  caps this from actually accumulating if price keeps moving adversely
+  that far. Flagged to the user as a direct, concrete consequence of the
+  v44 removal now visible in this specific number.

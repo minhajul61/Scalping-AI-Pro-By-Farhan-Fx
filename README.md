@@ -3,6 +3,25 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-09-10: v45 - carryover-cycle formula corrected to match the
+## exact intended sequence
+
+The v40-v44 carryover-cycle shape didn't match what was actually
+intended: base legs fixed at 0.01/0.02/0.04 every cycle, the 4th
+("growing") leg = 0.08 in cycle 1 (the plain martingale sequence just
+continuing one more step), then 0.16/0.32/0.64/1.28/2.56/5.12/... as an
+independent doubling series from cycle 2 onward. Fixed by changing
+`InpCarryoverBaseLegs` default 4 -> 3 and special-casing cycle 1 to use
+the plain lot-sizing formula instead of the carryover one. Compiled
+clean (v45, 0 errors/0 warnings).
+
+**20-cycle table (80 legs) computed with the existing `InpMaxSingleLegLot=17`
+cap applied - the growing leg hits 17 lots at cycle 9 and stays there.
+Running total across 20 cycles on one side alone: 225.80 lots** - with
+`InpMaxTotalBasketVolume` removed in v44, nothing stops this from
+actually accumulating if price moves adversely that far. Full table in
+`ml/learnings.md`.
+
 ## 2026-09-07 (later still, FINAL for the session): v44 - three
 ## account-level circuit breakers removed by explicit request, with a
 ## measured cost

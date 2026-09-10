@@ -70,7 +70,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v44"
+#define EA_BUILD_VERSION "v45"
 
 #include <Trade\Trade.mqh>
 
@@ -227,10 +227,18 @@ input double   InpMaxSingleLegLot   = 17;         // Max Single-Leg Lot Size (0 
 // ml/learnings.md's 2026-09-07 entries for the full before/after
 // numbers on both months, including the honest caveat that July's
 // rescued equity drawdown, 57-69%, is far higher than August's 5-7%).
+// 2026-09-10, explicit correction with an exact worked example (base
+// 0.1/0.2/0.4 fixed forever, growing leg 0.8, then 0.16/0.32/0.64/
+// 1.28/2.56/5.12/...): InpCarryoverBaseLegs is 3, not 4 - the growing
+// leg is the 4th leg of every cycle, not a 5th leg on top of a 4-leg
+// base. Cycle 1's growing leg is just the plain martingale sequence
+// continuing one more step (0.8); the independent InpCarryoverStartLot-
+// based doubling series only starts from cycle 2 onward (see the
+// outerCycleNum-1 shift at the call site).
 input bool     InpUseCarryoverCycle   = true;     // Use N-Leg Reset + Doubling Carryover Leg (overrides the plain cycle above when on)
-input int      InpCarryoverBaseLegs   = 4;        // Base Legs Per Cycle (flat doubling sequence length before the carryover leg)
-input double   InpCarryoverStartLot   = 0.16;     // Carryover Leg Starting Lot (this cycle's extra/last leg, cycle 1)
-input double   InpCarryoverGrowthMult = 2.0;      // Carryover Leg Growth Multiplier (doubles the carryover leg every full cycle by default)
+input int      InpCarryoverBaseLegs   = 3;        // Base Legs Per Cycle (flat doubling sequence length before the carryover leg)
+input double   InpCarryoverStartLot   = 0.16;     // Carryover Leg Starting Lot (from cycle 2 onward - cycle 1's growing leg continues the base doubling instead)
+input double   InpCarryoverGrowthMult = 2.0;      // Carryover Leg Growth Multiplier (doubles the carryover leg every cycle from cycle 2 onward)
 
 // 2026-09-06, explicit request: instead of checking/acting on entries
 // every tick, wait for the current M1 candle to close and only
@@ -973,9 +981,21 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
            }
          else
            {
+            // 2026-09-10, explicit correction with an exact worked example
+            // (0.1/0.2/0.4 fixed every cycle, growing leg 0.8/0.16/0.32/
+            // 0.64/1.28/...): cycle 1's growing leg is just the plain
+            // martingale sequence continuing one more step (0.4 x mult =
+            // 0.8, via NextLotSize - no carryover math involved yet).
+            // Only from cycle 2 onward does the INDEPENDENT carryover
+            // series kick in, starting fresh at InpCarryoverStartLot and
+            // doubling every cycle after that - hence outerCycleNum-1 so
+            // cycle 2 maps to carryover exponent 0.
             int outerCycleNum = b.legCount / cycleLen;
             legIndexForSizing = posInCycle; // = InpCarryoverBaseLegs - just for the comment label
-            prospectiveLot    = NextCarryoverLotSize(outerCycleNum, b.lastLegLots);
+            if(outerCycleNum == 0)
+               prospectiveLot = NextLotSize(posInCycle, b.lastLegLots);
+            else
+               prospectiveLot = NextCarryoverLotSize(outerCycleNum - 1, b.lastLegLots);
             carryoverLotOverride = prospectiveLot;
            }
         }

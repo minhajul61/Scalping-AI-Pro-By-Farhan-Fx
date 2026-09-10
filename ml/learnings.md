@@ -3059,3 +3059,11 @@ Farhan Fx` Python project's `learnings.md`.)
   showed catastrophic or >100%-drawdown behavior, and changing it on
   the strength of this sweep would be trading a known-tolerable setting
   for an unverifiable one.
+
+- **2026-09-11 (InpMaxSingleLegLot=0 re-tested on v46, flat-TP binary,
+  continuous 3-month test):** net $88,681.57 vs $88,683.68 capped (17) -
+  a $2.11 difference, Sharpe/PF/eqDD/trade-count all identical. Same
+  conclusion as the earlier v45 test: no basket in these three months
+  gets deep enough (cycle 9+ of the carryover sequence) for the cap to
+  matter either way. Not evidence removing it is safe in general -
+  just confirms it, again, wasn't exercised by this specific data.

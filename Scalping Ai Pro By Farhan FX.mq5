@@ -70,7 +70,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v45"
+#define EA_BUILD_VERSION "v46"
 
 #include <Trade\Trade.mqh>
 
@@ -114,46 +114,27 @@ input int      InpMaxSpreadPoints    = 300;       // Max Spread (points) - used 
 
 input group "=== Basket & Profit Target ==="
 input double   InpInitialLot            = 0.01;   // Initial Lot Size
-input double   InpBasketProfitTargetUSD = 1.0;    // Take Profit ($) - grows a little every DCA leg (see GetProfitTarget())
+// 2026-09-10, explicit request: reset the profit-target system back to
+// how most standard/retail martingale-grid EAs actually do it, after
+// web research confirmed the three common conventions - a flat $
+// ("currency unit") target, a fixed points/pips distance from the
+// basket's average entry, or a percentage-of-price target (sources:
+// pineify.app/mql5/mql5-martingale-ea, pineify.app/mql5/
+// mql5-martingale-grid-ea, mql5.com/en/blogs/post/775292). Picked the
+// simplest and most common of the three: one flat dollar target, never
+// growing with leg count, never overridden by floating loss or basket
+// volume - see GetProfitTarget(), now just returns this value directly.
+// Removes InpCycleTargetGrowth, InpTargetPercentOfFloatingLoss,
+// InpEmergencyExitVolumeLots, and InpEmergencyExitTargetUSD entirely
+// (all recoverable from git history) - this was genuinely a full reset,
+// not a re-tune of the existing formula.
+input double   InpBasketProfitTargetUSD = 1.0;    // Take Profit ($) - flat, same for every leg, never grows or gets overridden
 // 2026-08-27: default raised 7->15 - the 17-config sweep (see
 // ml/learnings.md) found 7 was one of the worst cycle lengths tested
 // (blew the account net-negative on the August window); 15 was the
 // tested baseline that survived, and 20/25 were only marginally
 // different from it.
 input int      InpMaxLegsPerBasket      = 15;     // Legs Per Sizing Cycle (lot size resets every N legs - keeps any single leg from hitting the broker's own max-lot cap; the basket itself has no total-leg cap - see the file header)
-input double   InpCycleTargetGrowth     = 0.5;    // Target Growth Per Cycle (0.5 = +50%)
-// 2026-08-24, explicit request: once a basket is genuinely underwater,
-// its target should scale with HOW underwater it is, not just how many
-// legs it's taken - "$5000 floating loss -> minimum $1000 profit before
-// releasing" (a 20% ratio). See GetProfitTarget() - this was the
-// dominant term once a basket got deep, on top of the per-leg growth
-// above which still sets the (much smaller) target for early/shallow
-// legs.
-// 2026-08-31, explicit request: revert to the plain, fixed/per-leg-
-// growing target most retail martingale/grid EAs actually use - no
-// scaling by how deep the basket is. Set to 0 (off) - the
-// floating-loss term in GetProfitTarget() is now fully disabled, only
-// the InpBasketProfitTargetUSD + InpCycleTargetGrowth baseline above
-// applies. Kept as a real input (not deleted) since it's exactly what
-// implements the earlier request if it's ever wanted back - one
-// number, not a code change.
-input double   InpTargetPercentOfFloatingLoss = 0; // Min Target As % Of Current Floating Loss (0 = off, use per-leg growth only)
-// 2026-08-28, explicit request after the real 252424 stop-out (see
-// ml/learnings.md): "with this much volume, didn't price come down even
-// once - build a system that gets out easily, without a loss, once
-// floating is high." The formula above does the OPPOSITE once a basket
-// is deep - it demands MORE profit (20% of the floating loss) the worse
-// things get, which is exactly wrong once total exposure is already
-// dangerous: a basket carrying 30+ lots doesn't need a big dollar
-// target, it needs to leave the instant it's not losing anymore, since
-// waiting for a bigger target is what leaves it exposed for the broker's
-// own stop-out to hit first. Once total basket volume crosses this
-// threshold, the target drops to InpEmergencyExitTargetUSD (a small,
-// still-no-loss number) instead of the 20%-of-floating-loss demand -
-// only overrides the target when it would otherwise be LARGER, so this
-// never demands more, only ever offers an earlier, easier exit.
-input double   InpEmergencyExitVolumeLots = 20.0; // Emergency Exit: Total Basket Volume Threshold (lots, 0 = off)
-input double   InpEmergencyExitTargetUSD  = 0.50; // Emergency Exit Target ($) - small but still > 0, never books an actual loss
 input bool     InpUseServerSideTP       = true;   // Attach Real TP To Each Leg (fires on the broker's server, less slippage than the EA closing legs one-by-one)
 
 // 2026-09-07: three account-level circuit breakers removed here by
@@ -664,64 +645,16 @@ void RefreshBaskets()
 //| Exits: profit target only - no stop-loss, ever, per explicit      |
 //| request.                                                           |
 //+------------------------------------------------------------------+
-// The target is not a flat number - it ramps up a little with EVERY DCA
-// leg (2026-08-21, replaced the old once-per-full-cycle step function per
-// explicit request: "target barbe protita DCA-te, cycle sesh hole na"). A
-// basket that has taken on more legs has more capital and more adverse
-// distance behind it, so it demands proportionally more profit before
-// it's worth closing - same "martingale harder, want more profit"
-// intent as before, just smooth instead of a sawtooth that only jumped
-// once every InpMaxLegsPerBasket legs and then reset flat.
-//
-// Same overall growth RATE as before (InpCycleTargetGrowth per
-// InpMaxLegsPerBasket legs), just spread evenly instead of dumped all at
-// once at the cycle boundary - and unlike the old version, it never
-// resets: legs 8, 9, 15, 30... keep compounding the target higher,
-// reflecting that a basket that's genuinely survived that many legs has
-// taken on real risk the flat/sawtooth version understated.
-// The very first (bootstrap) leg always stays at the flat base - growth
-// only starts from the first DCA add onward.
-//
-// 2026-08-24, explicit request: on top of the per-leg growth above, once
-// a basket is genuinely underwater the target must scale with HOW deep
-// it is, not just how many legs it took to get there - "$5000 floating
-// loss -> minimum $1000 profit before releasing" (InpTargetPercentOfFloatingLoss,
-// a 20% ratio by default). Two legs can both be "leg 6" with wildly
-// different floating loss depending on how far price ran, and the old
-// leg-count-only formula charged them the same target - this fixes that.
-// The final target is whichever of the two is larger: the per-leg
-// baseline still governs early/shallow legs (floating loss is small or
-// even positive there, so the % term is near zero), while the floating-
-// loss term takes over and dominates once a basket is deep underwater.
+// 2026-09-10, explicit request: reset back to the plain, flat $ target
+// most standard/retail martingale-grid EAs use - see the research note
+// above InpBasketProfitTargetUSD's declaration. This basket previously
+// had a per-leg-growing baseline, a floating-loss-percentage override,
+// and an emergency-exit volume override (all git-history-recoverable if
+// ever wanted back) - all removed here. Same target for every basket,
+// every leg, every time.
 double GetProfitTarget(const SBasket &b)
   {
-   double baseline;
-   if(InpMaxLegsPerBasket <= 0 || b.legCount <= 1)
-      baseline = InpBasketProfitTargetUSD;
-   else
-     {
-      double growthPerLeg = InpCycleTargetGrowth / InpMaxLegsPerBasket;
-      int legsPastFirst = b.legCount - 1;
-      baseline = InpBasketProfitTargetUSD * (1.0 + legsPastFirst * growthPerLeg);
-     }
-
-   double floatingLossBased = 0;
-   if(InpTargetPercentOfFloatingLoss > 0 && b.floatingPL < 0)
-      floatingLossBased = MathAbs(b.floatingPL) * (InpTargetPercentOfFloatingLoss / 100.0);
-
-   double target = MathMax(baseline, floatingLossBased);
-
-   // Emergency exit: once total volume is already dangerous, stop
-   // demanding more profit to release it - offer the smaller
-   // (never-a-loss) target instead, so any small favorable move takes
-   // it, rather than holding out for a bigger target that may never
-   // come before the broker's own margin stop-out does. Only ever
-   // LOWERS the target (MathMin), never raises it above what the
-   // formula above already asked for.
-   if(InpEmergencyExitVolumeLots > 0 && b.totalLots >= InpEmergencyExitVolumeLots)
-      target = MathMin(target, InpEmergencyExitTargetUSD);
-
-   return target;
+   return InpBasketProfitTargetUSD;
   }
 
 // The price level at which this basket's combined floating P/L (summed

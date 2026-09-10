@@ -2967,3 +2967,25 @@ Farhan Fx` Python project's `learnings.md`.)
   months of data on one broker/account snapshot; the standing
   reproducibility and small-sample caveats from earlier in this file
   apply in full - encouraging trend, not a guarantee.
+
+- **2026-09-10 (v46, profit-target system fully reset to a flat $
+  target, explicit request + web research):** user asked to reset the
+  whole profit-target system back to how standard/retail martingale-grid
+  EAs actually do it. Web research confirmed three common conventions -
+  flat $ ("currency unit"), fixed points/pips from average entry, or
+  percentage-of-price (sources: [pineify.app/mql5/mql5-martingale-ea](https://pineify.app/mql5/mql5-martingale-ea),
+  [pineify.app/mql5/mql5-martingale-grid-ea](https://pineify.app/mql5/mql5-martingale-grid-ea),
+  [mql5.com/en/blogs/post/775292](https://www.mql5.com/en/blogs/post/775292)).
+  Implemented the simplest/most common: a flat $ target, same for every
+  basket regardless of leg count or floating loss.
+
+  Removed `InpCycleTargetGrowth` (per-leg growth, added 2026-08-21),
+  `InpTargetPercentOfFloatingLoss` (floating-loss-scaled override, added
+  2026-08-24, already reverted to 0/off since 2026-08-31 but the input
+  itself stayed until now), and `InpEmergencyExitVolumeLots`/
+  `InpEmergencyExitTargetUSD` (volume-triggered target reduction, added
+  2026-08-29) - all recoverable from git history. `GetProfitTarget()`
+  now just returns `InpBasketProfitTargetUSD` directly, no conditions.
+  Compiled clean (v46, 0 errors/0 warnings, binary down to 209,798
+  bytes). Backtest comparison against v45's growing-target numbers
+  pending.

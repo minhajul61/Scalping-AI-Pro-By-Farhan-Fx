@@ -2882,3 +2882,39 @@ Farhan Fx` Python project's `learnings.md`.)
   caps this from actually accumulating if price keeps moving adversely
   that far. Flagged to the user as a direct, concrete consequence of the
   v44 removal now visible in this specific number.
+
+- **2026-09-10 (InpMaxSingleLegLot=0 test on the corrected v45 formula,
+  explicit request):** ran the same three reference windows with the
+  17-lot cap removed. **Result: byte-for-byte identical to the capped
+  (17) run on all three windows** (net profit, drawdown, PF, trade count
+  all match exactly). The cap never actually engaged - no basket in any
+  of these three months survived long enough (32+ DCA-adds on one side,
+  reaching cycle 9 of the carryover sequence) for the growing leg to
+  reach 17 lots in the first place. This is NOT evidence that removing
+  the cap is safe in general - it only means these three specific
+  months never tested that code path. A sufficiently long, sustained
+  one-directional move without a $1+ pullback across 30+ legs would
+  still reach it, and with `InpMaxTotalBasketVolume` already removed
+  (v44), nothing would stop the resulting lot size from growing
+  essentially without bound past that point (bounded only by the
+  broker's own SYMBOL_VOLUME_MAX clamp already inside `NextLotSize()`/
+  `NextCarryoverLotSize()`, not by anything this EA controls).
+
+  **Corrected-formula (v45) numbers on these three windows, for the
+  record, versus the old (wrong-formula, base=4) v44 numbers:**
+  ```
+  window   version           net$         eqDD%     PF
+  month    v44 (old formula) 27,416.46     42.52    1.33
+  month    v45 (corrected)   22,789.36     68.40    1.28
+  stress   v44 (old formula)  5,316.75     31.40    1.42
+  stress   v45 (corrected)    2,545.59     39.59    1.18
+  july     v44 (old formula) 29,479.33    105.08    1.32
+  july     v45 (corrected)   27,072.58     29.83    1.31   <- much safer
+  ```
+  The correction is not just cosmetic - it changed real behavior.
+  Worse on August (both windows: lower profit, higher drawdown) but
+  dramatically safer on July (105.08% -> 29.83% equity drawdown) - the
+  same window that was this project's worst-case reference point all
+  session. Net effect leans positive given how much July improved
+  relative to how much August gave back, but still just two months of
+  evidence, same caveat as everything else here.

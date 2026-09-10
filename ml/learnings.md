@@ -3006,3 +3006,56 @@ Farhan Fx` Python project's `learnings.md`.)
   essentially the same. Confirms this reset was a genuine simplification,
   not a downgrade - same usual caveat about small-sample/data-snapshot
   reproducibility applies.
+
+- **2026-09-10/11 (exhaustive InpBasketProfitTargetUSD sweep, explicit
+  request to "find the lowest-DD/highest-profit setting no matter what"
+  - the most conclusive proof yet that this design's parameter space is
+  genuinely chaotic, not a smooth surface with a findable optimum):**
+  swept 14 TP values (0.5 through 15) on the continuous 3-month test
+  (2026.06.01-08.27, the most realistic proxy this project has, same
+  one used throughout this session), after a first-pass stress-window
+  sweep flagged TP=5.0 as promising - which then catastrophically
+  failed on the full 3-month run, motivating the dense follow-up sweep
+  below. `InpMaxSingleLegLot` (5/10/17) was also swept on the stress
+  window first and made zero difference at any value tested - no
+  basket in that 4-day window ever got deep enough to reach even the
+  5-lot cap, so it was dropped from the rest of this sweep.
+  ```
+  TP     net$          eqDD%     PF     Sharpe   verdict
+  0.5    (stress only, not re-verified on 3mo)
+  1.0     88,683.68     22.34    1.30    3.89    good  <- current default
+  2.0     97,977.97     57.30    1.34    3.49    mediocre
+  3.0    105,997.05     34.78    1.39    3.89    good
+  4.0     99,668.52     47.48    1.38    3.36    mediocre
+  5.0    -31,015.66    135.07    0.40   -5.00    CATASTROPHIC
+  6.0    -40,399.57    133.36    0.28   -5.00    CATASTROPHIC
+  7.0     99,975.26    116.14    1.44    1.53    profitable but >100% eqDD
+  8.0    101,933.22     35.73    1.45    4.39    good
+  9.0    108,647.38    114.77    1.49    1.65    profitable but >100% eqDD
+  10.0   105,482.68     19.62    1.51    4.88    best-looking of all 14
+  10.5   105,864.86    114.54    1.51    1.65    back to bad, right next to 10.0
+  11.0   109,284.41     50.12    1.48    1.99    mediocre
+  12.0   -38,823.13    122.98    0.62   -1.89    CATASTROPHIC
+  15.0   -34,319.42    111.18    0.63   -5.00    CATASTROPHIC
+  ```
+  **TP=10.0 looked like the single best config of everything tested this
+  entire project (lowest eqDD, highest Sharpe) - but TP=10.5, one half-
+  dollar away, reverts to 114.54% drawdown.** This settles it: TP=10.0
+  is not a stable plateau, it is an isolated lucky point on this exact
+  data snapshot, exactly like TP=1.0, 3.0, and 8.0 are - the "good"
+  values are scattered, surrounded on both sides by mediocre or
+  catastrophic neighbors, with no smooth region anywhere in 0.5-15.
+
+  **Conclusion, stated plainly because it needs to be: there is no
+  reliable, findable "best" InpBasketProfitTargetUSD on this data.**
+  Any single value that looks good from a sweep - including every past
+  "winner" reported in this file for every OTHER parameter too - should
+  be read as possibly this same kind of lucky, non-robust spike rather
+  than assumed different in kind. This is the clearest, most exhaustive
+  demonstration of the project's standing fragility finding, not a new
+  discovery of it. **Recommendation: keep the current default
+  (InpBasketProfitTargetUSD=1.0)** - not because it is provably best,
+  but because among 14 tested values it is one of only four that never
+  showed catastrophic or >100%-drawdown behavior, and changing it on
+  the strength of this sweep would be trading a known-tolerable setting
+  for an unverifiable one.

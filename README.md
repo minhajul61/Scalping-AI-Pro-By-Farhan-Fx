@@ -3,6 +3,31 @@
 This folder now holds **three independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-09-10/11: exhaustive InpBasketProfitTargetUSD sweep - the
+## clearest proof yet that this parameter space has no findable optimum
+
+Explicit request: tune settings until the lowest-DD/highest-profit
+combination is found, "no matter what." Swept 14 TP values (0.5-15) on
+the continuous 3-month test used throughout this session.
+**InpMaxSingleLegLot (5/10/17) made zero difference at any value on a
+first-pass stress-window sweep - no basket got deep enough to reach
+even the 5-lot cap there.**
+
+**TP=10.0 looked like the best config found in this entire project
+(19.62% equity drawdown, Sharpe 4.88) - but TP=10.5, half a dollar
+away, reverts to 114.54% drawdown.** TP=5.0 and 6.0 are catastrophic
+(-130%+ eqDD), TP=7.0 and 9.0 are profitable but carry >100% drawdown,
+TP=12.0 and 15.0 are catastrophic again. Full 14-point table in
+`ml/learnings.md`.
+
+**Conclusion: there is no reliable, findable "best" value for this
+parameter on this data - every good-looking result is an isolated
+lucky point, not a stable region.** This is the clearest demonstration
+yet of the fragility this project has flagged repeatedly for every
+other lever too. Recommendation: keep the current default
+(`InpBasketProfitTargetUSD=1.0`) - one of only four values tested that
+never showed catastrophic behavior, not because it's provably optimal.
+
 ## 2026-09-10: v45 - carryover-cycle formula corrected to match the
 ## exact intended sequence
 

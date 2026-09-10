@@ -2952,3 +2952,18 @@ Farhan Fx` Python project's `learnings.md`.)
   positive: $37,978.73/$27,072.58/$22,789.36) - the most consistent
   multi-month result this project has produced so far. Still only three
   months; same standing caveat applies.
+
+- **2026-09-10 (continuous 3-month test, June+July+August as one
+  uninterrupted run, shipped v45 binary):** 2026.06.01-2026.08.27,
+  $30,000 deposit, compiled defaults, 100% real ticks. **Net $89,867.30,
+  equity drawdown 22.19%, balance drawdown 21.46%, PF 1.30, Sharpe 3.94,
+  123,927 trades.** The pattern from the 2-month continuous test
+  continues clearly: standalone-month worst case (August, 68.40% eqDD)
+  -> 2-month continuous (36.56%) -> 3-month continuous (22.19%) - later
+  drawdowns are a shrinking percentage of an equity base that keeps
+  compounding from earlier months' profit. $30k -> $89,867 profit
+  (roughly 3x) with a 22.19% max drawdown is the best and most
+  consistent multi-month result this project has produced. Still three
+  months of data on one broker/account snapshot; the standing
+  reproducibility and small-sample caveats from earlier in this file
+  apply in full - encouraging trend, not a guarantee.

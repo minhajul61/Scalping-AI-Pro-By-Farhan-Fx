@@ -3151,3 +3151,34 @@ Farhan Fx` Python project's `learnings.md`.)
   once" number to the cent** - net $88,681.57, equity drawdown 22.34%,
   PF 1.30, Sharpe 3.89, 124,316 trades - exact match, confirming the
   deletion is a clean, behavior-preserving removal of the rejected mode.
+
+- **2026-09-12 (new product: "Scalping X (FarhanFX)", explicit request -
+  a separate EA for the GoldTrap-replica logic, sibling "Scalping Ai
+  Pro By Farhan FX" kept unchanged):** after the full-fidelity GoldTrap
+  X replica (v52) showed a spectacular August result but the same July
+  weakness as everywhere else in this project, explicit request: name
+  this new logic as its own product rather than a mode inside the
+  existing one, keeping the original's own v49-equivalent default
+  completely untouched.
+
+  Forked `Scalping X (FarhanFX).mq5` from the v52 codebase (same file,
+  same `InpUseGoldTrapReplica` switch and all shared logic - not a
+  divergent copy) with three changes: `InpUseGoldTrapReplica` defaults
+  `true` instead of `false`, `InpMagicNumber` defaults `20270200`
+  instead of `20270115` (so both EAs can run on the same account
+  without colliding), and rebranded internals (dashboard title
+  "SCALPING X", log prefix `ScalpingX:`, position-comment tag
+  `ScalpingX-buy/sell-legN`). `InpUseGoldTrapReplica` can still be set
+  false in Scalping X to fall back to the sibling's own architecture for
+  direct comparison in the same file - the two products are switchable,
+  not forked apart in code, only in shipped default.
+
+  Compiled clean (0 errors/0 warnings). Verified on the shipped binary
+  (no `[TesterInputs]` override for `InpUseGoldTrapReplica`/
+  `InpMagicNumber`, report's own echoed `Inputs:` confirms `true`/
+  `20270200` came from the compiled defaults) - August reproduces the
+  earlier full-replica number to the cent: net $124,363.07, equity
+  drawdown 19.32%, PF 1.51, Sharpe 9.71, 66,607 trades. The sibling
+  "Scalping Ai Pro By Farhan FX.mq5" file itself was not touched at all
+  this session beyond the v52 additive changes already verified not to
+  alter its own default behavior (see the entries above).

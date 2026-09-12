@@ -1,42 +1,30 @@
 //+------------------------------------------------------------------+
-//|                                      GoldDualBasketDCA.mq5        |
-//|  XAUUSD M1 dual-basket grid/DCA EA. Simultaneous BUY + SELL       |
-//|  baskets (requires a hedging-mode account), each targeting a      |
-//|  floating-profit dollar amount, then closing and immediately      |
-//|  reopening. On a $-price adverse move past the last leg, adds a   |
-//|  martingale DCA leg - no total-leg cap. ATR-spike, higher-        |
-//|  timeframe trend, and economic-news filters gate DCA adds.        |
-//|  No stop-loss anywhere, ever, and no cap on how many legs a       |
-//|  basket can take on - per explicit, repeated user request (always |
-//|  martingale an against-trend basket until it hits its profit      |
-//|  target, no exceptions, no pauses). Confirmed 2026-08-24 as a      |
-//|  final decision, not a default: a real $20,000 backtest reproduced |
-//|  the same account-blowing mechanism as this EA's real 2026-08-24   |
-//|  live incident (unlimited legs into a sustained one-direction      |
-//|  move exhausts margin before a basket can average back to profit) |
-//|  - the user saw that result and chose to keep unlimited legs      |
-//|  anyway, risk understood and accepted. See ml\learnings.md.       |
-//|  An account login allow-list guards against the wrong-account     |
-//|  incident seen on this user's other bots.                         |
-//|                                                                    |
-//|  2026-08-12: simplified per explicit user request. Earlier         |
-//|  versions of this EA also had a daily self-tuner, a historical     |
-//|  market-regime detector, and a trained ML (ONNX) stuck-basket-     |
-//|  risk filter - rule-based/statistical additions layered on top     |
-//|  of the core logic below. All three, live-tested, changed          |
-//|  behavior in ways the user found harder to predict, and the ML     |
-//|  filter specifically sometimes deliberately paused martingale on   |
-//|  a risk read - which conflicted with the user's actual             |
-//|  requirement (always martingale through against-trend positions    |
-//|  until profit, unconditionally). Removed rather than just          |
-//|  disabled, so the input list matches exactly what the EA does.     |
-//|  See ml\learnings.md in this project for the full history if       |
-//|  this is ever revisited.                                          |
-//|                                                                    |
-//|  See E:\Straddle Ai Buy Sell Pending EA\StraddleAI_EA.mq5 for the  |
-//|  anti-pattern this was built to avoid: uniform lot sizing, no     |
-//|  per-basket cap, no floating-loss circuit breaker - an unlimited  |
-//|  ladder that blew up a demo account.                              |
+//|                                   Scalping X (FarhanFX).mq5       |
+//|  2026-09-12: a sibling product to "Scalping Ai Pro By Farhan FX"  |
+//|  in this same project folder, forked from its v52 codebase.       |
+//|  Shares the same dual-basket engine, but defaults              |
+//|  InpUseGoldTrapReplica=true - built from a real competing EA's    |
+//|  ("GoldTrap X", eagoldtrap.com) official Input Settings Guide PDF |
+//|  plus real trade-history analysis (account 256686): two-tier      |
+//|  grid spacing (S1/S2), two-tier distance-from-average-entry TP    |
+//|  (T1/T2), a plain lot multiplier capped by leg COUNT (not lot     |
+//|  size), a persistent GlobalVariable equity-lock (R1), a max-      |
+//|  basket-age exit that only ever fires non-negative (H1), and      |
+//|  broker-session/H4-boundary/news-importance pause filters.        |
+//|  Backtested (2026.08 alone): net $124,363, 19.32% equity DD,      |
+//|  Sharpe 9.71 - the best single-window result found in this        |
+//|  project's whole history. Same July weakness as everywhere else   |
+//|  in this project (net -$30,558, 101.72% DD) with this account's   |
+//|  real R1=100% setting, which is loose enough to barely limit      |
+//|  worst-case loss - see ml/learnings.md's 2026-09-12 entries for   |
+//|  the full comparison against the sibling EA's own v49 default,    |
+//|  an isolated-TP test, and a partial-combo test (both of which     |
+//|  blew up before this full replica was built).                     |
+//|  InpUseGoldTrapReplica can still be set to false to fall back to  |
+//|  the sibling EA's own proven architecture (flat $ TP, carryover-  |
+//|  cycle lot growth, adaptive-ATR DCA distance) for direct, same-    |
+//|  file comparison - the two products are switchable, not forked    |
+//|  apart in code, only in shipped default.                          |
 //+------------------------------------------------------------------+
 #property copyright "FarhanFX Algo"
 #property version   "1.00"
@@ -70,7 +58,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v52"
+#define EA_BUILD_VERSION "v1"
 
 #include <Trade\Trade.mqh>
 
@@ -117,7 +105,7 @@ enum ENUM_ACCOUNT_TYPE
 // the full comparison.
 
 input group "=== Account & Basic Settings ==="
-input ulong    InpMagicNumber        = 20270115;  // Magic Number
+input ulong    InpMagicNumber        = 20270200;  // Magic Number (deliberately different from the sibling "Scalping Ai Pro By Farhan FX" EA's 20270115, so both can run on the same account without colliding)
 input long     InpExpectedLogin      = 0;         // Account Login (0 = skip check - client sets their own)
 input ENUM_BROKER_PRESET InpBrokerPreset = BROKER_CUSTOM;   // Broker Preset (auto-sets Max Spread)
 input ENUM_ACCOUNT_TYPE  InpAccountType  = ACCOUNT_TYPE_USD; // Account Type (scales Max Spread for cent accounts)
@@ -301,7 +289,7 @@ input bool     InpShowChartWatermark = true; // Show Farhan FX Watermark On Main
 // (blew up worse) that motivated building this complete version instead
 // of guessing which piece mattered.
 input group "=== GoldTrap X Full Replica (test/comparison mode) ==="
-input bool     InpUseGoldTrapReplica = false; // Master Switch - Use The Full GoldTrap X Replica Below (off = our own proven default architecture, untouched)
+input bool     InpUseGoldTrapReplica = true;  // Master Switch - Use The Full GoldTrap X Replica Below (on by default for Scalping X - this product IS the replica logic; off falls back to the sibling EA's own architecture, still available for comparison)
 input double   InpGtSpacingS1        = 1.10;  // S1: Grid Spacing While Side Has 1-5 Legs ($ price)
 input double   InpGtSpacingS2        = 1.70;  // S2: Grid Spacing After The 5th Leg ($ price)
 input double   InpGtTpSingleLeg      = 1.00;  // T1: Profit Target, Single-Leg Basket ($ price distance from entry)
@@ -436,14 +424,14 @@ int OnInit()
 
    if(InpExpectedLogin != 0 && AccountInfoInteger(ACCOUNT_LOGIN) != InpExpectedLogin)
      {
-      PrintFormat("GoldDualBasketDCA: connected account %d does not match InpExpectedLogin %d. Refusing to run.",
+      PrintFormat("ScalpingX: connected account %d does not match InpExpectedLogin %d. Refusing to run.",
                   (int)AccountInfoInteger(ACCOUNT_LOGIN), (int)InpExpectedLogin);
       return(INIT_FAILED);
      }
 
    if((ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE) != ACCOUNT_MARGIN_MODE_RETAIL_HEDGING)
      {
-      Print("GoldDualBasketDCA: account is not in hedging mode. This EA needs simultaneous buy+sell "
+      Print("ScalpingX: account is not in hedging mode. This EA needs simultaneous buy+sell "
             "positions on the same symbol, which a netting account cannot hold. Refusing to run.");
       return(INIT_FAILED);
      }
@@ -456,7 +444,7 @@ int OnInit()
    g_atrHandle = iATR(_Symbol, PERIOD_M1, InpAtrPeriod);
    if(g_atrHandle == INVALID_HANDLE)
      {
-      Print("GoldDualBasketDCA: ATR handle creation failed.");
+      Print("ScalpingX: ATR handle creation failed.");
       return(INIT_FAILED);
      }
 
@@ -474,10 +462,10 @@ int OnInit()
       MqlCalendarValue diag[];
       int diagN = CalendarValueHistory(diag, TimeCurrent() - 7 * 24 * 3600, TimeCurrent() + 7 * 24 * 3600, NULL, InpNewsCurrency);
       if(diagN < 0)
-         PrintFormat("GoldDualBasketDCA: news calendar diagnostic FAILED (err=%d) - the News Filter will silently do nothing until this is fixed.",
+         PrintFormat("ScalpingX: news calendar diagnostic FAILED (err=%d) - the News Filter will silently do nothing until this is fixed.",
                      GetLastError());
       else
-         PrintFormat("GoldDualBasketDCA: news calendar diagnostic OK - found %d %s event(s) in the past/next 7 days "
+         PrintFormat("ScalpingX: news calendar diagnostic OK - found %d %s event(s) in the past/next 7 days "
                      "(this check alone does not affect trading, it only confirms calendar access works).",
                      diagN, InpNewsCurrency);
      }
@@ -772,7 +760,7 @@ void ApplyBasketTP(ENUM_BASKET_SIDE side)
          continue;
 
       if(!trade.PositionModify(ticket, 0, tp)) // 0 = no SL, per the standing no-SL-ever policy
-         PrintFormat("GoldDualBasketDCA: failed to set TP on ticket %d (target price %.2f): retcode=%d %s - tick-based close remains as backup",
+         PrintFormat("ScalpingX: failed to set TP on ticket %d (target price %.2f): retcode=%d %s - tick-based close remains as backup",
                      (int)ticket, tp, trade.ResultRetcode(), trade.ResultRetcodeDescription());
      }
   }
@@ -824,13 +812,13 @@ void CloseBasket(ENUM_BASKET_SIDE side, string reason, double displayProfit = 0.
          DeleteLegMarker(side, ticket);
         }
       else
-         PrintFormat("GoldDualBasketDCA: failed to close ticket %d (%s): retcode=%d %s",
+         PrintFormat("ScalpingX: failed to close ticket %d (%s): retcode=%d %s",
                      (int)ticket, reason, trade.ResultRetcode(), trade.ResultRetcodeDescription());
      }
 
    if(closedCount > 0)
      {
-      PrintFormat("GoldDualBasketDCA: %s basket closed (%d leg(s)) - %s",
+      PrintFormat("ScalpingX: %s basket closed (%d leg(s)) - %s",
                   (side == SIDE_BUY ? "BUY" : "SELL"), closedCount, reason);
       DrawCloseMarker(side, lastClosePrice, displayProfit);
      }
@@ -895,7 +883,7 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
    // every DCA trigger until the real cause is confirmed from real data
    // instead of guessed at again.
    if(adverse)
-      PrintFormat("GoldDualBasketDCA: DCA-DIAG %s adverse=true bid=%.3f ask=%.3f lastLegEntry=%.3f dcaDistanceInput=%.3f legCount=%d lastLegTime=%s",
+      PrintFormat("ScalpingX: DCA-DIAG %s adverse=true bid=%.3f ask=%.3f lastLegEntry=%.3f dcaDistanceInput=%.3f legCount=%d lastLegTime=%s",
                   (side == SIDE_BUY ? "BUY" : "SELL"), bid, ask, b.lastLegEntry, dcaDist, b.legCount,
                   TimeToString(b.lastLegTime, TIME_SECONDS));
 
@@ -1043,7 +1031,7 @@ void OpenLeg(ENUM_BASKET_SIDE side, int legIndexForSizing, double previousLegLot
 
    double price;
    bool ok;
-   string comment = StringFormat("FarhanFx-%s-leg%d", (side == SIDE_BUY ? "buy" : "sell"), legIndexForSizing + 1);
+   string comment = StringFormat("ScalpingX-%s-leg%d", (side == SIDE_BUY ? "buy" : "sell"), legIndexForSizing + 1);
 
    // GoldTrap replica uses separate magic numbers per side (M1/M2) - set
    // right before sending, since CTrade's magic is one shared stateful
@@ -1066,7 +1054,7 @@ void OpenLeg(ENUM_BASKET_SIDE side, int legIndexForSizing, double previousLegLot
      }
 
    if(!ok)
-      PrintFormat("GoldDualBasketDCA: %s leg open failed (lot=%.2f): retcode=%d %s",
+      PrintFormat("ScalpingX: %s leg open failed (lot=%.2f): retcode=%d %s",
                   (side == SIDE_BUY ? "BUY" : "SELL"), lots, trade.ResultRetcode(), trade.ResultRetcodeDescription());
    else
       DrawLegMarker(side, trade.ResultOrder(), legIndexForSizing + 1, price, lots);
@@ -1241,7 +1229,7 @@ void LogRecentClosedDeals()
       // a SELL deal closes a BUY leg, a BUY deal closes a SELL leg.
       string closedSide = (dealType == DEAL_TYPE_SELL) ? "BUY leg" : "SELL leg";
 
-      PrintFormat("GoldDualBasketDCA: %s closed (deal #%d) - profit=%.2f swap=%.2f commission=%.2f net=%.2f",
+      PrintFormat("ScalpingX: %s closed (deal #%d) - profit=%.2f swap=%.2f commission=%.2f net=%.2f",
                   closedSide, (int)dealTicket, profit, swap, commission, profit + swap + commission);
      }
 
@@ -1594,7 +1582,7 @@ void ForceCloseOnDailyLossLimit()
   {
    if(!g_dailyLossLimitLoggedToday)
      {
-      PrintFormat("GoldDualBasketDCA: DAILY LOSS LIMIT HIT (%.1f%% of day-start balance) - force-closing both baskets.",
+      PrintFormat("ScalpingX: DAILY LOSS LIMIT HIT (%.1f%% of day-start balance) - force-closing both baskets.",
                   InpDailyLossLimitPercent);
       g_dailyLossLimitLoggedToday = true;
      }
@@ -1651,7 +1639,7 @@ void GtTriggerEquityLock()
   {
    if(!GtEquityLocked())
      {
-      PrintFormat("GoldDualBasketDCA: GoldTrap replica R1 EQUITY LOCK TRIGGERED (>= %.1f%% loss from saved baseline) - closing everything, persistent lock set.",
+      PrintFormat("ScalpingX: GoldTrap replica R1 EQUITY LOCK TRIGGERED (>= %.1f%% loss from saved baseline) - closing everything, persistent lock set.",
                   InpGtEquityLockPercent);
       GlobalVariableSet(GtLockVarName(), 1);
      }
@@ -1919,7 +1907,7 @@ void UpdateDashboard()
    // Icon (created once in CreateDashboard()) sits at (x-6, y-6), 64x47px -
    // text starts to its right, then drops back to the full-width left
    // margin once the icon's height has cleared.
-   DbLabel("Title", x + 70, y, "SCALPING AI PRO", clrWhite, 9);
+   DbLabel("Title", x + 70, y, "SCALPING X", clrWhite, 9);
    y += lh;
    // Own line, not packed onto the title line - a fixed pixel offset for a
    // second same-line label overlapped the first on real hardware (font

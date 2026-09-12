@@ -1,7 +1,32 @@
 # XAUUSD Dual Basket DCA EA
 
-This folder now holds **three independent EAs** - read this section first
+This folder now holds **four independent EAs** - read this section first
 to know which one you're looking at.
+
+## 2026-09-12: fourth EA - `Scalping X (FarhanFX).mq5` - a sibling
+## product built around a real competing EA's design, GoldTrap-replica
+## logic on by default
+
+Forked from `Scalping Ai Pro By Farhan FX.mq5`'s v52 codebase (same
+file, same `InpUseGoldTrapReplica` switch and shared logic - not a
+divergent copy) with three changes: `InpUseGoldTrapReplica` defaults
+`true` instead of `false`, `InpMagicNumber` defaults `20270200` instead
+of `20270115` (so both EAs can run on the same account without
+colliding), and rebranded internals (dashboard title "SCALPING X", log
+prefix `ScalpingX:`). Explicit request, following the full GoldTrap-
+replica backtest below - keeps the original EA's own proven v49-
+equivalent default completely untouched as its own separate product,
+rather than folding the new logic into it.
+
+Verified on the shipped binary: August reproduces the full-replica
+number to the cent (net $124,363.07, equity drawdown 19.32%, PF 1.51,
+Sharpe 9.71, 66,607 trades - the best single-window result found in
+this project's whole history). Same July weakness as everywhere else
+in this project applies (net -$30,558, 101.72% eqDD) - this account's
+real R1=100% equity-lock setting is loose enough to barely limit
+worst-case loss. `InpUseGoldTrapReplica` can be set `false` in this
+same file to fall back to the sibling's own architecture for direct,
+same-file comparison. Full detail in `ml/learnings.md`.
 
 ## 2026-09-11 (v48/v49): "one side at a time" tested, always-dual
 ## confirmed as final

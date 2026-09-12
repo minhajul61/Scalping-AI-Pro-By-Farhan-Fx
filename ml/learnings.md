@@ -3260,3 +3260,34 @@ Farhan Fx` Python project's `learnings.md`.)
   git history. Re-verified on the shipped binary: August reproduces
   $128,372.39/18.80% eqDD/PF 1.52/Sharpe 10.68 to the cent, confirming
   the removal is clean.
+
+## 2026-09-13: T4/F5 defaults corrected to match the real GoldTrap X account (256686)
+
+  User cross-checked Scalping X's compiled defaults against the real
+  account's Inputs screenshot (T2=30.0, T4=25, F5=FALSE) and asked
+  whether they already matched. They did not, on two of the three:
+
+  ```
+  code   input                       was (wrong)   real account   fixed?
+  T2     InpGtTpMultiLeg             0.30          30 raw (=0.30) already matched
+  T4     InpGtSessionOpenMinutes     60            25             fixed -> 25
+  F5     InpGtUseH4BoundaryFilter    true          FALSE          fixed -> false
+  ```
+
+  Corrected both defaults, recompiled clean (0 errors/0 warnings),
+  redeployed the .ex5/.mq5 to the D0E8 test terminal's Experts folder
+  (root + Advisors), and re-ran the August 2026.08.01-08.27 backtest.
+
+  **Result: numbers came back byte-identical to the previous pure-copy
+  run** - $128,372.39 net, 18.80% eqDD, PF 1.52, Sharpe 10.68, 69,619
+  trades. Neither T4 (session-open pause window shrinking 60->25 min)
+  nor F5 (turning the H4-boundary pause off entirely) changed a single
+  outcome in August - the F1 broker-session filter and the news filter
+  already dominate whatever those two windows would have blocked, at
+  least in this specific month. Reported honestly rather than assumed:
+  a "no visible difference" result is still a real, verified result,
+  not a wasted test.
+
+  All other GoldTrap X inputs (S1/S2/E1/R1/P1/H1/M1/M2/F1/T3/F3/DT1/F4/
+  N1/T5/T6/T7/T8) were already confirmed matching the real account from
+  the earlier PDF-driven build - this closes out the last two known gaps.

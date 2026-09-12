@@ -149,7 +149,7 @@ input ulong    InpGtMagicSell        = 528101;  // M2: Magic Number, SELL Side
 input group "=== GoldTrap X - Session, Daily & News (F1,T3,T4 / F3,DT1 / F4,N1,T5,T6) ==="
 input bool     InpGtUseSessionFilter = true;  // F1: Pause New Cycles Near Broker Session Boundaries
 input int      InpGtSessionCloseMinutes = 60; // T3: Minutes Before Session Close To Pause
-input int      InpGtSessionOpenMinutes  = 60; // T4: Minutes After Session Open To Pause
+input int      InpGtSessionOpenMinutes  = 25; // T4: Minutes After Session Open To Pause
 input bool     InpGtUseDailyTarget   = false; // F3: Enable The Daily Profit Target
 input double   InpGtDailyTargetAmount = 0;    // DT1: Daily Profit Target, Account Currency (0 = off even if F3 is true)
 input bool     InpGtUseNewsFilter    = true;  // F4: Enable The MT5 Economic Calendar News Filter
@@ -159,7 +159,7 @@ input int      InpGtNewsMinutesBefore = 30;   // T5: Minutes Before A Qualifying
 input int      InpGtNewsMinutesAfter  = 30;   // T6: Minutes After A Qualifying News Event To Pause
 
 input group "=== GoldTrap X - H4 Boundary (F5, T7, T8) ==="
-input bool     InpGtUseH4BoundaryFilter = true; // F5: Pause New Cycles Near H4 Candle Boundaries (00/04/08/12/16/20 server time)
+input bool     InpGtUseH4BoundaryFilter = false; // F5: Pause New Cycles Near H4 Candle Boundaries (00/04/08/12/16/20 server time)
 input int      InpGtH4CloseMinutes   = 15;    // T7: Minutes Before H4 Close To Pause
 input int      InpGtH4OpenMinutes    = 15;    // T8: Minutes After H4 Open To Pause
 

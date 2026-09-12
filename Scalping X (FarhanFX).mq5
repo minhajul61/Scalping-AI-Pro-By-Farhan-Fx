@@ -1,30 +1,34 @@
 //+------------------------------------------------------------------+
 //|                                   Scalping X (FarhanFX).mq5       |
 //|  2026-09-12: a sibling product to "Scalping Ai Pro By Farhan FX"  |
-//|  in this same project folder, forked from its v52 codebase.       |
-//|  Shares the same dual-basket engine, but defaults              |
-//|  InpUseGoldTrapReplica=true - built from a real competing EA's    |
-//|  ("GoldTrap X", eagoldtrap.com) official Input Settings Guide PDF |
-//|  plus real trade-history analysis (account 256686): two-tier      |
-//|  grid spacing (S1/S2), two-tier distance-from-average-entry TP    |
-//|  (T1/T2), a plain lot multiplier capped by leg COUNT (not lot     |
-//|  size), a persistent GlobalVariable equity-lock (R1), a max-      |
-//|  basket-age exit that only ever fires non-negative (H1), and      |
-//|  broker-session/H4-boundary/news-importance pause filters.        |
-//|  Backtested (2026.08 alone): net $124,363, 19.32% equity DD,      |
-//|  Sharpe 9.71 - the best single-window result found in this        |
-//|  project's whole history. Same July weakness as everywhere else   |
-//|  in this project (net -$30,558, 101.72% DD) with this account's   |
-//|  real R1=100% setting, which is loose enough to barely limit      |
-//|  worst-case loss - see ml/learnings.md's 2026-09-12 entries for   |
-//|  the full comparison against the sibling EA's own v49 default,    |
-//|  an isolated-TP test, and a partial-combo test (both of which     |
-//|  blew up before this full replica was built).                     |
-//|  InpUseGoldTrapReplica can still be set to false to fall back to  |
-//|  the sibling EA's own proven architecture (flat $ TP, carryover-  |
-//|  cycle lot growth, adaptive-ATR DCA distance) for direct, same-    |
-//|  file comparison - the two products are switchable, not forked    |
-//|  apart in code, only in shipped default.                          |
+//|  in this same project folder - a pure, exact port of a real       |
+//|  competing EA's ("GoldTrap X", eagoldtrap.com) documented design, |
+//|  built from its official Input Settings Guide PDF plus real       |
+//|  trade-history analysis (account 256686): two-tier grid spacing   |
+//|  (S1/S2), two-tier distance-from-average-entry TP (T1/T2), a      |
+//|  plain lot multiplier capped by leg COUNT, not lot size (E1/N), a |
+//|  persistent GlobalVariable equity-lock (R1), a max-basket-age     |
+//|  exit that only ever fires non-negative (H1), and broker-session/ |
+//|  H4-boundary/news-importance pause filters (F1/T3/T4, F4/N1/T5/   |
+//|  T6, F5/T7/T8). Originally forked from the sibling EA's codebase  |
+//|  with a togglable replica mode; per explicit request ("hubuhu     |
+//|  kuno poribartan charai GoldTrap X-ke, amader kichu use korbe na" |
+//|  - copy GoldTrap X exactly, use nothing of ours) the toggle and   |
+//|  every piece of the sibling's own architecture (adaptive-ATR DCA  |
+//|  distance, carryover-cycle lot growth, the flat $ profit target,  |
+//|  the ATR-spike filter, server-clock trading hours, the daily      |
+//|  equity-percent loss limit, the manual news-window block) were    |
+//|  deleted entirely, not hidden. Only basic MT5 account plumbing    |
+//|  (Magic/Login/Broker-preset/Max-Spread) and the on-chart status   |
+//|  display are shared infrastructure, not the sibling's trading     |
+//|  logic. Backtested (2026.08 alone, the full-replica combo before  |
+//|  this pure-copy rewrite): net $124,363, 19.32% equity DD, Sharpe  |
+//|  9.71 - the best single-window result found in this project's     |
+//|  whole history. Same July weakness as everywhere else in this     |
+//|  project (net -$30,558, 101.72% DD) with this account's real      |
+//|  R1=100% setting, which is loose enough to barely limit worst-    |
+//|  case loss - see ml/learnings.md's 2026-09-12 entries for the     |
+//|  full comparison history.                                          |
 //+------------------------------------------------------------------+
 #property copyright "FarhanFX Algo"
 #property version   "1.00"
@@ -93,171 +97,74 @@ enum ENUM_ACCOUNT_TYPE
    ACCOUNT_TYPE_USC = 1  // Cent (USC)
   };
 
-// 2026-09-11: a "one side at a time" test mode (ENUM_TRADE_SIDE/
-// InpTradeSide - either side could bootstrap, just never both open
-// together) was built, backtested, and compared against the always-
-// dual-simultaneous default on the continuous 3-month test: net
-// $45,382.70 vs $88,681.57, equity drawdown almost unchanged (21.70%
-// vs 22.34% - the worst-case swing barely improved) while profit
-// roughly halved. Explicit decision after seeing that result: always
-// trade both sides simultaneously - deleted the toggle and the mode
-// entirely (not left as a disabled option) - see ml/learnings.md for
-// the full comparison.
+// 2026-09-12, explicit request ("hubuhu kuno poribartan charai GoldTrap
+// X-ke, amader kichu use korbe na" - copy GoldTrap X exactly, with no
+// changes, use nothing of ours): this file was originally forked from
+// the sibling "Scalping Ai Pro By Farhan FX" EA with a togglable
+// replica mode layered on top of that EA's own architecture. Per this
+// explicit instruction, the toggle and every piece of that architecture
+// (adaptive-ATR DCA distance, carryover-cycle lot growth, the flat $
+// profit target, the ATR-spike filter, trading-hours-by-server-clock,
+// the daily equity-percent loss limit, and the manual news-window
+// block) have been deleted entirely - not hidden, not left as a
+// fallback option. Every remaining input below is a direct port of a
+// GoldTrap X input from its official Input Settings Guide PDF (letter
+// code noted in each comment) plus real trade-history analysis of
+// account 256686 - nothing here belongs to the sibling EA's own design.
+// Only Magic Number/Login/Broker-preset/Max-Spread (basic MT5 account
+// plumbing every EA needs regardless of strategy, not a trading-logic
+// choice) and the Dashboard/Chart-Visuals display toggles (F2's
+// intent - GoldTrap X shows its own on-chart status panel too, per the
+// PDF, though its exact visual design isn't documented so this reuses
+// this project's own dashboard renderer for that purpose) were kept as
+// non-strategy infrastructure. See ml/learnings.md's 2026-09-12 entries
+// for the full history (isolated-TP test, partial-combo test, and the
+// full-replica backtest numbers) that led to this file existing at all.
 
 input group "=== Account & Basic Settings ==="
-input ulong    InpMagicNumber        = 20270200;  // Magic Number (deliberately different from the sibling "Scalping Ai Pro By Farhan FX" EA's 20270115, so both can run on the same account without colliding)
+input ulong    InpMagicNumber        = 20270200;  // Magic Number (deliberately different from the sibling "Scalping Ai Pro By Farhan FX" EA's 20270115, so both can run on the same account without colliding) - overridden per-side by InpGtMagicBuy/InpGtMagicSell below (M1/M2) once trading starts
 input long     InpExpectedLogin      = 0;         // Account Login (0 = skip check - client sets their own)
 input ENUM_BROKER_PRESET InpBrokerPreset = BROKER_CUSTOM;   // Broker Preset (auto-sets Max Spread)
 input ENUM_ACCOUNT_TYPE  InpAccountType  = ACCOUNT_TYPE_USD; // Account Type (scales Max Spread for cent accounts)
 input int      InpMaxSpreadPoints    = 300;       // Max Spread (points) - used when Broker Preset = Custom
 
-// 2026-09-11, explicit request: base lot, DCA distance, the adaptive
-// multiplier, and lot multiplier made visible again (input, not const)
-// so the user can choose them directly - these are the ones a user
-// would reasonably want to size per their own account/risk appetite.
-input group "=== Basket & DCA (user-adjustable) ==="
-input double   InpInitialLot            = 0.01;   // Initial Lot Size (base lot - how big the very first leg of each basket is)
-input double   InpDcaDistancePrice  = 1.2;        // DCA Distance ($) - base value; scaled up live since InpUseAdaptiveDcaDistance is on
-input bool     InpUseAdaptiveDcaDistance = true; // Widen DCA Distance During High Volatility (ATR-ratio based) - 2026-09-04 default, see ml/learnings.md for the sweep and fragility caveat
-input double   InpAdaptiveDcaAtrMult     = 1.5;   // Adaptive DCA Distance Multiplier (effective distance = base x max(1, currentATR/baselineATR x this))
-input double   InpLotMultiplier     = 2.0;        // Lot Multiplier
+input group "=== GoldTrap X - Core (V1, N, S1, S2, T1, T2, E1) ==="
+input double   InpInitialLot         = 0.01;  // V1: Starting Lot For Every New Cycle
+input int      InpGtMaxGridLegs      = 17;    // N: Maximum Legs Per Side (hard cap, matches this account's real setting)
+input double   InpGtSpacingS1        = 1.10;  // S1: Grid Spacing While Side Has 1-5 Legs ($ price)
+input double   InpGtSpacingS2        = 1.70;  // S2: Grid Spacing After The 5th Leg ($ price)
+input double   InpGtTpSingleLeg      = 1.00;  // T1: Profit Target, Single-Leg Basket ($ price distance from entry)
+input double   InpGtTpMultiLeg       = 0.30;  // T2: Basket Target, 2+ Legs ($ price distance from weighted avg entry)
+input double   InpGtLotMultiplier    = 1.68;  // E1: Grid Lot Multiplier (applied to the latest leg, no reset)
 
-// 2026-09-11, explicit request ("kaj er setting chara sob hide kore
-// final koro" - hide everything except the settings that actually need
-// touching, finalize it): every trading-logic parameter below this
-// point (profit-target, carryover-cycle, ATR spike filter) has now been
-// researched, backtested, and swept exhaustively this session - see
-// ml/learnings.md for the full history behind each value. These are no
-// longer `input` (so they no longer clutter the Inputs dialog a client
-// sees when attaching the EA) - they're fixed constants at their final,
-// verified values. To change any of these again, edit the value here
-// directly and recompile - same as changing any other piece of
-// finalized logic.
-// 2026-09-10, explicit request: reset the profit-target system to a
-// flat $ target, matching how most standard/retail martingale-grid EAs
-// actually do it (see ml/learnings.md for the research this was based
-// on). 2026-09-12: real-trade-history analysis of a competing EA
-// ("GoldTrap X") found IT uses a fixed price-DISTANCE target instead
-// (two tiers - T1 for a single-position cycle, T2 for 2+ positions) -
-// tested that mechanism both isolated and as part of a full replica of
-// their whole design, and both blew up on our data (see ml/learnings.md's
-// 2026-09-12 entries) - it is NOT adopted as our own default, only
-// available inside InpUseGoldTrapReplica (InpGtTpSingleLeg/
-// InpGtTpMultiLeg) for a fair, isolated-variable-free comparison. This
-// flat $ target remains our own, separately-proven default.
-const double   InpBasketProfitTargetUSD = 1.0;    // Take Profit ($) - flat, same for every leg, never grows or gets overridden
-const bool     InpUseServerSideTP       = true;   // Attach Real TP To Each Leg (fires on the broker's server, less slippage than the EA closing legs one-by-one)
+input group "=== GoldTrap X - Protection & Execution (R1, P1, H1) ==="
+input double   InpGtEquityLockPercent = 100.0; // R1: Equity Loss Limit, % Of Saved Baseline (close everything + persistent lock; 0 or below = off)
+input int      InpGtMaxDeviationPoints = 3;   // P1: Max Execution Deviation (broker points)
+input int      InpGtMaxBasketAgeHours = 0;    // H1: Max Basket Age, Hours (0 = off; after this, closes only once floating P/L is non-negative)
 
-// 2026-09-07: three account-level circuit breakers removed entirely by
-// explicit request - InpMaxTotalBasketVolume, InpStopOutCooldownHours,
-// InpMinMarginLevelPercent. All three were added earlier this project
-// specifically in response to real live account blowups (see git
-// history / ml/learnings.md's 2026-08-29, 2026-08-31 and 2026-09
-// entries). Recoverable from git history if ever wanted back.
+input group "=== GoldTrap X - Identity (M1, M2) ==="
+input ulong    InpGtMagicBuy         = 837490;  // M1: Magic Number, BUY Side
+input ulong    InpGtMagicSell        = 528101;  // M2: Magic Number, SELL Side
 
-const int      InpMinSecondsBetweenLegs = 5;      // Min Seconds Between Legs (safety net vs a cascade)
-// 2026-09-11: InpMaxLegsPerBar deleted entirely (not just hidden) -
-// tested capped at every value tried and made things worse every time
-// (same mechanism as slowing InpMinSecondsBetweenLegs down - both
-// throttle the fast re-averaging this design depends on), so the
-// feature itself was never actually useful, not just currently off.
-const double   InpMaxSingleLegLot   = 17;         // Max Single-Leg Lot Size (0 = unlimited - caps martingale growth without slowing the add cadence; 2026-08-28 default)
+input group "=== GoldTrap X - Session, Daily & News (F1,T3,T4 / F3,DT1 / F4,N1,T5,T6) ==="
+input bool     InpGtUseSessionFilter = true;  // F1: Pause New Cycles Near Broker Session Boundaries
+input int      InpGtSessionCloseMinutes = 60; // T3: Minutes Before Session Close To Pause
+input int      InpGtSessionOpenMinutes  = 60; // T4: Minutes After Session Open To Pause
+input bool     InpGtUseDailyTarget   = false; // F3: Enable The Daily Profit Target
+input double   InpGtDailyTargetAmount = 0;    // DT1: Daily Profit Target, Account Currency (0 = off even if F3 is true)
+input bool     InpGtUseNewsFilter    = true;  // F4: Enable The MT5 Economic Calendar News Filter
+input string   InpGtNewsCurrency     = "USD"; // News Currency (not a named PDF input - needed by MT5's calendar API to scope the check)
+input ENUM_CALENDAR_EVENT_IMPORTANCE InpGtNewsMinPriority = CALENDAR_IMPORTANCE_MODERATE; // N1: Minimum News Priority To Block (matches "Medium" in the PDF)
+input int      InpGtNewsMinutesBefore = 30;   // T5: Minutes Before A Qualifying News Event To Pause
+input int      InpGtNewsMinutesAfter  = 30;   // T6: Minutes After A Qualifying News Event To Pause
 
-// 2026-09-06/07/10/11, carryover-cycle lot sizing - N flat-doubling legs
-// then a growing 4th leg that doesn't reset (see NextCarryoverLotSize()
-// and the call site in ManageBasketEntries() for the exact formula,
-// corrected 2026-09-10 to match an exact worked example: base
-// 0.01/0.02/0.04 fixed forever, growing leg 0.08 in cycle 1, then
-// 0.16/0.32/0.64/1.28/... from cycle 2 onward). Set as the default
-// 2026-09-07 after it was the more consistently positive lever of
-// everything tested that day - full before/after numbers, including
-// the honest fragility caveats, in ml/learnings.md. 2026-09-11: the
-// on/off toggle and the older plain "reset every InpMaxLegsPerBasket
-// legs" cycle it used to fall back to were both deleted entirely - this
-// is now the only lot-sizing cycle shape, unconditionally.
-const int      InpCarryoverBaseLegs   = 3;        // Base Legs Per Cycle (flat doubling sequence length before the carryover leg)
-const double   InpCarryoverStartLot   = 0.16;     // Carryover Leg Starting Lot (from cycle 2 onward - cycle 1's growing leg continues the base doubling instead)
-const double   InpCarryoverGrowthMult = 2.0;      // Carryover Leg Growth Multiplier (doubles the carryover leg every cycle from cycle 2 onward)
+input group "=== GoldTrap X - H4 Boundary (F5, T7, T8) ==="
+input bool     InpGtUseH4BoundaryFilter = true; // F5: Pause New Cycles Near H4 Candle Boundaries (00/04/08/12/16/20 server time)
+input int      InpGtH4CloseMinutes   = 15;    // T7: Minutes Before H4 Close To Pause
+input int      InpGtH4OpenMinutes    = 15;    // T8: Minutes After H4 Open To Pause
 
-// 2026-09-12: the lot-growth mode switch folded into the single
-// InpUseGoldTrapReplica master switch (see that input group below)
-// rather than staying a separate standalone toggle - when replica mode
-// is on, ManageBasketEntries() uses a plain geometric sequence
-// (InpInitialLot x InpGtLotMultiplier^legCount, no reset, no carryover
-// leg) capped at InpGtMaxGridLegs total legs per side, matching GoldTrap
-// X's "N" parameter (leg COUNT cap, not our own InpMaxSingleLegLot's LOT
-// SIZE cap - a different mechanism). Isolated-TP and partial-combo tests
-// both blew up (ml/learnings.md, 2026-09-12) before this full replica
-// was built to give the fairest possible comparison.
-
-// 2026-09-11: InpTradeOnCandleCloseOnly deleted entirely (not just
-// hidden) - it was off by default, and the 2026-09-07 sweep found it
-// underperformed on its own combined with carryover-cycle (which is now
-// the permanent, only lot-sizing shape) versus either lever alone - see
-// ml/learnings.md. Never part of the winning configuration.
-
-const bool             InpUseAtrSpikeFilter = true;      // Use ATR Spike Filter
-const int              InpAtrPeriod         = 14;        // ATR Period
-const int              InpAtrBaselineBars   = 20;        // ATR Baseline Bars
-const double           InpMaxAtrRatio       = 1.5;       // Max ATR Ratio (spike threshold)
-// 2026-09-07: the entire trend-filter subsystem was removed entirely
-// (not just hidden) by explicit request, after a July cross-check
-// showed it didn't hold up - see ml/learnings.md's 2026-09-07 entries
-// and git history if a future idea wants to revisit trend-gating.
-
-input group "=== News Filter ==="
-input bool     InpUseNewsFilter       = true;   // Use News Filter (auto calendar - live/demo only)
-input string   InpNewsCurrency        = "USD";  // News Currency
-input int      InpNewsMinutesBefore   = 30;     // Minutes Before News
-input int      InpNewsMinutesAfter    = 30;     // Minutes After News
-input bool     InpUseManualNewsWindow = false;  // Also Block A Specific Date/Time
-input string   InpManualNewsStart     = "";     // Manual Block Start (yyyy.mm.dd hh:mi)
-input string   InpManualNewsEnd       = "";     // Manual Block End (yyyy.mm.dd hh:mi)
-
-input group "=== Trading Hours ==="
-// 2026-08-21, explicit request: new entries only from this hour onward each
-// day (broker/server time, i.e. the same clock TimeCurrent() already uses
-// everywhere else in this EA) - blocked before it, resumes automatically
-// at the same hour the next day. Existing baskets keep being managed
-// (closed at target, etc.) at any hour - this only gates NEW entries,
-// same non-blocking pattern as every other gate in this EA.
-input bool     InpUseTradingHours   = true; // Only Trade After This Hour Each Day
-// 2026-08-29, explicit request: start trading 3h30m after the weekly
-// market open (IST 3:30 AM), i.e. IST 07:00 - added minute precision
-// since the hour-only input couldn't land on a half-hour IST time.
-// CXM Direct's server clock is assumed GMT+3 (the standard MT5-broker
-// convention, same as Exness/IC Markets) - NOT independently confirmed
-// for this specific broker/account. IST = GMT+5:30, so IST 07:00 =
-// server 04:30, which is what these two defaults are set to. If the
-// real offset turns out to be different, these two inputs are exactly
-// what needs adjusting - tell the actual broker-time-vs-IST difference
-// once and both values get corrected precisely, no other code changes.
-input int      InpTradingStartHour   = 4;    // Trading Start Hour (0-23, broker/server time)
-input int      InpTradingStartMinute = 30;   // Trading Start Minute (0-59, broker/server time)
-
-input group "=== Daily Profit Target ==="
-input bool     InpUseDailyProfitTarget = false; // Stop New Trades After Reaching This Daily Profit
-input double   InpDailyProfitTargetUSD = 50.0;  // Daily Profit Target ($) - resumes automatically next day
-
-input group "=== Daily Loss Limit ==="
-// Research into what separates surviving martingale/grid EAs from ones
-// that blow up consistently names one feature above the others: "a hard
-// stop loss enforced at the portfolio level - if cumulative drawdown
-// hits the defined threshold, all positions close and the EA stops."
-// This EA had a daily PROFIT target (above) but nothing on the loss
-// side until now - added 2026-08-21. Off by default since it's new
-// behavior that didn't exist before; the user should turn it on
-// deliberately, not have it silently change how live accounts behave.
-// Unlike DailyTargetHit() (which deliberately uses realized balance so
-// it doesn't flicker on floating P/L noise), this checks EQUITY - a
-// martingale basket's actual danger is in floating loss building up
-// before anything is realized, so the whole point of this circuit
-// breaker is to react to that, not wait for it to become permanent.
-input bool     InpUseDailyLossLimit     = false; // Force-Close Everything If Daily Loss Hits This %
-input double   InpDailyLossLimitPercent = 5.0;   // Daily Loss Limit (% of day-start balance, checked against live equity)
-
-input group "=== Dashboard ==="
-input bool     InpShowDashboard = true;   // Show Dashboard
+input group "=== Dashboard (F2 - on-chart status display) ==="
+input bool     InpShowDashboard = true;   // F2: Show On-Chart Status Panel
 input int      InpDashboardX    = 10;     // Dashboard X Position
 input int      InpDashboardY    = 20;     // Dashboard Y Position
 input bool     InpSetWhiteChartTheme = false; // White Chart Theme (off = dark, matches the Farhan FX brand's black logo background)
@@ -267,47 +174,16 @@ input bool     InpShowLegMarkers    = true; // Show DCA Leg Markers On Chart
 input bool     InpShowCloseMarkers  = true; // Show Basket-Closed Markers On Chart
 input bool     InpShowChartWatermark = true; // Show Farhan FX Watermark On Main Chart
 
-// 2026-09-12, explicit request ("full copy koro, kichu bad diba na" - a
-// complete copy, leave nothing out): a full, faithful replica of a real
-// competing EA ("GoldTrap X", eagoldtrap.com), built from its official
-// Input Settings Guide PDF plus real trade-history analysis of account
-// 256686 - every input/mechanism the PDF documents, ported under one
-// master switch so it never touches our own (separately proven) default
-// architecture when off. When InpUseGoldTrapReplica is true, this
-// REPLACES: the DCA-distance system (S1/S2 two-tier spacing instead of
-// InpDcaDistancePrice/adaptive-ATR), the profit target (T1/T2 distance-
-// from-average-entry instead of the flat InpBasketProfitTargetUSD), and
-// the lot-growth shape (plain E1 multiplier capped at N legs instead of
-// carryover-cycle) - and ADDS mechanisms our own design never had: an
-// equity-loss kill switch with a persistent lock (R1), a max-basket-age
-// time exit that only ever fires non-negative (H1), separate magic
-// numbers per side (M1/M2), a max execution-deviation setting (P1), and
-// three new pause-only filters (broker session boundary, H4 candle
-// boundary, and a minimum-news-importance threshold) on top of the
-// news/hours filters we already have. See ml/learnings.md's 2026-09-12
-// entries for the isolated-TP test (blew up) and partial-combo test
-// (blew up worse) that motivated building this complete version instead
-// of guessing which piece mattered.
-input group "=== GoldTrap X Full Replica (test/comparison mode) ==="
-input bool     InpUseGoldTrapReplica = true;  // Master Switch - Use The Full GoldTrap X Replica Below (on by default for Scalping X - this product IS the replica logic; off falls back to the sibling EA's own architecture, still available for comparison)
-input double   InpGtSpacingS1        = 1.10;  // S1: Grid Spacing While Side Has 1-5 Legs ($ price)
-input double   InpGtSpacingS2        = 1.70;  // S2: Grid Spacing After The 5th Leg ($ price)
-input double   InpGtTpSingleLeg      = 1.00;  // T1: Profit Target, Single-Leg Basket ($ price distance from entry)
-input double   InpGtTpMultiLeg       = 0.30;  // T2: Basket Target, 2+ Legs ($ price distance from weighted avg entry)
-input double   InpGtLotMultiplier    = 1.68;  // E1: Grid Lot Multiplier (applied to the latest leg, no reset)
-input int      InpGtMaxGridLegs      = 17;    // N: Maximum Legs Per Side (hard cap, matches this account's real setting)
-input double   InpGtEquityLockPercent = 100.0; // R1: Equity Loss Limit, % Of Saved Baseline (close everything + persistent lock; 0 or below = off)
-input int      InpGtMaxBasketAgeHours = 0;    // H1: Max Basket Age, Hours (0 = off; after this, closes only once floating P/L is non-negative)
-input ulong    InpGtMagicBuy         = 837490;  // M1: Magic Number, BUY Side
-input ulong    InpGtMagicSell        = 528101;  // M2: Magic Number, SELL Side
-input int      InpGtMaxDeviationPoints = 3;   // P1: Max Execution Deviation (broker points)
-input bool     InpGtUseSessionFilter = true;  // F1: Pause New Cycles Near Broker Session Boundaries
-input int      InpGtSessionCloseMinutes = 60; // T3: Minutes Before Session Close To Pause
-input int      InpGtSessionOpenMinutes  = 60; // T4: Minutes After Session Open To Pause
-input bool     InpGtUseH4BoundaryFilter = true; // F5: Pause New Cycles Near H4 Candle Boundaries (00/04/08/12/16/20 server time)
-input int      InpGtH4CloseMinutes   = 15;    // T7: Minutes Before H4 Close To Pause
-input int      InpGtH4OpenMinutes    = 15;    // T8: Minutes After H4 Open To Pause
-input ENUM_CALENDAR_EVENT_IMPORTANCE InpGtNewsMinPriority = CALENDAR_IMPORTANCE_MODERATE; // N1: Minimum News Priority To Block (matches "Medium" in the PDF)
+// Non-input constants this file's shared engine code still needs a
+// value for, now fixed rather than user-facing since GoldTrap X has no
+// equivalent concept to expose: TP is always attached server-side (its
+// own basket-target mechanism assumes this), and a leg-open cascade
+// guard stays on as a pure safety net (not part of GoldTrap X's own
+// documented design, but removing it entirely would let a same-second
+// duplicate-tick bug cascade legs with no brake at all - kept as
+// infrastructure, not a strategy choice).
+const bool     InpUseServerSideTP       = true;
+const int      InpMinSecondsBetweenLegs = 5;
 
 CTrade trade;
 
@@ -332,11 +208,8 @@ struct SBasket
 
 SBasket g_buyBasket, g_sellBasket;
 
-int g_atrHandle      = INVALID_HANDLE;
-
 int    g_dayStartDateCode = -1;
 double g_dayStartBalance  = 0.0;
-bool   g_dailyLossLimitLoggedToday = false;
 
 // Watermark for LogRecentClosedDeals() - only deals strictly after this
 // time get logged/re-checked, so a leg that already got logged once
@@ -404,15 +277,11 @@ void ApplyBlackChartTheme()
 // regardless of side (position-restore-on-init, deal logging).
 ulong MagicForSide(ENUM_BASKET_SIDE side)
   {
-   if(!InpUseGoldTrapReplica)
-      return InpMagicNumber;
    return (side == SIDE_BUY) ? InpGtMagicBuy : InpGtMagicSell;
   }
 
 bool IsOurMagic(long magic)
   {
-   if(!InpUseGoldTrapReplica)
-      return magic == (long)InpMagicNumber;
    return magic == (long)InpGtMagicBuy || magic == (long)InpGtMagicSell;
   }
 
@@ -441,13 +310,6 @@ int OnInit()
    else
       ApplyBlackChartTheme(); // forces pure black - see comment on the function, this is what makes the watermark blend in correctly
 
-   g_atrHandle = iATR(_Symbol, PERIOD_M1, InpAtrPeriod);
-   if(g_atrHandle == INVALID_HANDLE)
-     {
-      Print("ScalpingX: ATR handle creation failed.");
-      return(INIT_FAILED);
-     }
-
    UpdateDayTracking();
 
    // Diagnostic only (does not affect trading) - confirms whether the
@@ -457,17 +319,17 @@ int OnInit()
    // identical (News: clear) - added 2026-08-13 specifically so this can be
    // verified right after attaching, instead of waiting to line up with a
    // real event's exact 30-min window.
-   if(InpUseNewsFilter)
+   if(InpGtUseNewsFilter)
      {
       MqlCalendarValue diag[];
-      int diagN = CalendarValueHistory(diag, TimeCurrent() - 7 * 24 * 3600, TimeCurrent() + 7 * 24 * 3600, NULL, InpNewsCurrency);
+      int diagN = CalendarValueHistory(diag, TimeCurrent() - 7 * 24 * 3600, TimeCurrent() + 7 * 24 * 3600, NULL, InpGtNewsCurrency);
       if(diagN < 0)
          PrintFormat("ScalpingX: news calendar diagnostic FAILED (err=%d) - the News Filter will silently do nothing until this is fixed.",
                      GetLastError());
       else
          PrintFormat("ScalpingX: news calendar diagnostic OK - found %d %s event(s) in the past/next 7 days "
                      "(this check alone does not affect trading, it only confirms calendar access works).",
-                     diagN, InpNewsCurrency);
+                     diagN, InpGtNewsCurrency);
      }
 
    if(InpShowDashboard)
@@ -485,8 +347,6 @@ int OnInit()
 //+------------------------------------------------------------------+
 void OnDeinit(const int reason)
   {
-   if(g_atrHandle != INVALID_HANDLE)
-      IndicatorRelease(g_atrHandle);
    EventKillTimer();
    ObjectsDeleteAll(0, DB_PREFIX);
    ChartRedraw();
@@ -550,9 +410,6 @@ void OnTick()
   {
    RefreshBaskets();
    UpdateDayTracking();
-
-   if(DailyLossLimitHit())
-      ForceCloseOnDailyLossLimit();
 
    if(GtEquityLossLimitHit())
       GtTriggerEquityLock();
@@ -630,7 +487,7 @@ void ScanBasket(ENUM_BASKET_SIDE side, SBasket &b)
       // be indistinguishable by POSITION_TIME alone, which could pick the
       // WRONG leg as "most recent" and let the DCA-distance check compare
       // against a stale price - letting legs cascade far faster than
-      // InpDcaDistancePrice was ever meant to allow.
+      // the DCA spacing (S1/S2) was ever meant to allow.
       if(tMsc >= b.lastLegTimeMsc)
         {
          b.lastLegTime    = t;
@@ -655,20 +512,17 @@ void RefreshBaskets()
 //| Exits: profit target only - no stop-loss, ever, per explicit      |
 //| request.                                                           |
 //+------------------------------------------------------------------+
-// GetProfitTarget() returns our own flat $ target normally. In
-// InpUseGoldTrapReplica mode it instead returns the EQUIVALENT $ amount
-// for a fixed price-DISTANCE target (two tiers, T1/T2, matching GoldTrap
-// X's real design - see the input group's comment for the real-trade-
-// history and official-PDF evidence) at the basket's CURRENT total lots,
-// using tick_value/tick_size so it matches POSITION_PROFIT the same way
-// the non-replica path already does - it is a derived number in replica
-// mode, not an independent setting. ManageBasketExits()'s tick-based
-// floatingPL check uses this directly, in both modes, unchanged.
+// GoldTrap X's T1 (single-position cycle) / T2 (2+ positions) - a fixed
+// price DISTANCE from the basket's weighted average entry, not a flat $
+// target. GetProfitTarget() returns the EQUIVALENT $ amount at the
+// basket's CURRENT total lots (using tick_value/tick_size, so it matches
+// POSITION_PROFIT/floatingPL the same way regardless of contract-size
+// peculiarities on any given symbol/broker) purely so
+// ManageBasketExits()'s tick-based floatingPL check stays consistent
+// with the real price target - it is a derived number, not an
+// independent setting.
 double GetProfitTarget(const SBasket &b)
   {
-   if(!InpUseGoldTrapReplica)
-      return InpBasketProfitTargetUSD;
-
    double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
    double tickSize   = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
    double distance   = (b.legCount <= 1) ? InpGtTpSingleLeg : InpGtTpMultiLeg;
@@ -679,32 +533,13 @@ double GetProfitTarget(const SBasket &b)
   }
 
 // The price level at which this basket's combined floating P/L reaches
-// GetProfitTarget(b). Replica mode: a direct weightedAvgEntry +/-
-// distance lookup (T1/T2). Our own default mode: converts the flat $
-// target into a price distance via tick_value/tick_size - found the hard
-// way (2026-08-16, live on CXM demo) that SYMBOL_TRADE_CONTRACT_SIZE
-// alone can disagree with how the broker's server actually computes
-// POSITION_PROFIT (cent-account quirks etc.); tick_value/tick_size is
-// the same per-price-unit-per-lot profit rate the broker itself uses, so
-// it matches POSITION_PROFIT/floatingPL by construction regardless of
-// contract-size peculiarities on any given symbol/broker.
+// GetProfitTarget(b) - a direct weightedAvgEntry +/- distance (T1/T2)
+// lookup.
 double BasketTargetPrice(ENUM_BASKET_SIDE side, const SBasket &b)
   {
    if(b.totalLots <= 0)
       return 0;
-
-   double distance;
-   if(InpUseGoldTrapReplica)
-      distance = (b.legCount <= 1) ? InpGtTpSingleLeg : InpGtTpMultiLeg;
-   else
-     {
-      double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
-      double tickSize   = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
-      if(tickValue <= 0 || tickSize <= 0)
-         return 0;
-      double profitPerPriceUnitPerLot = tickValue / tickSize;
-      distance = GetProfitTarget(b) / (b.totalLots * profitPerPriceUnitPerLot);
-     }
+   double distance = (b.legCount <= 1) ? InpGtTpSingleLeg : InpGtTpMultiLeg;
    return (side == SIDE_BUY) ? (b.weightedAvgEntry + distance) : (b.weightedAvgEntry - distance);
   }
 
@@ -835,9 +670,6 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
    else
       b = g_sellBasket;
 
-   if(IsBeforeTradingStart())
-      return; // before InpTradingStartHour - existing baskets still manage/close normally, only new entries pause
-
    if(IsNewsBlackout())
       return; // paused around medium/high-impact news (calendar and/or manual window), both bootstrap and DCA-adds
 
@@ -848,10 +680,7 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
       return; // GoldTrap replica's F5/T7/T8 - near an H4 candle boundary
 
    if(DailyTargetHit())
-      return; // today's profit target already reached - resumes automatically at the next day rollover
-
-   if(DailyLossLimitHit())
-      return; // today's loss limit hit - OnTick() also force-closes both baskets, see there
+      return; // today's profit target already reached (F3/DT1) - resumes automatically at the next day rollover
 
    if(GtEquityLocked())
       return; // GoldTrap replica's R1 equity-lock has fired - permanently refuses new entries until manually reset (see GtEquityLocked())
@@ -879,7 +708,7 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
 
    // Temporary diagnostic (2026-08-18) - a live demo cascade wasn't explained
    // by the millisecond-tie-break fix alone (gaps were >= the cooldown, but
-   // still far under InpDcaDistancePrice), so log the exact numbers behind
+   // still far under the DCA spacing (S1/S2)), so log the exact numbers behind
    // every DCA trigger until the real cause is confirmed from real data
    // instead of guessed at again.
    if(adverse)
@@ -898,87 +727,29 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
       // few seconds again even if it existed).
       if(InpMinSecondsBetweenLegs > 0 && (TimeCurrent() - b.lastLegTime) < InpMinSecondsBetweenLegs)
          return;
-      if(InpUseAtrSpikeFilter && IsAtrSpiking())
-         return; // "news proxy" - don't average into a volatility spike
 
-      // Cycling: once a full cycle is used up, the next leg restarts lot
-      // sizing from InpInitialLot instead of continuing to compound the
-      // multiplier indefinitely - keeps a basket that's been going against
-      // for a long time from ever needing an unaffordable lot size, while
-      // still letting it keep averaging (unconditionally, no pause) if
-      // price keeps moving, per explicit request.
-      //
-      // 2026-09-06/07/10/11, carryover-cycle lot sizing (the proven,
-      // permanent default - the older plain "reset every InpMaxLegsPerBasket
-      // legs" cycle was deleted 2026-09-11 since it could never run once
-      // carryover became the fixed default): InpCarryoverBaseLegs
-      // flat-doubling legs (0.01/0.02/0.04-style), then one extra
-      // "carryover" leg that does NOT reset - cycle 1's carryover leg is
-      // just the plain martingale sequence continuing one more step
-      // (via NextLotSize), and from cycle 2 onward an independent series
-      // starting at InpCarryoverStartLot takes over, doubling every cycle
-      // after that (hence outerCycleNum-1 so cycle 2 maps to exponent 0).
-      // legIndexForSizing is the 0-based position within the base
-      // sequence for the flat legs, and just the leg-N comment label for
-      // the carryover leg (sized by NextCarryoverLotSize() instead).
-      int    legIndexForSizing;
-      double prospectiveLot;
-      double carryoverLotOverride = -1;
+      // E1: plain geometric growth, never resets, capped by leg COUNT
+      // (N / InpGtMaxGridLegs) rather than lot size - matches GoldTrap
+      // X's real design exactly (no reset-cycle/carryover concept at
+      // all in its documented behaviour).
+      if(b.legCount >= InpGtMaxGridLegs)
+         return; // grid depth cap reached - no more adds until this basket closes
+      int    legIndexForSizing = b.legCount;
+      double prospectiveLot    = NextLotSize(legIndexForSizing, b.lastLegLots);
 
-      if(InpUseGoldTrapReplica)
-        {
-         // GoldTrap-X-replica mode: plain geometric growth (InpGtLotMultiplier),
-         // never resets, capped by leg COUNT (InpGtMaxGridLegs, their "N")
-         // rather than lot size.
-         if(b.legCount >= InpGtMaxGridLegs)
-            return; // grid depth cap reached - no more adds until this basket closes
-         legIndexForSizing = b.legCount;
-         prospectiveLot    = NextLotSize(legIndexForSizing, b.lastLegLots);
-        }
-      else
-        {
-         int cycleLen   = InpCarryoverBaseLegs + 1;
-         int posInCycle = b.legCount % cycleLen;
-         if(posInCycle < InpCarryoverBaseLegs)
-           {
-            legIndexForSizing = posInCycle;
-            prospectiveLot    = NextLotSize(legIndexForSizing, b.lastLegLots);
-           }
-         else
-           {
-            int outerCycleNum = b.legCount / cycleLen;
-            legIndexForSizing = posInCycle; // = InpCarryoverBaseLegs - just for the comment label
-            if(outerCycleNum == 0)
-               prospectiveLot = NextLotSize(posInCycle, b.lastLegLots);
-            else
-               prospectiveLot = NextCarryoverLotSize(outerCycleNum - 1, b.lastLegLots);
-            carryoverLotOverride = prospectiveLot;
-           }
-        }
-
-      OpenLeg(side, legIndexForSizing, b.lastLegLots, carryoverLotOverride);
+      OpenLeg(side, legIndexForSizing, b.lastLegLots);
       RefreshBaskets(); // pick up the new leg + updated avg entry before recomputing the shared TP
       ApplyBasketTP(side);
       return;
      }
   }
 
+// E1 (grid lot multiplier) - no reset, no cap by lot size (GoldTrap X
+// caps by leg COUNT instead, checked at the call site before this is
+// even called).
 double NextLotSize(int legCount, double previousLegLots)
   {
-   double mult = InpUseGoldTrapReplica ? InpGtLotMultiplier : InpLotMultiplier;
-   double raw  = InpInitialLot * MathPow(mult, legCount);
-
-   // 2026-08-28: caps exponential martingale growth without touching the
-   // add cadence - a basket that hits the cap during a fast spike still
-   // adds legs on the same schedule, just at a flat (then +1 step per
-   // leg, since the monotonic-growth guarantee below still applies) size
-   // instead of doubling every time. Directly targets the mechanism
-   // behind the 2026-08-26 58% equity drawdown (9 doublings, 0.62->163.82
-   // lots, in 2.5 minutes) - see ml/learnings.md. GoldTrap replica mode
-   // skips this - it caps by leg COUNT (InpGtMaxGridLegs, checked at the
-   // call site) instead of lot size, matching its real design.
-   if(!InpUseGoldTrapReplica && InpMaxSingleLegLot > 0)
-      raw = MathMin(raw, InpMaxSingleLegLot);
+   double raw = InpInitialLot * MathPow(InpGtLotMultiplier, legCount);
 
    double minLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
    double maxLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
@@ -994,38 +765,9 @@ double NextLotSize(int legCount, double previousLegLots)
    return NormalizeDouble(lots, 2);
   }
 
-// InpUseCarryoverCycle's extra leg: same rounding/cap/monotonic-growth
-// rules as NextLotSize() above, just a different raw-lot formula (starts
-// at InpCarryoverStartLot, doubles - or InpCarryoverGrowthMult's-worth -
-// every full outer cycle instead of every single leg). Still respects
-// InpMaxSingleLegLot, so this leg can't runaway past the same cap every
-// other leg already obeys.
-double NextCarryoverLotSize(int outerCycleNum, double previousLegLots)
+void OpenLeg(ENUM_BASKET_SIDE side, int legIndexForSizing, double previousLegLots)
   {
-   double raw = InpCarryoverStartLot * MathPow(InpCarryoverGrowthMult, outerCycleNum);
-
-   if(InpMaxSingleLegLot > 0)
-      raw = MathMin(raw, InpMaxSingleLegLot);
-
-   double minLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
-   double maxLot  = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MAX);
-   double lotStep = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
-
-   double lots = MathRound(raw / lotStep) * lotStep;
-   if(lots <= previousLegLots)
-      lots = previousLegLots + lotStep;
-
-   lots = MathMax(minLot, MathMin(maxLot, lots));
-   return NormalizeDouble(lots, 2);
-  }
-
-void OpenLeg(ENUM_BASKET_SIDE side, int legIndexForSizing, double previousLegLots, double overrideLot = -1)
-  {
-   // overrideLot > 0 means the caller already computed the exact lot size
-   // (used by the InpUseCarryoverCycle carryover leg, which has a
-   // different formula than the plain NextLotSize() cycle) - use it as-is
-   // instead of recomputing from legIndexForSizing.
-   double lots = (overrideLot > 0) ? overrideLot : NextLotSize(legIndexForSizing, previousLegLots);
+   double lots = NextLotSize(legIndexForSizing, previousLegLots);
    if(lots <= 0)
       return;
 
@@ -1037,7 +779,7 @@ void OpenLeg(ENUM_BASKET_SIDE side, int legIndexForSizing, double previousLegLot
    // right before sending, since CTrade's magic is one shared stateful
    // value, not per-call.
    trade.SetExpertMagicNumber(MagicForSide(side));
-   if(InpUseGoldTrapReplica && InpGtMaxDeviationPoints > 0)
+   if(InpGtMaxDeviationPoints > 0)
       trade.SetDeviationInPoints(InpGtMaxDeviationPoints);
 
    // No stop-loss on any leg, ever - per explicit, repeated request. Basket
@@ -1280,59 +1022,11 @@ void PositionWatermark()
 // git history if a future decision wants any of them back - see
 // ml/learnings.md's 2026-08-29/2026-08-31/2026-09 entries for the real
 // incidents that motivated each one.
-// ATR-ratio (current 14-period ATR / InpAtrBaselineBars-bar average),
-// reused by both IsAtrSpiking() and GetEffectiveDcaDistance() below so
-// "spiking" and "adaptive distance" always agree on what "the market is
-// moving fast right now" means. Returns 1.0 (neutral, not spiking) on
-// any data failure - never lets a bad read silently tighten distance.
-double GetAtrRatio()
-  {
-   double atrSeries[];
-   ArraySetAsSeries(atrSeries, true);
-   int n = InpAtrBaselineBars + 1;
-   if(CopyBuffer(g_atrHandle, 0, 1, n, atrSeries) < n)
-      return 1.0;
-   double current = atrSeries[0];
-   double sum = 0;
-   for(int i = 1; i < n; i++)
-      sum += atrSeries[i];
-   double baseline = sum / (n - 1);
-   if(baseline <= 0)
-      return 1.0;
-   return current / baseline;
-  }
-
-// The base DCA distance, widened only while the market is genuinely
-// moving fast (ATR ratio above 1) - see InpUseAdaptiveDcaDistance's
-// comment for the real-research citation and why this differs from the
-// flat wider-distance test already tried and found worse. Never
-// returns LESS than the base distance - this only ever widens, never
-// tightens, so it can't make a calm market more aggressive than the
-// already-tuned base value.
-// legCount lets the GoldTrap replica pick S1 (while adding leg 1-5) vs
-// S2 (leg 6 onward) - matches its "S1 for 1 to 5 positions, S2 after the
-// fifth position" spec exactly. Our own (non-replica) adaptive-ATR
-// distance ignores legCount entirely, same as always.
+// S1 (while adding leg 1-5) vs S2 (leg 6 onward) - matches GoldTrap X's
+// "S1 for 1 to 5 positions, S2 after the fifth position" spec exactly.
 double GetEffectiveDcaDistance(int legCount)
   {
-   if(InpUseGoldTrapReplica)
-      return (legCount < 5) ? InpGtSpacingS1 : InpGtSpacingS2;
-   if(!InpUseAdaptiveDcaDistance)
-      return InpDcaDistancePrice;
-   double ratio = MathMax(1.0, GetAtrRatio() * InpAdaptiveDcaAtrMult);
-   return InpDcaDistancePrice * ratio;
-  }
-
-bool IsAtrSpiking()
-  {
-   // Refactored 2026-09-03 to share GetAtrRatio() with
-   // GetEffectiveDcaDistance() instead of duplicating the same
-   // CopyBuffer/baseline math - a 0.0 return only happens on the same
-   // data-failure path GetAtrRatio() already treats as "no spike".
-   double ratio = GetAtrRatio();
-   if(ratio <= 0)
-      return false;
-   return(ratio > InpMaxAtrRatio);
+   return (legCount < 5) ? InpGtSpacingS1 : InpGtSpacingS2;
   }
 
 // 2026-09-07: GetTrendOnTF()/GetTrend()/IsAgainstTrend()/IsWithTrend()
@@ -1343,73 +1037,44 @@ bool IsAtrSpiking()
 // from git history if a future idea wants to revisit trend-gating with
 // better evidence.
 
-// Uses MT5's built-in economic calendar (no external service needed - the
-// terminal syncs it automatically while connected, live/demo only). Blocks
-// new trades and DCA-adds from InpNewsMinutesBefore before a medium/high-
-// impact InpNewsCurrency event until InpNewsMinutesAfter after it. Does not
-// touch already-open positions or profit-target closes - only pauses new
-// adds.
+// F4/N1/T5/T6: uses MT5's built-in economic calendar (no external
+// service needed - the terminal syncs it automatically while connected,
+// live/demo only). Blocks new trades and DCA-adds from T5 minutes
+// before a qualifying-priority (N1) InpGtNewsCurrency event until T6
+// minutes after it. Does not touch already-open positions or profit-
+// target closes - only pauses new adds.
 // CONFIRMED (2026-08-13, standalone diagnostic script): CalendarValueHistory
 // returns err=4014 (ERR_FUNCTION_NOT_ALLOWED) inside the Strategy Tester for
 // every date range tried, including dates well within the account's own
 // history - this is a genuine MT5 platform restriction on calendar
 // functions in the Tester, not a data-availability issue or a bug here.
 // This check is real and works live/demo; it cannot be exercised or
-// validated via backtesting at all. Use IsManualNewsBlackout() below to
-// test "what if trading paused around this specific news window" in the
-// Tester instead.
-bool IsCalendarNewsBlackout()
+// validated via backtesting at all.
+bool IsNewsBlackout()
   {
-   if(!InpUseNewsFilter)
+   if(!InpGtUseNewsFilter)
       return false;
 
-   datetime from = TimeCurrent() - InpNewsMinutesAfter * 60;
-   datetime to   = TimeCurrent() + InpNewsMinutesBefore * 60;
+   datetime from = TimeCurrent() - InpGtNewsMinutesAfter * 60;
+   datetime to   = TimeCurrent() + InpGtNewsMinutesBefore * 60;
 
    MqlCalendarValue values[];
-   int n = CalendarValueHistory(values, from, to, NULL, InpNewsCurrency);
+   int n = CalendarValueHistory(values, from, to, NULL, InpGtNewsCurrency);
    if(n <= 0)
       return false;
 
-   // GoldTrap replica's N1 ("minimum event priority to block") replaces
-   // the fixed Moderate-or-High threshold with a configurable one -
-   // matches its documented behaviour ("Selecting Low blocks low, medium
-   // and high events, so it is most restrictive").
-   ENUM_CALENDAR_EVENT_IMPORTANCE minImportance = InpUseGoldTrapReplica ? InpGtNewsMinPriority : CALENDAR_IMPORTANCE_MODERATE;
+   // N1 ("minimum event priority to block") - matches its documented
+   // behaviour ("Selecting Low blocks low, medium and high events, so
+   // it is most restrictive").
    for(int i = 0; i < n; i++)
      {
       MqlCalendarEvent ev;
       if(!CalendarEventById(values[i].event_id, ev))
          continue;
-      if(ev.importance >= minImportance)
+      if(ev.importance >= InpGtNewsMinPriority)
          return true;
      }
    return false;
-  }
-
-// A fixed date/time window to also treat as a news blackout, independent of
-// the (Tester-unusable) calendar check above. Two real uses: (1) testing
-// the effect of avoiding a specific known news event in the Strategy
-// Tester, since the calendar can't be exercised there at all; (2) live/
-// demo, as a manual belt-and-braces block around a known major release the
-// automatic calendar check might miss or mistime.
-bool IsManualNewsBlackout()
-  {
-   if(!InpUseManualNewsWindow || InpManualNewsStart == "" || InpManualNewsEnd == "")
-      return false;
-
-   datetime blockStart = StringToTime(InpManualNewsStart);
-   datetime blockEnd   = StringToTime(InpManualNewsEnd);
-   if(blockStart == 0 || blockEnd == 0 || blockEnd <= blockStart)
-      return false;
-
-   datetime now = TimeCurrent();
-   return(now >= blockStart && now <= blockEnd);
-  }
-
-bool IsNewsBlackout()
-  {
-   return IsCalendarNewsBlackout() || IsManualNewsBlackout();
   }
 
 // GoldTrap replica's F1/T3/T4: pause new cycles within InpGtSessionCloseMinutes
@@ -1421,7 +1086,7 @@ bool IsNewsBlackout()
 // the broker doesn't expose session data for today rather than guessing.
 bool GtInSessionBoundaryPause()
   {
-   if(!InpUseGoldTrapReplica || !InpGtUseSessionFilter)
+   if(!InpGtUseSessionFilter)
       return false;
 
    MqlDateTime dtNow;
@@ -1452,7 +1117,7 @@ bool GtInSessionBoundaryPause()
 // doesn't depend on the chart's own period.
 bool GtInH4BoundaryPause()
   {
-   if(!InpUseGoldTrapReplica || !InpGtUseH4BoundaryFilter)
+   if(!InpGtUseH4BoundaryFilter)
       return false;
 
    MqlDateTime dt;
@@ -1524,71 +1189,22 @@ void UpdateDayTracking()
      {
       g_dayStartDateCode = todayCode;
       g_dayStartBalance  = AccountInfoDouble(ACCOUNT_BALANCE);
-      g_dailyLossLimitLoggedToday = false; // new day - the loss-limit force-close can fire (and log) again if needed
      }
   }
 
-// Realized (closed) profit only - today's balance vs balance at today's
-// rollover - not floating equity, so this doesn't flicker true/false as
-// open baskets' floating P/L wobbles. Once true, stays true for the rest
-// of the day (UpdateDayTracking() resets g_dayStartBalance at the next
-// day rollover, which is what makes this resume automatically).
+// F3/DT1: realized (closed) profit only - today's balance vs balance at
+// today's rollover - not floating equity, so this doesn't flicker
+// true/false as open baskets' floating P/L wobbles. Once true, stays
+// true for the rest of the day (UpdateDayTracking() resets
+// g_dayStartBalance at the next day rollover, which is what makes this
+// resume automatically) - matches GoldTrap X's documented F3/DT1
+// behaviour ("stops new cycles, but never abandons an active basket").
 bool DailyTargetHit()
   {
-   if(!InpUseDailyProfitTarget || g_dayStartBalance <= 0)
+   if(!InpGtUseDailyTarget || InpGtDailyTargetAmount <= 0 || g_dayStartBalance <= 0)
       return false;
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
-   return((balance - g_dayStartBalance) >= InpDailyProfitTargetUSD);
-  }
-
-// Blocks new entries before InpTradingStartHour each day - existing
-// baskets keep being managed regardless (same non-blocking gate pattern
-// as every other check here). No "end hour" - once past the start hour,
-// stays open for the rest of that day; resets automatically at midnight
-// server time since the hour check is re-evaluated fresh every call.
-bool IsBeforeTradingStart()
-  {
-   if(!InpUseTradingHours)
-      return false;
-   MqlDateTime dt;
-   TimeToStruct(TimeCurrent(), dt);
-   if(dt.hour != InpTradingStartHour)
-      return(dt.hour < InpTradingStartHour);
-   return(dt.min < InpTradingStartMinute); // same hour - minute decides
-  }
-
-// Equity-based, on purpose - see the input group comment above for why
-// this deliberately does NOT use the same realized-balance-only approach
-// as DailyTargetHit(). Once true, ManageBasketEntries() halts new entries
-// (existing non-blocking gate pattern) and OnTick() additionally force-
-// closes both baskets - the two together are what actually cap the day's
-// worst case, not just stop it from getting worse via new legs.
-bool DailyLossLimitHit()
-  {
-   if(!InpUseDailyLossLimit || g_dayStartBalance <= 0)
-      return false;
-   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
-   double lossPct = (g_dayStartBalance - equity) / g_dayStartBalance * 100.0;
-   return(lossPct >= InpDailyLossLimitPercent);
-  }
-
-// Called every tick once DailyLossLimitHit() is true - closes both
-// baskets outright (not just "stop adding new legs", which is what the
-// non-blocking ManageBasketEntries() gate already does on its own).
-// Idempotent: once there's nothing left to close, CloseBasket() is a
-// harmless no-op, so calling this repeatedly every tick for the rest of
-// the day is fine - only logs once per day via g_dailyLossLimitLoggedToday.
-void ForceCloseOnDailyLossLimit()
-  {
-   if(!g_dailyLossLimitLoggedToday)
-     {
-      PrintFormat("ScalpingX: DAILY LOSS LIMIT HIT (%.1f%% of day-start balance) - force-closing both baskets.",
-                  InpDailyLossLimitPercent);
-      g_dailyLossLimitLoggedToday = true;
-     }
-   RefreshBaskets();
-   CloseBasket(SIDE_BUY, "daily loss limit hit", g_buyBasket.floatingPL);
-   CloseBasket(SIDE_SELL, "daily loss limit hit", g_sellBasket.floatingPL);
+   return((balance - g_dayStartBalance) >= InpGtDailyTargetAmount);
   }
 
 //+------------------------------------------------------------------+
@@ -1606,7 +1222,7 @@ string GtLockVarName()     { return "GTReplica_" + IntegerToString(InpMagicNumbe
 
 bool GtEquityLocked()
   {
-   if(!InpUseGoldTrapReplica || InpGtEquityLockPercent <= 0)
+   if(InpGtEquityLockPercent <= 0)
       return false;
    string lockVar = GtLockVarName();
    return(GlobalVariableCheck(lockVar) && GlobalVariableGet(lockVar) > 0);
@@ -1614,7 +1230,7 @@ bool GtEquityLocked()
 
 bool GtEquityLossLimitHit()
   {
-   if(!InpUseGoldTrapReplica || InpGtEquityLockPercent <= 0)
+   if(InpGtEquityLockPercent <= 0)
       return false;
    if(GtEquityLocked())
       return true; // already locked from an earlier tick/session - stays true until manually reset
@@ -1657,7 +1273,7 @@ void GtTriggerEquityLock()
 // rather than forcing one.
 bool GtMaxBasketAgeExit(ENUM_BASKET_SIDE side, const SBasket &b)
   {
-   if(!InpUseGoldTrapReplica || InpGtMaxBasketAgeHours <= 0)
+   if(InpGtMaxBasketAgeHours <= 0)
       return false;
    if(b.legCount == 0 || b.firstLegTime == 0)
       return false;
@@ -1933,26 +1549,27 @@ void UpdateDashboard()
            (dailyPL >= 0 ? clrLime : clrRed), 8);
    y += lh;
    bool dailyTargetHit = DailyTargetHit();
-   string dailyTargetText = !InpUseDailyProfitTarget ? "off"
+   string dailyTargetText = (!InpGtUseDailyTarget || InpGtDailyTargetAmount <= 0) ? "off"
                              : dailyTargetHit ? "HIT (paused today)"
-                             : "$" + DoubleToString(dailyPL, 2) + " / $" + DoubleToString(InpDailyProfitTargetUSD, 2);
-   DbLabel("DailyTarget", lx, y, PadRight("Daily Target", lblW) + dailyTargetText,
+                             : "$" + DoubleToString(dailyPL, 2) + " / $" + DoubleToString(InpGtDailyTargetAmount, 2);
+   DbLabel("DailyTarget", lx, y, PadRight("Daily Target (F3/DT1)", lblW) + dailyTargetText,
            dailyTargetHit ? clrLime : clrSilver, 8);
    y += lh;
-   bool dailyLossHit = DailyLossLimitHit();
-   double dailyLossPct = (g_dayStartBalance > 0) ? (g_dayStartBalance - equity) / g_dayStartBalance * 100.0 : 0;
-   string dailyLossText = !InpUseDailyLossLimit ? "off"
-                           : dailyLossHit ? "HIT (baskets closed)"
-                           : DoubleToString(dailyLossPct, 1) + "% / " + DoubleToString(InpDailyLossLimitPercent, 1) + "%";
-   DbLabel("DailyLoss", lx, y, PadRight("Daily Loss Limit", lblW) + dailyLossText,
-           dailyLossHit ? clrRed : clrSilver, 8);
+   bool sessionPause = GtInSessionBoundaryPause();
+   bool h4Pause      = GtInH4BoundaryPause();
+   string pauseText = (sessionPause && h4Pause) ? "session + H4 boundary"
+                       : sessionPause ? "session boundary (F1)"
+                       : h4Pause      ? "H4 boundary (F5)"
+                       : "clear";
+   DbLabel("BoundaryPause", lx, y, PadRight("Boundary Pause", lblW) + pauseText,
+           (sessionPause || h4Pause) ? clrOrange : clrSilver, 8);
    y += lh;
-   bool beforeStart = IsBeforeTradingStart();
-   string tradingHoursText = !InpUseTradingHours ? "off"
-                              : beforeStart ? StringFormat("before %02d:%02d (paused)", InpTradingStartHour, InpTradingStartMinute)
-                              : StringFormat("open (from %02d:%02d)", InpTradingStartHour, InpTradingStartMinute);
-   DbLabel("TradingHours", lx, y, PadRight("Trading Hours", lblW) + tradingHoursText,
-           beforeStart ? clrOrange : clrSilver, 8);
+   bool equityLocked = GtEquityLocked();
+   string equityLockText = (InpGtEquityLockPercent <= 0) ? "off"
+                            : equityLocked ? "LOCKED (see Journal)"
+                            : "armed at " + DoubleToString(InpGtEquityLockPercent, 1) + "%";
+   DbLabel("EquityLock", lx, y, PadRight("Equity Lock (R1)", lblW) + equityLockText,
+           equityLocked ? clrRed : clrSilver, 8);
    y += lh + 6;
 
    DbDivider("Div1", x, y, 320, C'55,55,65');
@@ -2017,13 +1634,8 @@ void UpdateDashboard()
    DbLabel("Spread", lx, y, PadRight("Spread", lblW) + IntegerToString((int)liveSpread) + " / " + IntegerToString(maxSpread) + (spreadBlocking ? " (blocking)" : ""),
            spreadBlocking ? clrRed : clrSilver, 8);
    y += lh;
-   bool atrSpiking = InpUseAtrSpikeFilter && IsAtrSpiking();
-   DbLabel("AtrSpike", lx, y, PadRight("ATR Spike", lblW) + (InpUseAtrSpikeFilter ? (atrSpiking ? "YES (blocking)" : "no") : "off"),
-           atrSpiking ? clrOrange : clrSilver, 8);
-   y += lh;
    bool newsBlackout = IsNewsBlackout();
-   bool newsFilterOn = (InpUseNewsFilter || InpUseManualNewsWindow);
-   DbLabel("News", lx, y, PadRight("News", lblW) + (newsFilterOn ? (newsBlackout ? "YES (blocking)" : "clear") : "off"),
+   DbLabel("News", lx, y, PadRight("News (F4/N1)", lblW) + (InpGtUseNewsFilter ? (newsBlackout ? "YES (blocking)" : "clear") : "off"),
            newsBlackout ? clrOrange : clrSilver, 8);
    y += lh;
    bool hedgingOk = ((ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE) == ACCOUNT_MARGIN_MODE_RETAIL_HEDGING);

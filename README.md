@@ -3,6 +3,30 @@
 This folder now holds **four independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-09-12 (later): Scalping X rewritten as a genuinely pure GoldTrap
+## X copy - no toggle, nothing borrowed from the sibling EA
+
+Explicit request: "hubuhu kuno poribartan charai GoldTrap X-ke, amader
+kichu use korbe na" (copy GoldTrap X exactly, use nothing of ours).
+While doing this, found the earlier "full replica" test wasn't 100%
+pure either - the sibling EA's own ATR-spike filter was a `const` in
+that codebase, unconditionally active regardless of replica mode, so it
+was silently still gating DCA-adds. Removed that along with every other
+remaining piece of the sibling's own architecture (adaptive-ATR DCA
+distance, carryover-cycle lot growth, the flat $ profit target, server-
+clock trading hours, the daily equity-percent loss limit, the manual
+news-window block) and the `InpUseGoldTrapReplica` toggle itself - no
+fallback mode left in this file. Remaining shared inputs renamed to
+GoldTrap-flavoured names (F3/DT1, F4/N1/T5/T6) so nothing in the Inputs
+dialog reads as borrowed.
+
+Re-verified on the shipped binary - genuinely pure numbers, close to
+but not identical to the earlier contaminated test: August net
+$128,372.39 (was $124,363.07), 18.80% eqDD, PF 1.52, Sharpe 10.68; July
+net -$30,461.01 (was -$30,558.79), 101.42% eqDD - confirms the
+contamination was real, if modest in these specific windows. Full
+comparison in `ml/learnings.md`.
+
 ## 2026-09-12: fourth EA - `Scalping X (FarhanFX).mq5` - a sibling
 ## product built around a real competing EA's design, GoldTrap-replica
 ## logic on by default

@@ -3182,3 +3182,37 @@ Farhan Fx` Python project's `learnings.md`.)
   "Scalping Ai Pro By Farhan FX.mq5" file itself was not touched at all
   this session beyond the v52 additive changes already verified not to
   alter its own default behavior (see the entries above).
+
+- **2026-09-12 (Scalping X rewritten as a genuine, pure GoldTrap X copy,
+  explicit request - "hubuhu kuno poribartan charai GoldTrap X-ke,
+  amader kichu use korbe na"):** discovered while doing this that the
+  earlier "full replica" test wasn't actually 100% pure either - the
+  sibling EA's own ATR-spike filter (`InpUseAtrSpikeFilter`, a `const`
+  in v52, unconditionally applied regardless of replica mode) was
+  silently still gating DCA-adds during that test. Removed it entirely
+  from Scalping X this time, along with every other piece of the
+  sibling's own architecture that had survived the first fork: adaptive-
+  ATR DCA distance, carryover-cycle lot growth, the flat $ profit
+  target, server-clock trading hours, the daily equity-percent loss
+  limit, and the manual news-window block. Also removed the
+  `InpUseGoldTrapReplica` toggle itself (no fallback mode left in this
+  file) and renamed the remaining shared inputs to GoldTrap-flavoured
+  names (F3/DT1 daily target, F4/N1/T5/T6 news filter) so nothing in the
+  Inputs dialog reads as borrowed from the sibling EA. Compiled clean
+  (0 errors/0 warnings).
+
+  **Re-verified on the shipped binary - genuinely pure numbers, close to
+  but not identical to the earlier contaminated test:**
+  ```
+  window   net$          eqDD%     PF     Sharpe   (earlier contaminated test)
+  august   128,372.39     18.80    1.52   10.68    (124,363.07 / 19.32% / 1.51 / 9.71)
+  july     -30,461.01    101.42    0.19   -5.00    (-30,558.79 / 101.72% / 0.19 / -5.00)
+  3-month  -33,470.43    104.56    0.80   19.16    (-31,617.46 / 102.33% / 0.76 / 17.36)
+  ```
+  Differences are modest (the ATR-spike filter wasn't a dominant factor
+  in these specific windows) but real - confirms the contamination was
+  genuine, not imagined, and that this is now the first truly clean
+  measurement of GoldTrap X's actual documented design on this data.
+  Same July weakness as every version tested so far; this account's
+  real R1=100% setting remains loose enough to barely limit worst-case
+  loss.

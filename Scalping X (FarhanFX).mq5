@@ -174,6 +174,23 @@ input bool     InpShowLegMarkers    = true; // Show DCA Leg Markers On Chart
 input bool     InpShowCloseMarkers  = true; // Show Basket-Closed Markers On Chart
 input bool     InpShowChartWatermark = true; // Show Farhan FX Watermark On Main Chart
 
+// 2026-09-13: a temporary "one side at a time" A/B test toggle
+// (InpTestOneSideAtATime) was added here, tested, and deleted again the
+// same day - never part of GoldTrap X's own design. Findings: it fixed
+// July's disaster (-$30,461 -> +$62,946) but created an equally severe
+// one in June (-$30,423, 100.80% eqDD - nearly identical in magnitude to
+// dual mode's July failure) and roughly halved profit in the good
+// months (August dual $128,372 vs single $60,956) since only one
+// side's capital is ever deployed at a time. Explicit decision after
+// reviewing this: keep the pure always-dual design - it matches
+// GoldTrap X's own real, live-verified behaviour (account 256686's real
+// trade history independently confirmed simultaneous BUY+SELL trading),
+// earns roughly double in good months, and single-mode's apparent
+// "safety" turned out to be illusory (June still nearly wiped the
+// account even at half exposure) rather than a genuine risk reduction -
+// see ml/learnings.md's 2026-09-13 entries for the full comparison.
+// Recoverable from git history if ever wanted back.
+
 // Non-input constants this file's shared engine code still needs a
 // value for, now fixed rather than user-facing since GoldTrap X has no
 // equivalent concept to expose: TP is always attached server-side (its

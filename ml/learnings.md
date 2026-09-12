@@ -3216,3 +3216,47 @@ Farhan Fx` Python project's `learnings.md`.)
   Same July weakness as every version tested so far; this account's
   real R1=100% setting remains loose enough to barely limit worst-case
   loss.
+
+- **2026-09-13 (one-side-at-a-time A/B test on Scalping X, added then
+  deleted the same day - decision: keep the pure always-dual design):**
+  explicit request to verify Scalping X genuinely trades both sides
+  simultaneously (confirmed directly from a real trade-log excerpt -
+  BUY and SELL both bootstrap at the same second, e.g.
+  2026.08.03 01:01:00), then to test a "never both open together"
+  variant for comparison. Added `InpTestOneSideAtATime` as a clearly-
+  labeled test-only toggle (not part of GoldTrap X's own design).
+
+  ```
+  window   mode     net$          eqDD%     PF     trades
+  june     dual     (part of the 3-month continuous, not separately negative)
+  june     single   -30,423.76    100.80    0.68   13,512   <- new failure mode
+  july     dual     -30,461.01    101.42    0.19    1,587
+  july     single    62,946.78     21.14    1.58   37,219   <- fixed
+  august   dual     128,372.39     18.80    1.52   69,619
+  august   single    60,956.85     32.22    1.52   35,008   <- roughly halved
+  3-month  dual      -33,470.43   104.56    0.80   27,239
+  3-month  single    -30,423.76   100.80    0.68   13,512   <- matches June exactly;
+                                                                 June's loss consumed
+                                                                 the account before
+                                                                 July/August could
+                                                                 contribute
+  ```
+  **Single-side-at-a-time fixed July's disaster but created an equally
+  severe one in June** (100.80% eqDD, nearly identical magnitude to
+  dual's July failure) **and roughly halved profit in the good months**
+  (only one side's capital ever deployed at once). The apparent "safety"
+  of reduced exposure was illusory - June still nearly wiped the account
+  even with just one side trading, proving the core danger is the
+  underlying grid/multiplier design (E1=1.68, no lot-size cap, N=17)
+  itself, not simultaneous dual exposure.
+
+  **Explicit decision after reviewing this comparison: keep the pure
+  always-dual design.** Reasoning: (1) it matches GoldTrap X's own real,
+  live-verified behaviour - the actual account 256686's trade history
+  independently confirmed simultaneous BUY+SELL trading; (2) it earns
+  roughly double in good months; (3) single-mode traded one catastrophic
+  month for another rather than genuinely reducing risk. Deleted
+  `InpTestOneSideAtATime` and its gate check entirely - recoverable from
+  git history. Re-verified on the shipped binary: August reproduces
+  $128,372.39/18.80% eqDD/PF 1.52/Sharpe 10.68 to the cent, confirming
+  the removal is clean.

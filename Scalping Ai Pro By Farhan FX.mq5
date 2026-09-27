@@ -4,13 +4,21 @@
 //|  baskets (requires a hedging-mode account), each targeting a      |
 //|  floating-profit dollar amount, then closing and immediately      |
 //|  reopening. On a $-price adverse move past the last leg, adds a   |
-//|  martingale DCA leg - no total-leg cap. ATR-spike, higher-        |
-//|  timeframe trend, and economic-news filters gate DCA adds.        |
+//|  martingale DCA leg - no total-leg cap. An ATR spike and the      |
+//|  economic-news filter gate DCA adds.                              |
 //|  No stop-loss anywhere, ever, and no cap on how many legs a       |
-//|  basket can take on - per explicit, repeated user request (always |
-//|  martingale an against-trend basket until it hits its profit      |
-//|  target, no exceptions, no pauses). Confirmed 2026-08-24 as a      |
-//|  final decision, not a default: a real $20,000 backtest reproduced |
+//|  basket can take on. v53 can pause ADDITIONAL legs (Friday /      |
+//|  rollover / week-open, and an ATR spike on the first leg) and can |
+//|  require the $1 target net of commission, capped. It never closes |
+//|  a basket at a loss. Session pauses and the commission-aware      |
+//|  target default on. The margin-add guard, trend-widen and         |
+//|  extreme-pause exist but default off: on a Dukascopy M1 replay of |
+//|  August 2026 a 200% margin floor froze the losing basket and the  |
+//|  hole grew, and on the June 2026 drop widening or pausing adds    |
+//|  made the drawdown deeper. The v52 preset turns the rest off too. |
+//|  Confirmed 2026-08-24 as a final decision for                     |
+//|  no-SL rule itself. v52 shipped with no pauses at all. A real     |
+//|  $20,000 backtest reproduced                                         |
 //|  the same account-blowing mechanism as this EA's real 2026-08-24   |
 //|  live incident (unlimited legs into a sustained one-direction      |
 //|  move exhausts margin before a basket can average back to profit) |
@@ -70,7 +78,7 @@
 // the four builds already deployed today under the old date-based scheme
 // (2026.08.12.1 through .4) as v1-v4, so this numbering continues from
 // the real deployment history instead of resetting it.
-#define EA_BUILD_VERSION "v52"
+#define EA_BUILD_VERSION "v53"
 
 #include <Trade\Trade.mqh>
 
@@ -266,7 +274,62 @@ input group "=== Daily Loss Limit ==="
 // before anything is realized, so the whole point of this circuit
 // breaker is to react to that, not wait for it to become permanent.
 input bool     InpUseDailyLossLimit     = false; // Force-Close Everything If Daily Loss Hits This %
-input double   InpDailyLossLimitPercent = 5.0;   // Daily Loss Limit (% of day-start balance, checked against live equity)
+input double   InpDailyLossLimitPercent = 5.0;   // Daily Loss Limit (% of the day-start baseline, checked against live equity)
+// false reproduces v52, which compared live equity with the day's
+// starting balance and could trip at midnight on a loss that was
+// already open yesterday.
+input bool     InpDailyLossFromDayStartEquity = true; // Daily Loss Baseline Is Day-Start Equity
+
+// v53. Still no per-trade and no per-basket stop-loss. Everything in
+// this group either pauses a NEW leg or corrects the dollar target.
+// Nothing here force-closes a losing basket. GoldTrap replica mode
+// ignores the group so comparison tests stay comparable. To reproduce
+// v52 trade decisions, turn the bools off, set InpCentProfitMultiplier
+// to 1 and InpNewsCacheSeconds to 0. See README.
+input group "=== v53 Safety (pauses new legs only - no stop-loss) ==="
+input bool     InpCommissionAwareTarget   = true;  // $1 Target Must Be Net Of Commission
+input bool     InpEstimateCloseCommission = true;  // Also Reserve The Closing-Side Commission
+input double   InpMaxCommissionAddUSD     = 2.0;   // Cap The Extra Target Added For Commission (0 = no cap)
+input double   InpCommissionPerLotPerSide = 0.0;   // Commission Override Per Lot Per Side, Account Currency (0 = read the open deal)
+input double   InpCentProfitMultiplier    = 0.0;   // Scale $ Inputs (0 = auto x100 on cent currencies, 1 = v52 no scale)
+// Off by default. v36's tester pass on 24-27 Aug 2026 raised the worst
+// margin level, but an M1 replay of the whole of August 2026 showed a
+// 200% / 50% add-pause freezing the losing basket: price never came
+// back to the frozen average, and the open loss kept growing. The
+// guard only refuses the NEXT leg. It never closes anything. Turn it
+// on only after a Strategy Tester pass on the live account's leverage.
+input bool     InpUseMarginGuard          = false; // Stop Adding Legs If The Next Leg Would Stress Margin
+input double   InpMinMarginLevelPercent   = 200.0; // Minimum Margin Level After That Leg, % (0 = skip)
+input double   InpMaxMarginUsePercent     = 50.0;  // Maximum Margin / Equity After That Leg, % (0 = skip)
+// Off by default. On the June 2026 Dukascopy sample, widening into an
+// H1 extension made the equity drawdown deeper, not shallower. The
+// input stays so a Strategy Tester pass can turn it on deliberately.
+input bool     InpUseTrendAwareSpacing    = false; // Widen DCA Distance When Adding Into A Strong H1 Trend
+input int      InpTrendEmaPeriod          = 50;    // H1 EMA Period
+input int      InpTrendAtrPeriod          = 14;    // H1 ATR Period
+input double   InpTrendExtendAtr          = 1.5;   // H1 ATRs Beyond The EMA Before Distance Widens
+input double   InpTrendSpacingMultiplier  = 2.0;   // Distance Multiplier While That Extended
+// Off by default. On the same June 2026 drop, pausing adds trapped the
+// losing basket (it could not average back to the target) and the
+// 3-ATR vs 4-ATR threshold flipped the result from a loss to a much
+// larger loss. Same fragility as the old trend filter. Not a default.
+input bool     InpPauseAddsWhenExtreme    = false; // Pause Further Adds On An Extreme H1 Extension (never closes)
+input double   InpExtremeExtendAtr        = 3.0;   // H1 ATRs Beyond The EMA That Pauses Adds
+input int      InpExtremePauseMinLegs     = 4;     // Pause Only After The Basket Already Has This Many Legs
+input bool     InpUseFridayCutoff         = true;  // No New Legs Late Friday
+input int      InpFridayCutoffHour        = 20;    // Friday Cutoff Hour (server time)
+input int      InpFridayCutoffMinute      = 0;     // Friday Cutoff Minute
+input bool     InpUseRolloverPause        = true;  // No New Legs Around Server Midnight
+input int      InpRolloverPauseMinutes    = 30;    // Minutes Before And After Midnight
+input bool     InpUseWeekOpenPause        = true;  // No New Legs Right After The Sunday/Monday Open
+input int      InpWeekOpenPauseMinutes    = 60;    // Minutes After That Session Opens
+input bool     InpAtrSpikeBlocksFirstLeg  = true;  // ATR Spike Also Delays The First Leg (v52 blocked adds only)
+input bool     InpUseProfitFundedTrim     = false; // Close The Furthest Leg Only When Today's Realized Profit Covers It
+input int      InpTrimMinLegs             = 6;     // Minimum Legs Before A Trim Is Allowed
+input int      InpTrimMaxPerDay           = 3;     // Maximum Trims Per Side Per Day
+input int      InpTrimCooldownSeconds     = 60;    // Minimum Seconds Between Trims On One Side
+input int      InpNewsCacheSeconds        = 10;    // Reuse The Calendar Result This Many Seconds (0 = every call, v52)
+input bool     InpLogEntryDecisions       = false; // Log Each Leg Open (replaces the old per-tick DCA-DIAG flood)
 
 input group "=== Dashboard ==="
 input bool     InpShowDashboard = true;   // Show Dashboard
@@ -328,6 +391,7 @@ struct SBasket
    int      legCount;        // all legs: bootstrap + DCA
    double   totalLots;
    double   floatingPL;      // sum of POSITION_PROFIT + POSITION_SWAP across the basket's legs
+   double   commissionDrag;  // negative (or zero): open commission, plus the estimated close commission when that input is on. POSITION_PROFIT does not include either.
    double   weightedAvgEntry;
    ulong    lastLegTicket;
    double   lastLegEntry;
@@ -345,10 +409,22 @@ struct SBasket
 SBasket g_buyBasket, g_sellBasket;
 
 int g_atrHandle      = INVALID_HANDLE;
+int g_h1EmaHandle   = INVALID_HANDLE;
+int g_h1AtrHandle   = INVALID_HANDLE;
 
 int    g_dayStartDateCode = -1;
 double g_dayStartBalance  = 0.0;
+double g_dayStartEquity   = 0.0;
 bool   g_dailyLossLimitLoggedToday = false;
+
+// Open-deal commission, keyed by position ticket. Tickets stay ulong -
+// casting them to int overflows past 2^31-1 and used to break marker names.
+ulong  g_commTickets[];
+double g_commOpen[];
+datetime g_lastTrimTime[2];
+int      g_trimsToday[2];
+datetime g_lastEntryLog = 0;
+datetime g_lastMarginLog = 0;
 
 // Watermark for LogRecentClosedDeals() - only deals strictly after this
 // time get logged/re-checked, so a leg that already got logged once
@@ -434,10 +510,14 @@ int OnInit()
    trade.SetExpertMagicNumber(InpMagicNumber);
    trade.SetTypeFillingBySymbol(_Symbol);
 
+   if(InpExpectedLogin == 0)
+      Print("GoldDualBasketDCA: WARNING - InpExpectedLogin is 0, so the account allow-list is disabled. "
+            "Set it to this account's login before trading real money.");
+
    if(InpExpectedLogin != 0 && AccountInfoInteger(ACCOUNT_LOGIN) != InpExpectedLogin)
      {
-      PrintFormat("GoldDualBasketDCA: connected account %d does not match InpExpectedLogin %d. Refusing to run.",
-                  (int)AccountInfoInteger(ACCOUNT_LOGIN), (int)InpExpectedLogin);
+      PrintFormat("GoldDualBasketDCA: connected account %I64d does not match InpExpectedLogin %I64d. Refusing to run.",
+                  AccountInfoInteger(ACCOUNT_LOGIN), InpExpectedLogin);
       return(INIT_FAILED);
      }
 
@@ -458,6 +538,16 @@ int OnInit()
      {
       Print("GoldDualBasketDCA: ATR handle creation failed.");
       return(INIT_FAILED);
+     }
+
+   // H1 trend read is only used to widen or pause adds. A missing handle
+   // must not stop the EA - TrendExtension() treats that as "no extension".
+   if(!InpUseGoldTrapReplica && (InpUseTrendAwareSpacing || InpPauseAddsWhenExtreme))
+     {
+      g_h1EmaHandle = iMA(_Symbol, PERIOD_H1, InpTrendEmaPeriod, 0, MODE_EMA, PRICE_CLOSE);
+      g_h1AtrHandle = iATR(_Symbol, PERIOD_H1, InpTrendAtrPeriod);
+      if(g_h1EmaHandle == INVALID_HANDLE || g_h1AtrHandle == INVALID_HANDLE)
+         Print("GoldDualBasketDCA: H1 trend handles failed. Trend spacing and the extreme-trend pause will stay inactive.");
      }
 
    UpdateDayTracking();
@@ -482,11 +572,12 @@ int OnInit()
                      diagN, InpNewsCurrency);
      }
 
+   // The timer retries server-side TP, drops orphan markers and logs the
+   // real commission on closes. It used to start only with the dashboard,
+   // so all three stopped when InpShowDashboard was false.
+   EventSetTimer(1);
    if(InpShowDashboard)
-     {
       CreateDashboard();
-      EventSetTimer(1);
-     }
 
    RestoreLegMarkersOnInit(); // reattach/restart: redraw markers for legs already open
    PositionWatermark();
@@ -499,6 +590,10 @@ void OnDeinit(const int reason)
   {
    if(g_atrHandle != INVALID_HANDLE)
       IndicatorRelease(g_atrHandle);
+   if(g_h1EmaHandle != INVALID_HANDLE)
+      IndicatorRelease(g_h1EmaHandle);
+   if(g_h1AtrHandle != INVALID_HANDLE)
+      IndicatorRelease(g_h1AtrHandle);
    EventKillTimer();
    ObjectsDeleteAll(0, DB_PREFIX);
    ChartRedraw();
@@ -576,6 +671,9 @@ void OnTick()
 
    if(SpreadIsAcceptable())
      {
+      TryProfitFundedTrim(SIDE_BUY);
+      TryProfitFundedTrim(SIDE_SELL);
+      RefreshBaskets();
       ManageBasketEntries(SIDE_BUY);
       ManageBasketEntries(SIDE_SELL);
      }
@@ -594,6 +692,7 @@ void ResetBasket(SBasket &b)
    b.legCount         = 0;
    b.totalLots        = 0;
    b.floatingPL       = 0;
+   b.commissionDrag   = 0;
    b.weightedAvgEntry = 0;
    b.lastLegTicket    = 0;
    b.lastLegEntry     = 0;
@@ -632,6 +731,13 @@ void ScanBasket(ENUM_BASKET_SIDE side, SBasket &b)
       b.legCount++;
       b.totalLots  += lots;
       b.floatingPL += profit;
+      if(InpCommissionAwareTarget && !InpUseGoldTrapReplica)
+        {
+         double openComm = ResolveOpenCommission();
+         b.commissionDrag += openComm;
+         if(InpEstimateCloseCommission)
+            b.commissionDrag += openComm; // same per-lot rate on the way out
+        }
       sumPriceLots += entry * lots;
       if(b.firstLegTime == 0 || t < b.firstLegTime)
          b.firstLegTime = t;
@@ -679,7 +785,22 @@ void RefreshBaskets()
 double GetProfitTarget(const SBasket &b)
   {
    if(!InpUseGoldTrapReplica)
-      return InpBasketProfitTargetUSD;
+     {
+      // Net dollars the basket must actually make. On a cent account the
+      // inputs are still written in "real" dollars, while POSITION_PROFIT
+      // is in cents, so a literal $1 would close at one cent.
+      double scale = AccountMoneyScale();
+      double netTarget = InpBasketProfitTargetUSD * scale;
+      // commissionDrag is <= 0. The extra gross required is its absolute
+      // value, capped so a deep basket is not asked to retrace by the
+      // whole commission bill before it is allowed to exit.
+      double extra = -b.commissionDrag;
+      if(extra < 0.0)
+         extra = 0.0;
+      if(InpMaxCommissionAddUSD > 0.0)
+         extra = MathMin(extra, InpMaxCommissionAddUSD * scale);
+      return netTarget + extra;
+     }
 
    double tickValue = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_VALUE);
    double tickSize   = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
@@ -750,8 +871,12 @@ void ApplyBasketTP(ENUM_BASKET_SIDE side)
    if(b.legCount == 0)
       return;
 
-   double tp = BasketTargetPrice(side, b);
+   double tp = NormalizeTargetPrice(side, BasketTargetPrice(side, b));
    if(tp <= 0)
+      return;
+   // A TP inside the broker stop level is rejected and used to be retried
+   // on every timer second. Leave this leg to the tick-based backup close.
+   if(TpIsInsideStopLevel(side, tp))
       return;
 
    long wantType = (side == SIDE_BUY) ? POSITION_TYPE_BUY : POSITION_TYPE_SELL;
@@ -768,12 +893,15 @@ void ApplyBasketTP(ENUM_BASKET_SIDE side)
          continue;
 
       double currentTP = PositionGetDouble(POSITION_TP);
-      if(MathAbs(currentTP - tp) < _Point) // already within a point of the right level - skip the modify call
+      double tickSize = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+      double tol = (tickSize > 0.0) ? tickSize * 0.5 : _Point;
+      if(MathAbs(currentTP - tp) <= tol)
          continue;
 
       if(!trade.PositionModify(ticket, 0, tp)) // 0 = no SL, per the standing no-SL-ever policy
-         PrintFormat("GoldDualBasketDCA: failed to set TP on ticket %d (target price %.2f): retcode=%d %s - tick-based close remains as backup",
-                     (int)ticket, tp, trade.ResultRetcode(), trade.ResultRetcodeDescription());
+         PrintFormat("GoldDualBasketDCA: failed to set TP on ticket %s (target price %s): retcode=%d %s - tick-based close remains as backup",
+                     IntegerToString((long)ticket), DoubleToString(tp, (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS)),
+                     trade.ResultRetcode(), trade.ResultRetcodeDescription());
      }
   }
 
@@ -824,8 +952,8 @@ void CloseBasket(ENUM_BASKET_SIDE side, string reason, double displayProfit = 0.
          DeleteLegMarker(side, ticket);
         }
       else
-         PrintFormat("GoldDualBasketDCA: failed to close ticket %d (%s): retcode=%d %s",
-                     (int)ticket, reason, trade.ResultRetcode(), trade.ResultRetcodeDescription());
+         PrintFormat("GoldDualBasketDCA: failed to close ticket %s (%s): retcode=%d %s",
+                     IntegerToString((long)ticket), reason, trade.ResultRetcode(), trade.ResultRetcodeDescription());
      }
 
    if(closedCount > 0)
@@ -834,6 +962,337 @@ void CloseBasket(ENUM_BASKET_SIDE side, string reason, double displayProfit = 0.
                   (side == SIDE_BUY ? "BUY" : "SELL"), closedCount, reason);
       DrawCloseMarker(side, lastClosePrice, displayProfit);
      }
+  }
+
+// Closes ONE furthest leg on a deep basket, and only when today's realized
+// balance change already covers that leg's loss. This is not a stop-loss:
+// the day's closed profit pays for the cut, and the rest of the basket stays
+// open. Off by default until a longer test says otherwise - see the README.
+void TryProfitFundedTrim(ENUM_BASKET_SIDE side)
+  {
+   if(!InpUseProfitFundedTrim || InpUseGoldTrapReplica)
+      return;
+
+   int si = (side == SIDE_BUY) ? 0 : 1;
+   SBasket b = (side == SIDE_BUY) ? g_buyBasket : g_sellBasket;
+   if(b.legCount < InpTrimMinLegs)
+      return;
+   if(g_trimsToday[si] >= InpTrimMaxPerDay)
+      return;
+   if(InpTrimCooldownSeconds > 0 && g_lastTrimTime[si] > 0 &&
+      (TimeCurrent() - g_lastTrimTime[si]) < InpTrimCooldownSeconds)
+      return;
+
+   long wantType = (side == SIDE_BUY) ? POSITION_TYPE_BUY : POSITION_TYPE_SELL;
+   ulong  worstTicket = 0;
+   double worstEntry  = 0.0;
+   double worstPL     = 0.0;
+   bool   found       = false;
+
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+     {
+      ulong ticket = PositionGetTicket(i);
+      if(ticket == 0 || !PositionSelectByTicket(ticket))
+         continue;
+      if(PositionGetString(POSITION_SYMBOL) != _Symbol)
+         continue;
+      if(PositionGetInteger(POSITION_MAGIC) != (long)MagicForSide(side))
+         continue;
+      if(PositionGetInteger(POSITION_TYPE) != wantType)
+         continue;
+
+      double entry = PositionGetDouble(POSITION_PRICE_OPEN);
+      double pl    = PositionGetDouble(POSITION_PROFIT) + PositionGetDouble(POSITION_SWAP);
+      bool further = !found || (side == SIDE_BUY ? entry > worstEntry : entry < worstEntry);
+      if(!further)
+         continue;
+      found = true;
+      worstTicket = ticket;
+      worstEntry = entry;
+      worstPL = pl;
+     }
+
+   if(!found || !PositionSelectByTicket(worstTicket))
+      return;
+
+   double closeComm = 0.0;
+   if(InpEstimateCloseCommission)
+      closeComm = ResolveOpenCommission(); // same per-lot rate, already negative
+   else if(InpCommissionPerLotPerSide > 0.0)
+      closeComm = -MathAbs(InpCommissionPerLotPerSide) * PositionGetDouble(POSITION_VOLUME);
+
+   double closeCash = worstPL + closeComm;
+   if(closeCash >= -0.01)
+      return;
+
+   double realizedToday = AccountInfoDouble(ACCOUNT_BALANCE) - g_dayStartBalance;
+   if(realizedToday + closeCash < 0.0)
+      return;
+
+   if(!trade.PositionClose(worstTicket))
+     {
+      PrintFormat("GoldDualBasketDCA: profit-funded trim failed on ticket %s: retcode=%d %s",
+                  IntegerToString((long)worstTicket), trade.ResultRetcode(), trade.ResultRetcodeDescription());
+      return;
+     }
+
+   g_lastTrimTime[si] = TimeCurrent();
+   g_trimsToday[si]++;
+   DeleteLegMarker(side, worstTicket);
+   PrintFormat("GoldDualBasketDCA: trimmed furthest %s leg %s (close cash %.2f, realized today before trim %.2f). Not a stop-loss - today's closed profit covered it.",
+               (side == SIDE_BUY ? "BUY" : "SELL"), IntegerToString((long)worstTicket), closeCash, realizedToday);
+   RefreshBaskets();
+   ApplyBasketTP(side);
+  }
+
+//+------------------------------------------------------------------+
+//| v53 helpers. None of these place a stop-loss.                     |
+//+------------------------------------------------------------------+
+double AccountMoneyScale()
+  {
+   if(InpCentProfitMultiplier > 0.0)
+      return InpCentProfitMultiplier;
+   string cur = AccountInfoString(ACCOUNT_CURRENCY);
+   StringToUpper(cur);
+   if(cur == "USC" || cur == "EUC" || cur == "GBC" || cur == "CHC" || cur == "AUC" || cur == "CAC" || cur == "NZC")
+      return 100.0;
+   return 1.0;
+  }
+
+// Position must already be selected. Returns the open-deal commission
+// (negative or zero) in account currency.
+double ResolveOpenCommission()
+  {
+   double lots = PositionGetDouble(POSITION_VOLUME);
+   if(InpCommissionPerLotPerSide > 0.0)
+      return -MathAbs(InpCommissionPerLotPerSide) * lots;
+
+   ulong ticket = (ulong)PositionGetInteger(POSITION_TICKET);
+   int n = ArraySize(g_commTickets);
+   for(int i = 0; i < n; i++)
+     {
+      if(g_commTickets[i] == ticket)
+         return g_commOpen[i];
+     }
+
+   double comm = 0.0;
+   bool foundOpenDeal = false;
+   ulong posId = (ulong)PositionGetInteger(POSITION_IDENTIFIER);
+   if(HistorySelectByPosition(posId))
+     {
+      int total = HistoryDealsTotal();
+      for(int i = 0; i < total; i++)
+        {
+         ulong deal = HistoryDealGetTicket(i);
+         if(deal == 0)
+            continue;
+         ENUM_DEAL_ENTRY entry = (ENUM_DEAL_ENTRY)HistoryDealGetInteger(deal, DEAL_ENTRY);
+         if(entry != DEAL_ENTRY_IN && entry != DEAL_ENTRY_INOUT)
+            continue;
+         foundOpenDeal = true;
+         comm += HistoryDealGetDouble(deal, DEAL_COMMISSION);
+        }
+     }
+   // The open deal is sometimes not visible on the same tick the position
+   // appears. Caching a miss as zero would ignore commission forever.
+   if(!foundOpenDeal)
+      return 0.0;
+
+   if(n > 2000)
+     {
+      ArrayResize(g_commTickets, 0);
+      ArrayResize(g_commOpen, 0);
+      n = 0;
+     }
+   ArrayResize(g_commTickets, n + 1);
+   ArrayResize(g_commOpen, n + 1);
+   g_commTickets[n] = ticket;
+   g_commOpen[n] = comm;
+   return comm;
+  }
+
+// Round onto the symbol's tick grid in the direction that does not
+// shrink the basket target. A plain MathRound can put a buy TP one tick
+// too close, so the server closes for slightly less than the $1 net.
+double NormalizeTargetPrice(ENUM_BASKET_SIDE side, double price)
+  {
+   if(price <= 0.0)
+      return 0.0;
+   double tick = SymbolInfoDouble(_Symbol, SYMBOL_TRADE_TICK_SIZE);
+   int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
+   if(tick > 0.0)
+     {
+      double steps = price / tick;
+      if(side == SIDE_BUY)
+         price = MathCeil(steps - 1e-8) * tick;
+      else
+         price = MathFloor(steps + 1e-8) * tick;
+     }
+   return NormalizeDouble(price, digits);
+  }
+
+bool TpIsInsideStopLevel(ENUM_BASKET_SIDE side, double tp)
+  {
+   long stops = SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL);
+   if(stops <= 0)
+      return false;
+   double minDist = (double)stops * _Point;
+   if(side == SIDE_BUY)
+      return (tp < SymbolInfoDouble(_Symbol, SYMBOL_BID) + minDist);
+   return (tp > SymbolInfoDouble(_Symbol, SYMBOL_ASK) - minDist);
+  }
+
+bool IsFridayCutoff()
+  {
+   if(!InpUseFridayCutoff || InpUseGoldTrapReplica)
+      return false;
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   if(dt.day_of_week != 5)
+      return false;
+   if(dt.hour > InpFridayCutoffHour)
+      return true;
+   if(dt.hour == InpFridayCutoffHour && dt.min >= InpFridayCutoffMinute)
+      return true;
+   return false;
+  }
+
+bool IsRolloverPause()
+  {
+   if(!InpUseRolloverPause || InpUseGoldTrapReplica || InpRolloverPauseMinutes <= 0)
+      return false;
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   int mins = dt.hour * 60 + dt.min;
+   if(mins < InpRolloverPauseMinutes)
+      return true;
+   if(mins >= 24 * 60 - InpRolloverPauseMinutes)
+      return true;
+   return false;
+  }
+
+bool IsWeekOpenPause()
+  {
+   if(!InpUseWeekOpenPause || InpUseGoldTrapReplica || InpWeekOpenPauseMinutes <= 0)
+      return false;
+   MqlDateTime dt;
+   TimeToStruct(TimeCurrent(), dt);
+   if(dt.day_of_week != 0 && dt.day_of_week != 1)
+      return false;
+
+   datetime sessFrom, sessTo;
+   if(!SymbolInfoSessionTrade(_Symbol, (ENUM_DAY_OF_WEEK)dt.day_of_week, 0, sessFrom, sessTo))
+      return false;
+   int nowSec = dt.hour * 3600 + dt.min * 60 + dt.sec;
+   int minsSince = (nowSec - (int)sessFrom) / 60;
+   return (minsSince >= 0 && minsSince <= InpWeekOpenPauseMinutes);
+  }
+
+bool SessionPauseActive()
+  {
+   return IsFridayCutoff() || IsRolloverPause() || IsWeekOpenPause();
+  }
+
+bool FirstLegBlockedByAtr()
+  {
+   if(InpUseGoldTrapReplica || !InpAtrSpikeBlocksFirstLeg || !InpUseAtrSpikeFilter)
+      return false;
+   return IsAtrSpiking();
+  }
+
+// Blocks the leg that is ABOUT to be sent. Uses OrderCalcMargin so a
+// single doubled leg cannot jump the account from "fine" to a stop-out
+// in one fill - the old margin-level check only looked at margin already
+// in use, and the next leg was often the one that did the damage.
+bool MarginGuardBlocks(ENUM_BASKET_SIDE side, double lots)
+  {
+   if(!InpUseMarginGuard || InpUseGoldTrapReplica || lots <= 0.0)
+      return false;
+   if(InpMinMarginLevelPercent <= 0.0 && InpMaxMarginUsePercent <= 0.0)
+      return false;
+
+   double equity = AccountInfoDouble(ACCOUNT_EQUITY);
+   if(equity <= 0.0)
+      return true;
+
+   double price = (side == SIDE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_ASK)
+                                      : SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   double required = 0.0;
+   ENUM_ORDER_TYPE otype = (side == SIDE_BUY) ? ORDER_TYPE_BUY : ORDER_TYPE_SELL;
+   // A calculation failure must not halt trading forever. The guard only
+   // blocks when it can actually see that this leg would breach.
+   if(!OrderCalcMargin(otype, _Symbol, lots, price, required) || required < 0.0)
+      return false;
+
+   double newMargin = AccountInfoDouble(ACCOUNT_MARGIN) + required;
+   if(newMargin <= 0.0)
+      return false;
+
+   bool block = false;
+   double level = equity / newMargin * 100.0;
+   if(InpMinMarginLevelPercent > 0.0 && level < InpMinMarginLevelPercent)
+      block = true;
+   if(InpMaxMarginUsePercent > 0.0 && (newMargin / equity * 100.0) > InpMaxMarginUsePercent)
+      block = true;
+   if(block)
+     {
+      datetime now = TimeCurrent();
+      if(g_lastMarginLog == 0 || (now - g_lastMarginLog) >= 60)
+        {
+         g_lastMarginLog = now;
+         PrintFormat("GoldDualBasketDCA: margin guard paused a %.2f %s add (margin level would be %.0f%%, limit %.0f%%). Open legs are left alone.",
+                     lots, (side == SIDE_BUY ? "BUY" : "SELL"), level, InpMinMarginLevelPercent);
+        }
+     }
+   return block;
+  }
+
+// How many closed-H1 ATRs price has extended AGAINST this side.
+// Positive means adding another leg is averaging into the trend.
+double TrendExtension(ENUM_BASKET_SIDE side)
+  {
+   if(g_h1EmaHandle == INVALID_HANDLE || g_h1AtrHandle == INVALID_HANDLE)
+      return 0.0;
+   double ema[1], atr[1];
+   if(CopyBuffer(g_h1EmaHandle, 0, 1, 1, ema) != 1)
+      return 0.0;
+   if(CopyBuffer(g_h1AtrHandle, 0, 1, 1, atr) != 1)
+      return 0.0;
+   if(atr[0] <= 0.0)
+      return 0.0;
+   double price = (side == SIDE_BUY) ? SymbolInfoDouble(_Symbol, SYMBOL_BID)
+                                      : SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   if(side == SIDE_BUY)
+      return (ema[0] - price) / atr[0];
+   return (price - ema[0]) / atr[0];
+  }
+
+double TrendDistanceMultiplier(ENUM_BASKET_SIDE side)
+  {
+   if(InpUseGoldTrapReplica || !InpUseTrendAwareSpacing)
+      return 1.0;
+   if(TrendExtension(side) >= InpTrendExtendAtr)
+      return MathMax(1.0, InpTrendSpacingMultiplier);
+   return 1.0;
+  }
+
+bool ExtremeTrendBlocksAdd(ENUM_BASKET_SIDE side, const SBasket &b)
+  {
+   if(InpUseGoldTrapReplica || !InpPauseAddsWhenExtreme)
+      return false;
+   if(b.legCount < InpExtremePauseMinLegs)
+      return false;
+   return (TrendExtension(side) >= InpExtremeExtendAtr);
+  }
+
+void LogEntryDecision(ENUM_BASKET_SIDE side, double lots, double distance, int legCount)
+  {
+   datetime now = TimeCurrent();
+   if(g_lastEntryLog > 0 && (now - g_lastEntryLog) < 1)
+      return;
+   g_lastEntryLog = now;
+   PrintFormat("GoldDualBasketDCA: open %s leg lots=%.2f distance=%.3f existingLegs=%d",
+               (side == SIDE_BUY ? "BUY" : "SELL"), lots, distance, legCount);
   }
 
 //+------------------------------------------------------------------+
@@ -871,8 +1330,19 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
    if(GtMaxBasketAgeExit(side, b))
       return; // this basket just force-closed on its H1 age limit - don't also try to add a leg to it this same tick
 
+   // v53 session pauses. No-ops in GoldTrap replica mode and when the
+   // matching input is off, so v52 behavior is one preset away. These
+   // refuse a new leg only - an open basket can still hit its target.
+   if(SessionPauseActive())
+      return;
+
    if(b.legCount == 0)
      {
+      if(FirstLegBlockedByAtr())
+         return;
+      double firstLot = NextLotSize(0, 0);
+      if(MarginGuardBlocks(side, firstLot))
+         return;
       OpenLeg(side, 0, 0);
       RefreshBaskets(); // pick up the leg just opened before computing its TP
       ApplyBasketTP(side);
@@ -882,22 +1352,12 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
    double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
    double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
 
-   double dcaDist = GetEffectiveDcaDistance(b.legCount);
+   double dcaDist = GetEffectiveDcaDistance(b.legCount) * TrendDistanceMultiplier(side);
    bool adverse;
    if(side == SIDE_BUY)
       adverse = (bid <= b.lastLegEntry - dcaDist);
    else
       adverse = (ask >= b.lastLegEntry + dcaDist);
-
-   // Temporary diagnostic (2026-08-18) - a live demo cascade wasn't explained
-   // by the millisecond-tie-break fix alone (gaps were >= the cooldown, but
-   // still far under InpDcaDistancePrice), so log the exact numbers behind
-   // every DCA trigger until the real cause is confirmed from real data
-   // instead of guessed at again.
-   if(adverse)
-      PrintFormat("GoldDualBasketDCA: DCA-DIAG %s adverse=true bid=%.3f ask=%.3f lastLegEntry=%.3f dcaDistanceInput=%.3f legCount=%d lastLegTime=%s",
-                  (side == SIDE_BUY ? "BUY" : "SELL"), bid, ask, b.lastLegEntry, dcaDist, b.legCount,
-                  TimeToString(b.lastLegTime, TIME_SECONDS));
 
    if(adverse) // no leg-count cap - see file header, this is a confirmed final decision
      {
@@ -912,13 +1372,15 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
          return;
       if(InpUseAtrSpikeFilter && IsAtrSpiking())
          return; // "news proxy" - don't average into a volatility spike
+      if(ExtremeTrendBlocksAdd(side, b))
+         return; // deep basket, price extended hard against it - stop adding, do not close
 
       // Cycling: once a full cycle is used up, the next leg restarts lot
       // sizing from InpInitialLot instead of continuing to compound the
       // multiplier indefinitely - keeps a basket that's been going against
       // for a long time from ever needing an unaffordable lot size, while
-      // still letting it keep averaging (unconditionally, no pause) if
-      // price keeps moving, per explicit request.
+      // still letting it keep averaging if price keeps moving. v53 can
+      // pause that add (margin, extreme trend, Friday) without closing.
       //
       // 2026-09-06/07/10/11, carryover-cycle lot sizing (the proven,
       // permanent default - the older plain "reset every InpMaxLegsPerBasket
@@ -967,6 +1429,12 @@ void ManageBasketEntries(ENUM_BASKET_SIDE side)
             carryoverLotOverride = prospectiveLot;
            }
         }
+
+      if(MarginGuardBlocks(side, prospectiveLot))
+         return;
+
+      if(InpLogEntryDecisions)
+         LogEntryDecision(side, prospectiveLot, dcaDist, b.legCount);
 
       OpenLeg(side, legIndexForSizing, b.lastLegLots, carryoverLotOverride);
       RefreshBaskets(); // pick up the new leg + updated avg entry before recomputing the shared TP
@@ -1080,7 +1548,7 @@ void OpenLeg(ENUM_BASKET_SIDE side, int legIndexForSizing, double previousLegLot
 //+------------------------------------------------------------------+
 string LegMarkerName(ENUM_BASKET_SIDE side, ulong posTicket)
   {
-   return MK_PREFIX + "LEG_" + (side == SIDE_BUY ? "B_" : "S_") + IntegerToString((int)posTicket);
+   return MK_PREFIX + "LEG_" + (side == SIDE_BUY ? "B_" : "S_") + IntegerToString((long)posTicket);
   }
 
 void DrawLegMarker(ENUM_BASKET_SIDE side, ulong posTicket, int legNumber, double price, double lots)
@@ -1114,7 +1582,7 @@ void DrawCloseMarker(ENUM_BASKET_SIDE side, double price, double profit)
    if(!InpShowCloseMarkers)
       return;
 
-   string name = MK_PREFIX + "CLOSE_" + IntegerToString((int)TimeCurrent()) + "_" + (side == SIDE_BUY ? "B" : "S");
+   string name = MK_PREFIX + "CLOSE_" + IntegerToString((long)TimeCurrent()) + "_" + (side == SIDE_BUY ? "B" : "S");
    color  clr  = (profit >= 0) ? clrLime : clrRed;
    string text = StringFormat("%s +$%.2f", (side == SIDE_BUY ? "BUY closed" : "SELL closed"), profit);
 
@@ -1241,8 +1709,8 @@ void LogRecentClosedDeals()
       // a SELL deal closes a BUY leg, a BUY deal closes a SELL leg.
       string closedSide = (dealType == DEAL_TYPE_SELL) ? "BUY leg" : "SELL leg";
 
-      PrintFormat("GoldDualBasketDCA: %s closed (deal #%d) - profit=%.2f swap=%.2f commission=%.2f net=%.2f",
-                  closedSide, (int)dealTicket, profit, swap, commission, profit + swap + commission);
+      PrintFormat("GoldDualBasketDCA: %s closed (deal #%s) - profit=%.2f swap=%.2f commission=%.2f net=%.2f",
+                  closedSide, IntegerToString((long)dealTicket), profit, swap, commission, profit + swap + commission);
      }
 
    g_lastDealLogTime = TimeCurrent();
@@ -1375,6 +1843,20 @@ bool IsCalendarNewsBlackout()
    if(!InpUseNewsFilter)
       return false;
 
+   static datetime s_cachedAt = 0;
+   static bool     s_cached   = false;
+   datetime now = TimeCurrent();
+   if(InpNewsCacheSeconds > 0 && s_cachedAt > 0 && (now - s_cachedAt) < InpNewsCacheSeconds)
+      return s_cached;
+
+   bool hit = CalendarNewsBlackoutNow();
+   s_cachedAt = now;
+   s_cached = hit;
+   return hit;
+  }
+
+bool CalendarNewsBlackoutNow()
+  {
    datetime from = TimeCurrent() - InpNewsMinutesAfter * 60;
    datetime to   = TimeCurrent() + InpNewsMinutesBefore * 60;
 
@@ -1536,7 +2018,10 @@ void UpdateDayTracking()
      {
       g_dayStartDateCode = todayCode;
       g_dayStartBalance  = AccountInfoDouble(ACCOUNT_BALANCE);
+      g_dayStartEquity   = AccountInfoDouble(ACCOUNT_EQUITY);
       g_dailyLossLimitLoggedToday = false; // new day - the loss-limit force-close can fire (and log) again if needed
+      g_trimsToday[0] = 0;
+      g_trimsToday[1] = 0;
      }
   }
 
@@ -1550,7 +2035,7 @@ bool DailyTargetHit()
    if(!InpUseDailyProfitTarget || g_dayStartBalance <= 0)
       return false;
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
-   return((balance - g_dayStartBalance) >= InpDailyProfitTargetUSD);
+   return((balance - g_dayStartBalance) >= InpDailyProfitTargetUSD * AccountMoneyScale());
   }
 
 // Blocks new entries before InpTradingStartHour each day - existing
@@ -1575,12 +2060,20 @@ bool IsBeforeTradingStart()
 // (existing non-blocking gate pattern) and OnTick() additionally force-
 // closes both baskets - the two together are what actually cap the day's
 // worst case, not just stop it from getting worse via new legs.
+double DailyLossBaseline()
+  {
+   return InpDailyLossFromDayStartEquity ? g_dayStartEquity : g_dayStartBalance;
+  }
+
 bool DailyLossLimitHit()
   {
-   if(!InpUseDailyLossLimit || g_dayStartBalance <= 0)
+   if(!InpUseDailyLossLimit)
+      return false;
+   double baseline = DailyLossBaseline();
+   if(baseline <= 0.0)
       return false;
    double equity = AccountInfoDouble(ACCOUNT_EQUITY);
-   double lossPct = (g_dayStartBalance - equity) / g_dayStartBalance * 100.0;
+   double lossPct = (baseline - equity) / baseline * 100.0;
    return(lossPct >= InpDailyLossLimitPercent);
   }
 
@@ -1594,8 +2087,8 @@ void ForceCloseOnDailyLossLimit()
   {
    if(!g_dailyLossLimitLoggedToday)
      {
-      PrintFormat("GoldDualBasketDCA: DAILY LOSS LIMIT HIT (%.1f%% of day-start balance) - force-closing both baskets.",
-                  InpDailyLossLimitPercent);
+      PrintFormat("GoldDualBasketDCA: DAILY LOSS LIMIT HIT (%.1f%% of day-start %s) - force-closing both baskets.",
+                  InpDailyLossLimitPercent, InpDailyLossFromDayStartEquity ? "equity" : "balance");
       g_dailyLossLimitLoggedToday = true;
      }
    RefreshBaskets();
@@ -1809,7 +2302,7 @@ void CreateDashboard()
    // past the panel's right edge onto the chart. That specific string
    // was also shortened (see the License DbLabel call below), but this
    // extra margin covers any other value text that gets long later.
-   int px = InpDashboardX - 10, py = InpDashboardY - 10, pw = 340, ph = 605;
+   int px = InpDashboardX - 10, py = InpDashboardY - 10, pw = 340, ph = 650;
 
    string bg = DB_PREFIX + "BG";
    if(ObjectFind(0, bg) < 0)
@@ -1878,9 +2371,9 @@ void CreateDashboard()
    ObjectSetInteger(0, icon, OBJPROP_BACK, false);
    ObjectSetInteger(0, icon, OBJPROP_ZORDER, 3);
 
-   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 521, 320, 24, "X  CLOSE ALL", C'120,20,20');
-   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 549, 156, 22, "Close BUY", C'20,80,20');
-   CreateButton("CloseSellBtn", InpDashboardX + 164, InpDashboardY + 549, 156, 22, "Close SELL", C'20,80,20');
+   CreateButton("CloseAllBtn", InpDashboardX, InpDashboardY + 566, 320, 24, "X  CLOSE ALL", C'120,20,20');
+   CreateButton("CloseBuyBtn", InpDashboardX, InpDashboardY + 594, 156, 22, "Close BUY", C'20,80,20');
+   CreateButton("CloseSellBtn", InpDashboardX + 164, InpDashboardY + 594, 156, 22, "Close SELL", C'20,80,20');
   }
 
 void UpdateDashboard()
@@ -1914,7 +2407,7 @@ void UpdateDashboard()
    // entirely - see the file's git history if this is ever revisited).
    // Height 107->122->137: two more rows added below (2026-08-31,
    // stop-out cooldown + margin guard status lines).
-   DbCard("FilterCard", x - 4, InpDashboardY + 383, 328, 137, C'16,20,28', C'50,60,75');
+   DbCard("FilterCard", x - 4, InpDashboardY + 383, 328, 182, C'16,20,28', C'50,60,75');
 
    // Icon (created once in CreateDashboard()) sits at (x-6, y-6), 64x47px -
    // text starts to its right, then drops back to the full-width left
@@ -1930,13 +2423,14 @@ void UpdateDashboard()
    y += lh + 6;
 
    bool loginOk = (InpExpectedLogin == 0 || AccountInfoInteger(ACCOUNT_LOGIN) == InpExpectedLogin);
-   DbLabel("Login", lx, y, PadRight("Login", lblW) + IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN)),
+   DbLabel("Login", lx, y, PadRight("Login", lblW) + IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN)),
            loginOk ? clrSilver : clrRed, 8);
    y += lh;
 
    double balance = AccountInfoDouble(ACCOUNT_BALANCE);
    double equity  = AccountInfoDouble(ACCOUNT_EQUITY);
-   double dailyPL = equity - g_dayStartBalance;
+   double dayBase = DailyLossBaseline();
+   double dailyPL = equity - dayBase;
    DbLabel("Balance", lx, y, PadRight("Balance", lblW) + "$" + DoubleToString(balance, 2), clrWhite, 8);
    y += lh;
    DbLabel("Equity", lx, y, PadRight("Equity", lblW) + "$" + DoubleToString(equity, 2), clrWhite, 8);
@@ -1945,14 +2439,16 @@ void UpdateDashboard()
            (dailyPL >= 0 ? clrLime : clrRed), 8);
    y += lh;
    bool dailyTargetHit = DailyTargetHit();
+   double realizedToday = balance - g_dayStartBalance;
+   double targetShown = InpDailyProfitTargetUSD * AccountMoneyScale();
    string dailyTargetText = !InpUseDailyProfitTarget ? "off"
                              : dailyTargetHit ? "HIT (paused today)"
-                             : "$" + DoubleToString(dailyPL, 2) + " / $" + DoubleToString(InpDailyProfitTargetUSD, 2);
+                             : "$" + DoubleToString(realizedToday, 2) + " / $" + DoubleToString(targetShown, 2);
    DbLabel("DailyTarget", lx, y, PadRight("Daily Target", lblW) + dailyTargetText,
            dailyTargetHit ? clrLime : clrSilver, 8);
    y += lh;
    bool dailyLossHit = DailyLossLimitHit();
-   double dailyLossPct = (g_dayStartBalance > 0) ? (g_dayStartBalance - equity) / g_dayStartBalance * 100.0 : 0;
+   double dailyLossPct = (dayBase > 0) ? (dayBase - equity) / dayBase * 100.0 : 0;
    string dailyLossText = !InpUseDailyLossLimit ? "off"
                            : dailyLossHit ? "HIT (baskets closed)"
                            : DoubleToString(dailyLossPct, 1) + "% / " + DoubleToString(InpDailyLossLimitPercent, 1) + "%";
@@ -2040,6 +2536,69 @@ void UpdateDashboard()
    y += lh;
    bool hedgingOk = ((ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE) == ACCOUNT_MARGIN_MODE_RETAIL_HEDGING);
    DbLabel("Hedging", lx, y, PadRight("Hedging", lblW) + (hedgingOk ? "OK" : "FAIL"), hedgingOk ? clrLime : clrRed, 8);
+   y += lh;
+
+   string marginText = "off";
+   color marginClr = clrSilver;
+   if(InpUseGoldTrapReplica)
+      marginText = "replica";
+   else if(InpUseMarginGuard)
+     {
+      double marginUsed = AccountInfoDouble(ACCOUNT_MARGIN);
+      double level = (marginUsed > 0.0 && equity > 0.0) ? equity / marginUsed * 100.0 : 0.0;
+      marginText = (marginUsed <= 0.0) ? "flat" : DoubleToString(level, 0) + "% / min " + DoubleToString(InpMinMarginLevelPercent, 0) + "%";
+      if(marginUsed > 0.0 && InpMinMarginLevelPercent > 0.0 && level < InpMinMarginLevelPercent)
+        {
+         marginText += " (pausing adds)";
+         marginClr = clrOrange;
+        }
+     }
+   DbLabel("Margin", lx, y, PadRight("Margin", lblW) + marginText, marginClr, 8);
+   y += lh;
+
+   string trendText = "off";
+   color trendClr = clrSilver;
+   if(InpUseGoldTrapReplica)
+      trendText = "replica";
+   else if(InpUseTrendAwareSpacing || InpPauseAddsWhenExtreme)
+     {
+      double buyExt = TrendExtension(SIDE_BUY);
+      double sellExt = TrendExtension(SIDE_SELL);
+      trendText = StringFormat("B %.1f / S %.1f ATR", buyExt, sellExt);
+      if(ExtremeTrendBlocksAdd(SIDE_BUY, g_buyBasket) || ExtremeTrendBlocksAdd(SIDE_SELL, g_sellBasket))
+        {
+         trendText += " (pausing)";
+         trendClr = clrOrange;
+        }
+     }
+   DbLabel("Trend", lx, y, PadRight("Trend", lblW) + trendText, trendClr, 8);
+   y += lh;
+
+   string sessionText = "open";
+   color sessionClr = clrSilver;
+   if(IsBeforeTradingStart())
+     {
+      sessionText = StringFormat("before %02d:%02d", InpTradingStartHour, InpTradingStartMinute);
+      sessionClr = clrOrange;
+     }
+   else if(IsFridayCutoff())
+     {
+      sessionText = StringFormat("Friday cutoff %02d:%02d", InpFridayCutoffHour, InpFridayCutoffMinute);
+      sessionClr = clrOrange;
+     }
+   else if(IsRolloverPause())
+     {
+      sessionText = "rollover pause";
+      sessionClr = clrOrange;
+     }
+   else if(IsWeekOpenPause())
+     {
+      sessionText = "week-open pause";
+      sessionClr = clrOrange;
+     }
+   else if(!InpUseFridayCutoff && !InpUseRolloverPause && !InpUseWeekOpenPause)
+      sessionText = "no extra pause";
+   DbLabel("Session", lx, y, PadRight("Session", lblW) + sessionText, sessionClr, 8);
    y += lh;
 
    y += 10;

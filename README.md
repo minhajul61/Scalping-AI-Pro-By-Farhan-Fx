@@ -3,6 +3,126 @@
 This folder now holds **four independent EAs** - read this section first
 to know which one you're looking at.
 
+## 2026-09-27: v53 — `Scalping Ai Pro By Farhan FX.mq5` (GoldDualBasketDCA)
+
+Build `v53`. Still no stop-loss, no per-basket stop, and no cap on how
+many legs a basket can take. The EA name, dashboard, watermark and
+GoldTrap replica mode are unchanged. Replica mode ignores the new
+strategy switches so a GoldTrap comparison stays a GoldTrap comparison.
+Two fixes have no off switch, because they are not trade rules: server
+TP prices are fit to the tick grid, and the 1-second timer runs even
+when the dashboard is hidden.
+
+`presets/GoldDualBasketDCA_v53_recommended.set` is the shipped default.
+`presets/GoldDualBasketDCA_v52_compatible.set` turns every v53 behavior
+switch off (`InpCentProfitMultiplier=1`, `InpNewsCacheSeconds=0`,
+`InpDailyLossFromDayStartEquity=false`) so entry and target decisions
+match v52.
+
+This build was not compiled. MetaEditor is not on the machine that
+prepared it. Brace depth of the source is balanced. Confirm it in
+MetaEditor before a live or tester run.
+
+### What changed, and the input that controls it
+
+| Change | Input | Shipped default |
+| --- | --- | --- |
+| Basket target is net of open commission, plus the same amount again as a reserve for the closing side. Extra dollars added to the $1 are capped, so a deep basket is not required to retrace by its whole commission bill. | `InpCommissionAwareTarget`, `InpEstimateCloseCommission`, `InpMaxCommissionAddUSD` (0 = no cap), `InpCommissionPerLotPerSide` (0 = read the open deal, account currency) | on, on, $2, 0 |
+| Dollar inputs scale by 100 when the account currency is USC, EUC, GBC, CHC, AUC, CAC or NZC. A literal $1 on a cent account was closing at one cent. | `InpCentProfitMultiplier` (0 = that auto scale, 1 = v52, no scale) | 0 |
+| Daily-loss baseline is day-start equity. v52 used day-start balance, so a basket already underwater could trip the limit at midnight. The limit itself is still off, and it still force-closes when it is turned on. That pre-existing force-close is not a new stop-loss. | `InpDailyLossFromDayStartEquity` | true (the limit stays off) |
+| No new legs after Friday 20:00 server, within 30 minutes of server midnight, or for 60 minutes after the Sunday/Monday session open. Open baskets are left alone. | `InpUseFridayCutoff`, `InpFridayCutoffHour`, `InpFridayCutoffMinute`, `InpUseRolloverPause`, `InpRolloverPauseMinutes`, `InpUseWeekOpenPause`, `InpWeekOpenPauseMinutes` | on |
+| An ATR spike also delays the first leg. v52 blocked adds only, so an empty basket still opened into the spike. | `InpAtrSpikeBlocksFirstLeg` | true |
+| Optional add-pause if the next leg would push margin level under a floor or margin/equity over a cap. It never closes a position. **Off.** On a fresh $30,000 August 2026 replay a 200% / 50% pause froze the losing sell basket near 10.66 lots and the open loss kept growing. v36's tester pass on 24-27 Aug 2026 did raise the worst margin level on that short window; the whole of August did not agree. Turn it on only as its own Strategy Tester pass, on the live account's leverage. | `InpUseMarginGuard`, `InpMinMarginLevelPercent`, `InpMaxMarginUsePercent` | false, 200, 50 |
+| Optional wider DCA distance when price is extended from the H1 EMA. **Off.** On the June 2026 drop it deepened the drawdown. On August it was the only variant that stayed above a 20% margin level, with max lots near 10.7 instead of 38, and it still gave back profit. One window is not a new default. | `InpUseTrendAwareSpacing`, `InpTrendEmaPeriod`, `InpTrendAtrPeriod`, `InpTrendExtendAtr`, `InpTrendSpacingMultiplier` | false, 50, 14, 1.5, 2.0 |
+| Optional pause of further adds on an extreme H1 extension, after the basket already has several legs. **Off.** With the June 8 bar included, a 3-ATR pause finished June with equity through a 20% margin level. The 3-ATR vs 4-ATR threshold was already unstable on synthetic paths. | `InpPauseAddsWhenExtreme`, `InpExtremeExtendAtr`, `InpExtremePauseMinLegs` | false, 3.0, 4 |
+| Optional close of the furthest leg only when today's realized balance change covers that leg's loss, swap and estimated close commission. **Off.** It books a loss the basket might have recovered, and it is not a stop-loss. | `InpUseProfitFundedTrim`, `InpTrimMinLegs`, `InpTrimMaxPerDay`, `InpTrimCooldownSeconds` | false, 6, 3, 60 |
+| Calendar result reused for 10 seconds. v52 queried it about three times a tick. The tester returns error 4014 for the calendar, so this does not change tester trades. | `InpNewsCacheSeconds` (0 = every call) | 10 |
+| The per-tick `DCA-DIAG` line is gone. One line is printed only when a leg is actually sent, and only if asked. | `InpLogEntryDecisions` | false |
+| `InpExpectedLogin=0` still means "do not lock the account out". Init now prints a warning, because that default disables the allow-list. | `InpExpectedLogin` | 0 |
+
+Also fixed, with no strategy input: server TP prices are rounded onto the tick grid in the direction that does not shrink the dollar target, and a TP inside `SYMBOL_TRADE_STOPS_LEVEL` is left to the tick-based close instead of being rejected every second. Position tickets and the account login are printed in full (`IntegerToString` of the 64-bit value). The old `(int)` cast truncated tickets above 2^31-1.
+
+Lot growth is unchanged: 0.01, 0.02, 0.04, then the carryover leg 0.08 / 0.16 / 0.32 … capped at 17 lots per leg. The flat target is still $1 before the commission adjustment above.
+
+### Approximate M1 replay (not a Strategy Tester result)
+
+`sim/basket_sim.py` replays Dukascopy XAUUSD BID M1. It is a model of the basket rules. It is not MetaTrader, and it does not reproduce the project's earlier real-tick figures (about +$88k with ~22% equity drawdown on Jun–Aug 2026).
+
+Assumptions, all of which move the numbers:
+
+- Every weekday from 2026-06-01 through 2026-08-31 (95,040 bars). Sunday files were not downloaded, so Friday's close joins Monday's open in one jump. A jump can add at most one catch-up leg, which understates a weekend gap.
+- Bullish bars walk open-low-high-close, bearish bars open-high-low-close, in 20-second steps. Several legs can open inside one bar when price travels through several DCA distances, with the 5-second cooldown.
+- Spread is a flat $0.20 on the bid. Buys fill at ask and mark at bid; sells fill at bid and mark at ask. One lot gains $100 per $1 of price. Deposit $30,000. Leverage 500. Margin is charged on the larger side only: `max(buy lots, sell lots) * price * 100 / 500`. That is not `OrderCalcMargin`. No swap.
+- Server clock is UTC+3. New legs only from 04:30. The week-open pause is not modeled; that 60-minute pause sits inside the 04:30 gate for a typical Sunday/Monday open, so it would not have changed these rows.
+- The replay never stops the account out. `eq at 20%` is the equity the first time the larger-side margin level went under 20% (live stop-outs in this project were seen around 14–29%). A profit printed after that line is profit the sim was allowed to keep trading through. A live account would already have been closed.
+
+At zero commission the commission-aware target does nothing, so v53 versus v52 here is the Friday cutoff, the rollover pause, and the ATR spike on the first leg.
+
+Zero commission:
+
+| Window | Variant | Equity net | Closed net | Max eq DD | Worst floating | Max lots buy/sell | Min margin level | Equity at 20% margin |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| June (4539 → 4005) | v52 | +86,492 | +86,492 | 38.6% ($14,795) | -15,701 | 10.65 / 10.66 | 208.9% | never |
+| June | v53 | +83,848 | +84,564 | 38.5% ($14,795) | -15,701 | 10.65 / 10.66 | 210.1% | never |
+| June | widen | +67,415 | +67,415 | 49.9% ($20,040) | -21,293 | 10.65 / 5.46 | 218.3% | never |
+| June | pause 3 ATR | +45,252 | +45,252 | 197.3% ($79,109) | -82,556 | 10.66 / 5.46 | -1195.9% | -547 |
+| July (4006 → 4043) | v52 | +51,609 | +51,627 | 21.1% ($9,093) | -9,598 | 5.47 / 2.86 | 770.7% | never |
+| July | v53 | +49,456 | +49,456 | 17.7% ($7,629) | -8,118 | 5.46 / 2.86 | 803.1% | never |
+| July | widen | +45,257 | +45,275 | 18.9% ($13,020) | -13,386 | 5.47 / 2.86 | 650.0% | never |
+| July | pause 3 ATR | +40,259 | +40,277 | 19.0% ($11,586) | -11,875 | 5.47 / 2.83 | 644.5% | never |
+| August (4075 → 4452), fresh $30k | v52 | +57,861 | +57,861 | 167.4% ($55,420) | -55,868 | 5.49 / 38.04 | -70.2% | 509 |
+| August, fresh $30k | v53 | +55,128 | +55,128 | 166.3% ($55,007) | -55,454 | 20.96 / 38.04 | -69.0% | 272 |
+| August, fresh $30k | margin 200/50 | -328,892 | +3,411 | 1790.6% ($592,930) | -593,228 | 0.80 / 10.66 | -5590.8% | 311 |
+| August, fresh $30k | widen | +49,092 | +49,092 | 91.1% ($29,776) | -30,432 | 10.65 / 10.68 | 32.5% | never |
+| August, fresh $30k | pause 3 ATR | +21,707 | +23,910 | 187.0% ($61,163) | -62,832 | 2.83 / 10.65 | -586.6% | 835 |
+| 24–27 Aug | v52 | +12,577 | +12,577 | 39.8% ($16,328) | -16,708 | 5.49 / 2.84 | 492.3% | never |
+| 24–27 Aug | v53 | +12,484 | +12,484 | 39.9% ($16,328) | -16,708 | 5.49 / 2.84 | 490.8% | never |
+| 24–27 Aug | widen | +12,170 | +12,170 | 27.7% ($11,306) | -11,686 | 5.46 / 2.84 | 590.4% | never |
+| Jun–Aug continuous | v52 | +196,135 | +196,135 | 38.6% ($55,420) | -55,868 | 10.65 / 38.04 | 208.9% | never |
+| Jun–Aug continuous | v53 | +188,717 | +188,717 | 38.5% ($55,007) | -55,454 | 20.96 / 38.04 | 210.1% | never |
+| Jun–Aug continuous | widen | +162,071 | +162,071 | 49.9% ($29,776) | -30,432 | 10.65 / 10.68 | 218.3% | never |
+| Jun–Aug continuous | pause 3 ATR | +106,828 | +109,031 | 197.3% ($79,109) | -82,556 | 10.66 / 10.65 | -1195.9% | -547 |
+
+The 200% margin row is omitted from June, July, 24–27 Aug and the continuous run because it matched v52 exactly: the next leg never failed the 200% / 50% test. On standalone August it did, and freezing the adds made the open loss larger. The continuous run's worst percentage (38.6%) is the June hole of $14,795. The worst dollar hole ($55,420) is later, on a larger balance, which is why margin level stayed above 200% even while a sell basket reached 38.04 lots. The same August path started from a fresh $30,000 crosses 20% margin with about $509 of equity left. The +$57,861 printed for that month exists only because the replay kept trading afterward.
+
+Same replay with $3.50 per lot per side (open and close). v53 then also lifts the gross target by up to $2. That is a different trade path, in both directions, which is the same fragility the $1 target sweep already showed. It is not a claim that commission-aware targets make more money.
+
+| Window | Variant | Equity net | Max eq DD | Worst floating | Max lots buy/sell | Min margin level | Equity at 20% margin |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| June | v52 | +80,632 | 39.1% ($14,851) | -15,701 | 10.65 / 10.66 | 205.9% | never |
+| June | v53 | +73,734 | 62.3% ($26,537) | -27,067 | 10.68 / 10.72 | 128.0% | never |
+| July | v52 | +47,243 | 21.7% ($9,134) | -9,598 | 5.47 / 2.86 | 745.7% | never |
+| July | v53 | +47,624 | 26.7% ($18,920) | -19,556 | 10.65 / 5.53 | 274.4% | never |
+| August, fresh $30k | v52 | +52,967 | 169.4% ($55,585) | -55,868 | 5.49 / 38.04 | -71.6% | 1,439 |
+| August, fresh $30k | v53 | +56,662 | 40.0% ($32,565) | -33,567 | 20.96 / 5.49 | 264.6% | never |
+| 24–27 Aug | v52 | +11,558 | 40.7% ($16,377) | -16,708 | 5.49 / 2.84 | 474.8% | never |
+| 24–27 Aug | v53 | +12,443 | 42.9% ($17,368) | -17,669 | 10.65 / 2.83 | 237.1% | never |
+| Jun–Aug continuous | v52 | +181,014 | 39.1% ($55,585) | -55,868 | 10.65 / 38.04 | 205.9% | never |
+| Jun–Aug continuous | v53 | +177,953 | 62.3% ($32,565) | -33,567 | 20.96 / 10.72 | 128.0% | never |
+
+Rerun, after `sim/download_xauusd_m1.py` has filled `sim/data/days/`:
+
+```
+python3 sim/run_compare.py sim/data/days 0
+python3 sim/run_compare.py sim/data/days 3.5 v52,v53
+```
+
+### What to run in the Strategy Tester
+
+Symbol XAUUSD, period M1, hedging account, model "Every tick based on real ticks". Deposit $30,000 unless the live account is different. Set the tester leverage to the live account's leverage. If the tester symbol charges no commission, set `InpCommissionPerLotPerSide` to the live per-lot-per-side cost in account currency.
+
+Load `presets/GoldDualBasketDCA_v53_recommended.set`. Run these windows separately, then one continuous pass:
+
+- 2026.06.01–2026.06.30
+- 2026.07.01–2026.07.31
+- 2026.08.01–2026.08.31
+- 2026.08.24–2026.08.27
+- 2026.06.01–2026.08.31
+
+Load `presets/GoldDualBasketDCA_v52_compatible.set` on the same windows when the comparison must match v52 trade decisions. A third pass with only `InpUseTrendAwareSpacing=true` (everything else at the v53 preset) is the variant that cut August's lot peak in the M1 replay. Keep it off until that tester pass agrees on June as well as August.
+
+A grid with no stop-loss can still blow the account on a long one-way move. v53 does not change that. On this replay the shipped defaults did not keep a fresh $30,000 alive through August.
+
 ## 2026-09-12 (later): Scalping X rewritten as a genuinely pure GoldTrap
 ## X copy - no toggle, nothing borrowed from the sibling EA
 

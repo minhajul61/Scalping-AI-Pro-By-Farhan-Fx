@@ -1,0 +1,100 @@
+; GoldDualBasketDCA v53 recommended — Scalping Ai Pro By Farhan FX
+; Load in MetaTrader 5 Strategy Tester: Inputs -> Load.
+; Symbol XAUUSD, period M1, hedging account.
+; Suggested deposit $30,000 (the deposit used for this project's 3-month reference).
+; Use "Every tick based on real ticks" when that history exists.
+; Dates to run, separately and as one continuous test:
+;   2026.06.01-2026.06.30, 2026.07.01-2026.07.31, 2026.08.01-2026.08.31,
+;   2026.08.24-2026.08.27 (known stress window), and 2026.06.01-2026.08.31.
+; Set the tester leverage to the live account's leverage.
+; If the tester symbol charges no commission, set InpCommissionPerLotPerSide
+; to the live per-lot-per-side cost (account currency). 0 reads the open deal.
+; There is no stop-loss in this preset.
+; InpUseMarginGuard is off. An approximate M1 replay of August 2026 showed
+; a 200% add-pause freezing the losing basket. Turn it on only as a
+; separate tester pass, on the live account's leverage.
+; InpUseTrendAwareSpacing and InpPauseAddsWhenExtreme are off. On the
+; June 2026 drop both made the drawdown deeper. They are inputs so a
+; tester pass can turn them on deliberately.
+
+InpMagicNumber=20270115||20270115||1||20270115||N
+InpExpectedLogin=0||0||1||10||N
+InpBrokerPreset=0||0||0||3||N
+InpAccountType=0||0||0||1||N
+InpMaxSpreadPoints=300||300||1||3000||N
+InpInitialLot=0.01||0.01||0.01||1.0||N
+InpDcaDistancePrice=1.2||1.2||0.1||5.0||N
+InpUseAdaptiveDcaDistance=true||false||0||true||N
+InpAdaptiveDcaAtrMult=1.5||1.5||0.1||3.0||N
+InpLotMultiplier=2.0||2.0||0.1||3.0||N
+InpUseNewsFilter=true||false||0||true||N
+InpNewsCurrency=USD
+InpNewsMinutesBefore=30||30||1||120||N
+InpNewsMinutesAfter=30||30||1||120||N
+InpUseManualNewsWindow=false||false||0||true||N
+InpManualNewsStart=
+InpManualNewsEnd=
+InpUseTradingHours=true||false||0||true||N
+InpTradingStartHour=4||4||1||23||N
+InpTradingStartMinute=30||30||1||59||N
+InpUseDailyProfitTarget=false||false||0||true||N
+InpDailyProfitTargetUSD=50.0||50.0||10.0||500.0||N
+InpUseDailyLossLimit=false||false||0||true||N
+InpDailyLossLimitPercent=5.0||5.0||1.0||30.0||N
+InpDailyLossFromDayStartEquity=true||false||0||true||N
+InpCommissionAwareTarget=true||false||0||true||N
+InpEstimateCloseCommission=true||false||0||true||N
+InpMaxCommissionAddUSD=2.0||2.0||1.0||20.0||N
+InpCommissionPerLotPerSide=0.0||0.0||0.5||20.0||N
+InpCentProfitMultiplier=0.0||0.0||1.0||100.0||N
+InpUseMarginGuard=false||false||0||true||N
+InpMinMarginLevelPercent=200.0||200.0||50.0||1000.0||N
+InpMaxMarginUsePercent=50.0||50.0||5.0||100.0||N
+InpUseTrendAwareSpacing=false||false||0||true||N
+InpTrendEmaPeriod=50||50||1||200||N
+InpTrendAtrPeriod=14||14||1||50||N
+InpTrendExtendAtr=1.5||1.5||0.5||5.0||N
+InpTrendSpacingMultiplier=2.0||2.0||0.25||4.0||N
+InpPauseAddsWhenExtreme=false||false||0||true||N
+InpExtremeExtendAtr=3.0||3.0||0.5||8.0||N
+InpExtremePauseMinLegs=4||4||1||12||N
+InpUseFridayCutoff=true||false||0||true||N
+InpFridayCutoffHour=20||20||1||23||N
+InpFridayCutoffMinute=0||0||1||59||N
+InpUseRolloverPause=true||false||0||true||N
+InpRolloverPauseMinutes=30||30||5||120||N
+InpUseWeekOpenPause=true||false||0||true||N
+InpWeekOpenPauseMinutes=60||60||5||180||N
+InpAtrSpikeBlocksFirstLeg=true||false||0||true||N
+InpUseProfitFundedTrim=false||false||0||true||N
+InpTrimMinLegs=6||6||1||20||N
+InpTrimMaxPerDay=3||3||1||10||N
+InpTrimCooldownSeconds=60||60||10||600||N
+InpNewsCacheSeconds=10||10||1||60||N
+InpLogEntryDecisions=false||false||0||true||N
+InpShowDashboard=true||false||0||true||N
+InpDashboardX=10||10||1||100||N
+InpDashboardY=20||20||1||100||N
+InpSetWhiteChartTheme=false||false||0||true||N
+InpShowLegMarkers=true||false||0||true||N
+InpShowCloseMarkers=true||false||0||true||N
+InpShowChartWatermark=true||false||0||true||N
+InpUseGoldTrapReplica=false||false||0||true||N
+InpGtSpacingS1=1.10||1.10||0.1||3.0||N
+InpGtSpacingS2=1.70||1.70||0.1||3.0||N
+InpGtTpSingleLeg=1.00||1.00||0.1||3.0||N
+InpGtTpMultiLeg=0.30||0.30||0.1||3.0||N
+InpGtLotMultiplier=1.68||1.68||0.01||3.0||N
+InpGtMaxGridLegs=17||17||1||30||N
+InpGtEquityLockPercent=100.0||100.0||10.0||200.0||N
+InpGtMaxBasketAgeHours=0||0||1||48||N
+InpGtMagicBuy=837490||837490||1||837490||N
+InpGtMagicSell=528101||528101||1||528101||N
+InpGtMaxDeviationPoints=3||3||1||50||N
+InpGtUseSessionFilter=true||false||0||true||N
+InpGtSessionCloseMinutes=60||60||5||180||N
+InpGtSessionOpenMinutes=60||60||5||180||N
+InpGtUseH4BoundaryFilter=true||false||0||true||N
+InpGtH4CloseMinutes=15||15||1||60||N
+InpGtH4OpenMinutes=15||15||1||60||N
+InpGtNewsMinPriority=2||0||1||3||N
